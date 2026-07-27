@@ -1,0 +1,326 @@
+{
+  "$schema": "Alexandria Research Data Model v2.0",
+  "purpose": "Structured checklist for research sub-agents. Each archetype defines the specific data fields to collect during web research (Step 3). Sub-agents should attempt to fill every field. Mark fields as null with a brief reason if the information cannot be found — this surfaces gaps honestly rather than hiding them.",
+
+  "person": {
+    "identity": {
+      "full_name": "string",
+      "birth_date": "date | null",
+      "birth_place": "string | null",
+      "nationality": "string",
+      "current_age": "number | null",
+      "known_as": "string — one-line positioning: what they're known for"
+    },
+    "origin": {
+      "family_context": "string — socioeconomic background, parents' occupations, family dynamics",
+      "formative_environment": "string — the world they grew up in, cultural/political/economic context",
+      "education": ["string — institution, field, years, notable mentors or experiences"],
+      "early_influences": ["string — people, books, events, ideologies that shaped their worldview"],
+      "the_spark": "string — specific moment or decision that launched them onto their known path",
+      "early_moves": ["string — first ventures, roles, publications, failures before they became 'them'"]
+    },
+    "arc_of_decisions": [
+      {
+        "decision": "string — what they chose",
+        "context": "string — the situation and options they faced",
+        "what_they_gave_up": "string — the road not taken",
+        "consequences_immediate": "string",
+        "consequences_long_term": "string",
+        "reveals_about_thinking": "string — what this decision tells us about how they operate"
+      }
+    ],
+    "operating_style": {
+      "decision_making": "string — data-driven? intuitive? consultative? impulsive?",
+      "leadership_approach": "string",
+      "intellectual_framework": "string | null",
+      "signature_techniques": ["string"],
+      "recurring_patterns": "string — how they handle adversity, opportunity, conflict"
+    },
+    "current_state": {
+      "current_role": "string",
+      "current_projects": ["string"],
+      "recent_developments": ["string — last 6-12 months"],
+      "public_perception": "string — how are they viewed right now?",
+      "active_controversies": ["string | null"]
+    },
+    "context": {
+      "key_contemporaries": ["string — who else operates in their space"],
+      "influenced_by": ["string"],
+      "has_influenced": ["string"],
+      "unique_positioning": "string — what makes them distinct"
+    }
+  },
+
+  "organization": {
+    "identity": {
+      "name": "string",
+      "founded": "date",
+      "headquarters": "string",
+      "type": "string — public company, private, nonprofit, government, etc.",
+      "known_as": "string — one-line positioning"
+    },
+    "origin": {
+      "founding_context": "string — market/political/social environment that made this possible",
+      "founders": [
+        {
+          "name": "string",
+          "background": "string",
+          "driving_beliefs": "string"
+        }
+      ],
+      "initial_vision": "string — what they set out to build",
+      "vs_reality": "string — how different was early version from what it became",
+      "early_survival": "string — existential threats, critical decisions, lucky breaks"
+    },
+    "evolution": [
+      {
+        "phase_name": "string — e.g., 'the growth phase', 'the pivot', 'the crisis'",
+        "period": "string — approximate years",
+        "core_tension": "string — the defining challenge",
+        "key_decisions": ["string"],
+        "consequences": "string",
+        "transition_to_next": "string — how this phase led to the next"
+      }
+    ],
+    "operating_model": {
+      "business_model": "string — how it makes money or sustains itself",
+      "revenue_streams": ["string"],
+      "key_metrics": {"metric_name": "value — ARR, users, market share, etc."},
+      "org_structure": "string — what's distinctive",
+      "core_capabilities": ["string — what it's genuinely better at"],
+      "real_culture": "string — not the PR version, evidenced by decisions"
+    },
+    "competitive_landscape": {
+      "direct_competitors": [
+        {
+          "name": "string",
+          "positioning": "string — what they optimize for",
+          "relative_strengths": ["string"],
+          "relative_weaknesses": ["string"]
+        }
+      ],
+      "market_dynamics": "string — growing, consolidating, fragmenting? who has momentum?",
+      "user_sentiment": {
+        "common_praises": ["string — from forums, reviews, social media"],
+        "common_complaints": ["string"]
+      }
+    },
+    "current_state": {
+      "strategic_focus": "string",
+      "recent_developments": ["string — last 6-12 months"],
+      "financial_health": "string",
+      "leadership": "string — current CEO/leader, recent changes",
+      "active_challenges": ["string"],
+      "momentum": "string — direction and speed"
+    }
+  },
+
+  "artifact": {
+    "identity": {
+      "name": "string",
+      "created_by": "string — person or organization",
+      "first_released": "date | null",
+      "type": "string — software, hardware, protocol, drug, creative work, etc.",
+      "known_as": "string — one-line positioning"
+    },
+    "how_it_works": {
+      "core_mechanism": "string — fundamental approach, architecture, or principle",
+      "key_components": ["string — main parts or features and how they fit together"],
+      "user_experience": "string — what it feels like to use/interact with",
+      "technical_choices": ["string — important design decisions and their tradeoffs"],
+      "limitations": ["string — what it can't do, where it breaks down"]
+    },
+    "origin": {
+      "problem_it_solves": "string — pain point, gap, or opportunity",
+      "creators_background": "string — who built it and what drove them",
+      "initial_reaction": "string — how was v1 received",
+      "v1_vs_now": "string — how different was the first version"
+    },
+    "evolution": [
+      {
+        "version_or_era": "string",
+        "what_changed": "string",
+        "why": "string",
+        "adoption_impact": "string"
+      }
+    ],
+    "competitive_landscape": {
+      "direct_alternatives": [
+        {
+          "name": "string",
+          "approach_difference": "string",
+          "who_prefers_it": "string",
+          "strengths_vs_subject": ["string"],
+          "weaknesses_vs_subject": ["string"]
+        }
+      ],
+      "indirect_alternatives": ["string — different approaches to same underlying problem"],
+      "user_sentiment": {
+        "genuine_praises": ["string — from real users"],
+        "genuine_complaints": ["string — from real users"]
+      },
+      "market_dynamics": "string"
+    },
+    "current_state": {
+      "current_version": "string",
+      "adoption_metrics": "string — users, revenue, downloads, whatever applies",
+      "momentum": "string — growing, plateauing, declining",
+      "latest_developments": ["string — last 3-6 months"],
+      "active_issues": ["string"],
+      "next_focus": "string — what the team is working on next"
+    }
+  },
+
+  "event": {
+    "identity": {
+      "name": "string",
+      "date_range": "string — when it started and ended (or 'ongoing')",
+      "location": "string",
+      "type": "string — war, crisis, election, revolution, disaster, etc.",
+      "known_as": "string — one-line summary of what happened and why it mattered"
+    },
+    "causal_chain": {
+      "proximate_cause": "string — the immediate trigger",
+      "enabling_conditions": ["string — what had to be true for the spark to catch"],
+      "deep_roots": ["string — structural/historical/systemic factors, years or decades back"],
+      "path_dependencies": ["string — earlier decisions that made this outcome increasingly likely"],
+      "offramps_not_taken": ["string — moments where it could have gone differently"]
+    },
+    "chronology": [
+      {
+        "phase": "string — name of this phase",
+        "period": "string — dates",
+        "key_moments": ["string"],
+        "turning_points": ["string"],
+        "on_the_ground": "string — what people experienced, specific accounts"
+      }
+    ],
+    "key_players": [
+      {
+        "name": "string — individual or group",
+        "role": "string",
+        "motivations": "string",
+        "constraints": "string",
+        "key_decisions": ["string"],
+        "impact_on_outcome": "string"
+      }
+    ],
+    "consequences": {
+      "immediate_aftermath": "string — days and weeks after",
+      "medium_term": "string — months and years",
+      "ripple_effects": ["string — beyond immediate scope"],
+      "what_didnt_change": "string — expected changes that didn't materialize"
+    },
+    "current_state": {
+      "current_situation": "string — for ongoing events, or lasting legacy for concluded ones",
+      "latest_developments": ["string"],
+      "current_relevance": "string — why it still matters"
+    }
+  },
+
+  "concept": {
+    "identity": {
+      "name": "string",
+      "field": "string — the discipline or domain",
+      "originated_by": "string — who first formulated it",
+      "originated_when": "date | string",
+      "known_as": "string — one-paragraph definition for a smart non-expert"
+    },
+    "genesis": {
+      "the_problem": "string — intellectual puzzle or practical need that gave rise to this",
+      "precursors": ["string — earlier ideas that laid the groundwork"],
+      "the_breakthrough": "string — key insight, what made it different",
+      "context": "string — what was happening in the field/world that made this moment ripe",
+      "initial_reception": "string — embraced? ignored? attacked? by whom?",
+      "key_original_works": ["string — papers, books, experiments"]
+    },
+    "core_content": {
+      "central_claim": "string — the core idea stated clearly and precisely",
+      "key_components": ["string — building blocks of the concept"],
+      "mechanism_or_logic": "string — how the argument or framework works",
+      "assumptions": ["string — what must be true for this to hold"],
+      "scope": "string — where it applies and where it doesn't",
+      "formal_definitions": ["string | null — equations, models, precise formulations"]
+    },
+    "evolution": {
+      "key_developments": [
+        {
+          "development": "string",
+          "contributor": "string",
+          "when": "string"
+        }
+      ],
+      "branches": ["string — schools of thought or competing versions"],
+      "cross_field_adoption": ["string — how other fields adapted it"],
+      "empirical_status": "string — evidence for and against",
+      "practical_applications": ["string — real-world use and results"]
+    },
+    "debates": {
+      "strongest_critiques": ["string — most serious objections, presented fairly"],
+      "competing_frameworks": ["string — alternative theories addressing same questions"],
+      "open_questions": ["string — what it doesn't yet explain"],
+      "active_controversies": ["string — current disputes and fault lines"]
+    },
+    "current_state": {
+      "status": "string — mainstream, fringe, emerging, declining",
+      "active_research_frontiers": ["string"],
+      "current_influence": "string",
+      "recent_developments": ["string"],
+      "expert_consensus": "string — how practitioners currently view it"
+    }
+  },
+
+  "system": {
+    "identity": {
+      "name": "string",
+      "type": "string — market, industry, ecosystem, geopolitical order, etc.",
+      "boundaries": "string — what's inside, what's outside",
+      "participants": "string — who operates within this system",
+      "known_as": "string — one-line definition"
+    },
+    "mechanics": {
+      "structure": "string — main components, layers, or sectors",
+      "flows": "string — what moves through: money, goods, information, people, power",
+      "incentive_structures": "string — what the system rewards and punishes",
+      "feedback_loops": ["string — self-reinforcing dynamics and balancing forces"],
+      "bottlenecks": ["string — choke points where small changes produce large effects"],
+      "rules": "string — formal regulations and informal norms"
+    },
+    "key_players": [
+      {
+        "name": "string — individual, company, government, or group",
+        "role_in_system": "string",
+        "interests": "string",
+        "power_level": "string",
+        "current_strategy": "string",
+        "key_relationships": ["string — alliances, rivalries, dependencies"]
+      }
+    ],
+    "history": {
+      "formation": "string — when and how this system emerged",
+      "key_transitions": [
+        {
+          "transition": "string",
+          "cause": "string",
+          "when": "string"
+        }
+      ],
+      "durable_features": ["string — what has persisted despite change"],
+      "things_in_flux": ["string — what has been changing"]
+    },
+    "current_state": {
+      "dominant_dynamics": "string — what's happening right now",
+      "vital_signs": {"metric_name": "value — key indicators"},
+      "active_tensions": ["string — unresolved forces pulling in different directions"],
+      "recent_shifts": ["string — last 6-12 months"],
+      "sentiment": "string — prevailing mood among participants",
+      "phase": "string — expansionary, contractionary, transitional"
+    },
+    "forces_and_trends": {
+      "structural_trends": ["string — long-term reshaping forces"],
+      "cyclical_dynamics": ["string — recurring patterns"],
+      "wild_cards": ["string — low-probability, high-impact disruptions"],
+      "emerging_dynamics": ["string — new forces just beginning to be felt"]
+    }
+  }
+}

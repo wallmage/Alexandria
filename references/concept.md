@@ -13,12 +13,10 @@ Key distinction from Artifact: if the subject is a specific implementation (Bitc
 These dimensions define what to investigate and ensure adequate coverage of. They are **not** chapter headings — the report's TOC should be crafted fresh for each subject with unique, compelling titles. A dimension can span multiple chapters, be woven into other sections, or be combined with another dimension. The goal is coverage, not section-matching.
 
 ### One-Line Definition
-*Moderate: 100-200 words*
 
 What is this concept? For concepts, the definition deserves slightly more space because the subject itself is abstract. Write it so a smart non-expert can grasp the core idea. One paragraph, no jargon without explanation.
 
 ### Genesis
-*Deep: 1,500-3,500 words*
 
 Every idea has an origin story. Where did this come from?
 
@@ -33,7 +31,6 @@ For scientific concepts: focus on the original paper(s), the key experiment(s), 
 For philosophical/ideological concepts: focus on the thinker(s), their influences, and the intellectual tradition they were responding to.
 
 ### Core Content
-*Deep: 2,000-5,000 words*
 
 The meat of the concept — what it actually says, claims, or proposes. This is the "How It Works" equivalent for ideas.
 
@@ -46,7 +43,6 @@ The meat of the concept — what it actually says, claims, or proposes. This is 
 Write this section at the level of a good university lecture — rigorous but accessible. Don't assume prior expertise, but don't condescend. Use examples to ground abstract ideas.
 
 ### Evolution and Development
-*Moderate: 1,000-3,000 words*
 
 How the concept has changed, grown, or been refined since its origin.
 
@@ -57,7 +53,6 @@ How the concept has changed, grown, or been refined since its origin.
 - **Practical applications**: How has the concept been applied in the real world? With what results?
 
 ### Debates and Critiques
-*Moderate: 1,000-2,500 words*
 
 No concept exists without challenge. What are the arguments against it?
 
@@ -69,7 +64,6 @@ No concept exists without challenge. What are the arguments against it?
 Present critiques on their merits — don't dismiss them to defend the concept, and don't amplify them to seem balanced. Just lay out the genuine state of the debate.
 
 ### State of Play
-*Moderate: 500-1,500 words*
 
 Where this concept stands now in its field.
 
@@ -80,7 +74,6 @@ Where this concept stands now in its field.
 - How practitioners/experts currently view it
 
 ### Verdict
-*Moderate: 800-2,000 words*
 
 Analytical assessment — but note that for concepts, "verdict" is less about future prediction and more about intellectual evaluation.
 
@@ -90,12 +83,6 @@ Analytical assessment — but note that for concepts, "verdict" is less about fu
 - **Durability**: Will this concept endure, evolve, or be superseded? What would it take to overthrow it?
 - **Why it matters**: For the non-specialist reader — why should anyone care about this concept? What does understanding it give you?
 
-## Research Sub-Agent Split
+## Coverage priority
 
-- **Sub-agent 1 (Genesis + Core)**: Origin, original papers/works, intellectual lineage, core claims, formal definitions
-- **Sub-agent 2 (Development + Debates)**: Extensions, refinements, competing theories, critiques, empirical evidence, applications
-- **Sub-agent 3 (Current)**: Current status in the field, recent papers or developments, active research, practical relevance
-
-## Word Count Target
-
-**Total: 7,500-15,000 words.** Genesis and Core Content should together comprise 50-60% of the report. For concepts, the reader's primary need is understanding — so the explanatory sections get the most space.
+Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

@@ -16,12 +16,10 @@ Key distinctions:
 These dimensions define what to investigate and ensure adequate coverage of. They are **not** chapter headings — the report's TOC should be crafted fresh for each subject with unique, compelling titles. A dimension can span multiple chapters, be woven into other sections, or be combined with another dimension. The goal is coverage, not section-matching.
 
 ### One-Line Definition
-*~50-150 words*
 
 What is this system? Define its boundaries — what's inside, what's outside. Who participates, and what does it produce or regulate?
 
 ### How It Works
-*Deep: 2,000-4,000 words*
 
 The mechanics of the system. This is the most important section — the reader needs to understand the machinery before anything else makes sense.
 
@@ -35,7 +33,6 @@ The mechanics of the system. This is the most important section — the reader n
 Write this like you're explaining the game board and rules before describing any particular match.
 
 ### Key Players
-*Deep: 1,500-3,500 words*
 
 Who are the major actors in this system, and what do they want?
 
@@ -52,7 +49,6 @@ Also cover:
 - **Newcomers and disruptors**: Who is trying to enter or change the system?
 
 ### Origin and Evolution
-*Moderate: 1,000-3,000 words*
 
 How did this system come to be, and how has it changed?
 
@@ -63,7 +59,6 @@ How did this system come to be, and how has it changed?
 This section is shorter than in other archetypes because systems often have long, gradual histories that matter less than understanding the current mechanics. Go deeper only if the historical context is essential for understanding the present.
 
 ### State of Play
-*Deep: 1,500-3,500 words*
 
 The current condition of the system. For systems, this is a primary section — often the main reason the user is researching.
 
@@ -74,7 +69,6 @@ The current condition of the system. For systems, this is a primary section — 
 - **Mood and momentum**: What's the prevailing sentiment among participants? Is the system in an expansionary, contractionary, or transitional phase?
 
 ### Forces and Trends
-*Moderate: 1,000-2,500 words*
 
 What forces are shaping the system's future?
 
@@ -84,7 +78,6 @@ What forces are shaping the system's future?
 - **Emerging dynamics**: New forces that are just beginning to be felt
 
 ### Verdict
-*Deep: 1,500-3,000 words*
 
 Analytical synthesis of the system.
 
@@ -95,12 +88,6 @@ Analytical synthesis of the system.
 - **Intervention points**: If someone wanted to change this system, where would they push? What are the realistic levers?
 - **The bottom line**: What should the reader understand about this system that isn't obvious from the headlines?
 
-## Research Sub-Agent Split
+## Coverage priority
 
-- **Sub-agent 1 (Mechanics + Players)**: System structure, how it works, major actors, power dynamics, incentive structures
-- **Sub-agent 2 (Current + Trends)**: Current state, recent developments, key metrics, emerging forces, expert analysis
-- **Sub-agent 3 (History + Context)**: How the system formed, key transitions, structural trends, regulatory environment
-
-## Word Count Target
-
-**Total: 8,000-15,000 words.** How It Works, Key Players, and State of Play should together comprise 55-65% of the report. For systems, understanding the mechanics and the current dynamics is the priority.
+Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

@@ -11,25 +11,22 @@ The subject is a specific, named individual. The user wants to understand who th
 These dimensions define what to investigate and ensure adequate coverage of. They are **not** chapter headings — the report's TOC should be crafted fresh for each subject with unique, compelling titles. A dimension can span multiple chapters, be woven into other sections, or be combined with another dimension. The goal is coverage, not section-matching.
 
 ### One-Line Definition
-*~50-100 words*
 
 Who is this person, in one paragraph? Not a biography — a positioning statement. What are they known for, and why do they matter right now?
 
 ### Origin Story
-*Deep: 1,500-4,000 words*
 
 This is the backbone of a person report. People are shaped by where they come from.
 
 Cover:
 - **Background**: Where and when born, family context, socioeconomic environment, formative culture. Not a dry CV — paint the world they grew up in.
 - **Formation**: Education, early influences, mentors, pivotal early experiences. What shaped their worldview before they became known?
-- **The spark**: What specific moment, opportunity, or decision launched them onto the path they're known for? Every significant person has an inflection point.
+- **Inflection points, if any**: Test whether a particular moment, opportunity, or decision changed their path. Some careers have several; others emerge gradually. Do not manufacture a single origin scene.
 - **Early moves**: First ventures, first roles, first publications, first failures. What did they do before they became "them"?
 
-The goal is to make the reader understand: *why this person, and not someone else?* What in their background made them uniquely positioned (or uniquely driven) to do what they did?
+The goal is to explain which parts of the person's background genuinely help account for later choices, without treating biography as destiny.
 
 ### Arc of Decisions
-*Deep: 2,000-5,000 words*
 
 This replaces a chronological biography. Instead of listing events in order, organize around the **major decisions** this person made — the ones that defined their trajectory.
 
@@ -47,7 +44,6 @@ Include:
 - **Relationships and rivalries** — key collaborators, adversaries, and how those dynamics shaped outcomes.
 
 ### How They Operate
-*Light-to-Moderate: 500-1,500 words*
 
 What is distinctive about this person's *method*? This isn't biography — it's analysis of their operating style.
 
@@ -59,7 +55,6 @@ Depending on the person, this might cover:
 - Recurring patterns in how they handle adversity, opportunity, conflict
 
 ### State of Play
-*Moderate: 500-2,000 words*
 
 Where is this person right now? What are they currently doing, building, saying, or facing?
 
@@ -69,7 +64,6 @@ Where is this person right now? What are they currently doing, building, saying,
 - Active controversies or ongoing situations
 
 ### Context
-*Light: 300-1,000 words*
 
 Reference points — but only where they sharpen understanding.
 
@@ -80,7 +74,6 @@ Reference points — but only where they sharpen understanding.
 Do NOT write a section comparing the subject to 3-5 peers across multiple dimensions. That's the organization/product framework leaking in. For people, comparisons are surgical: make a point, move on.
 
 ### Verdict
-*Deep: 1,000-2,500 words*
 
 The analytical payoff. This is where you earn the reader's time.
 
@@ -90,12 +83,6 @@ The analytical payoff. This is where you earn the reader's time.
 - **Trajectory**: Where are they heading? What are the plausible scenarios for what comes next?
 - **The takeaway**: After reading this entire report, what should the reader walk away understanding about this person that they didn't before?
 
-## Research Sub-Agent Split
+## Coverage priority
 
-- **Sub-agent 1 (Origin + Arc)**: Early life, career history, major decisions, key events, interviews, profiles
-- **Sub-agent 2 (Current + Context)**: Recent news, current projects, public statements, public perception, social media presence
-- **Sub-agent 3 (if needed)**: Deep background on specific episodes, controversies, or areas of expertise
-
-## Word Count Target
-
-**Total: 7,500-15,000 words.** The Origin Story and Arc of Decisions should together comprise 60-70% of the report.
+Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

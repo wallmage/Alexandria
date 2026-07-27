@@ -13,12 +13,10 @@ This is the most common archetype for tech-related research. "Research Bitcoin",
 These dimensions define what to investigate and ensure adequate coverage of. They are **not** chapter headings — the report's TOC should be crafted fresh for each subject with unique, compelling titles. A dimension can span multiple chapters, be woven into other sections, or be combined with another dimension. The goal is coverage, not section-matching.
 
 ### One-Line Definition
-*~50-100 words*
 
 What is this thing, in one paragraph? What does it do, who uses it, and why does it matter? Written for someone who has never heard of it.
 
 ### How It Works
-*Deep: 1,500-4,000 words*
 
 Start with the mechanics. Before the reader cares about the history or the competition, they need to understand what this thing actually *is*.
 
@@ -32,7 +30,6 @@ Cover:
 Write for a smart generalist, not a specialist. Use analogies where they help, but don't dumb it down. The reader should finish this section feeling like they genuinely understand the thing.
 
 ### Origin Story
-*Moderate: 800-2,000 words*
 
 How and why this thing came to exist.
 
@@ -42,7 +39,6 @@ How and why this thing came to exist.
 - **Early form**: How different was the v1 from what exists now?
 
 ### Evolution
-*Deep: 2,000-5,000 words*
 
 How the artifact changed from its creation to the present. Organized as narrative, not changelog.
 
@@ -54,7 +50,6 @@ How the artifact changed from its creation to the present. Organized as narrativ
 - **Key inflection points**: What moments fundamentally changed the trajectory? New funding? A competitor entering? A breakthrough feature? A crisis?
 
 ### Competitive Landscape
-*Deep: 1,500-4,000 words*
 
 What else exists in this space, and how does the subject compare?
 
@@ -65,7 +60,6 @@ What else exists in this space, and how does the subject compare?
 - **Market dynamics**: Is the space consolidating or fragmenting? Who has momentum?
 
 ### State of Play
-*Deep: 1,000-2,500 words*
 
 Where this artifact stands right now, today.
 
@@ -77,7 +71,6 @@ Where this artifact stands right now, today.
 - What the team/creator is focused on next
 
 ### Verdict
-*Deep: 1,500-3,000 words*
 
 Analytical synthesis.
 
@@ -88,12 +81,6 @@ Analytical synthesis.
 - **Future outlook**: Where is this heading? What are the key risks and opportunities? What would change the game?
 - **The bottom line**: The reader's key takeaway — the thing they should understand about this artifact that isn't obvious from the marketing page.
 
-## Research Sub-Agent Split
+## Coverage priority
 
-- **Sub-agent 1 (Mechanics + Origin)**: How it works, technical documentation, architecture, founding story, design philosophy
-- **Sub-agent 2 (Evolution + Current)**: Version history, changelogs, recent updates, adoption data, latest news, roadmap
-- **Sub-agent 3 (Landscape + Sentiment)**: Competitors, comparison articles, user reviews, forum discussions, benchmarks
-
-## Word Count Target
-
-**Total: 8,000-15,000 words.** How It Works, Evolution, and Competitive Landscape should together comprise 60-70% of the report.
+Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

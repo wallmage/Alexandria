@@ -1,0 +1,98 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes fonts-noto-cjk
+          python -m pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m unittest discover -v
+
+      - name: Compile scripts
+        run: python -m py_compile scripts/*.py
+
+      - name: Validate evidence ledger
+        run: python scripts/validate_ledger.py tests/fixtures/evidence-ledger.json
+
+      - name: Render and validate English PDF
+        run: |
+          python scripts/md_to_pdf.py \
+            tests/fixtures/sample-report.md \
+            /tmp/alexandria-sample.pdf \
+            --lang en
+          python scripts/validate_report.py \
+            tests/fixtures/sample-report.md \
+            --ledger tests/fixtures/evidence-ledger.json \
+            --pdf /tmp/alexandria-sample.pdf \
+            --expected-lang en \
+            --min-words 40 \
+            --min-sources 1 \
+            --min-sections 4 \
+            --min-pages 3 \
+            --min-text-chars 300 \
+            --min-links 1
+
+      - name: Render and validate Hong Kong PDF
+        run: |
+          python scripts/md_to_pdf.py \
+            tests/fixtures/sample-report.zh-HK.md \
+            /tmp/alexandria-sample.zh-HK.pdf \
+            --lang zh-HK
+          python scripts/validate_report.py \
+            tests/fixtures/sample-report.zh-HK.md \
+            --pdf /tmp/alexandria-sample.zh-HK.pdf \
+            --expected-lang zh-HK \
+            --min-chars 100 \
+            --min-sources 1 \
+            --min-sections 4 \
+            --min-pages 3 \
+            --min-text-chars 100 \
+            --min-links 1
+
+      - name: Render and validate Simplified Chinese PDF
+        run: |
+          python scripts/md_to_pdf.py \
+            tests/fixtures/sample-report.zh-CN.md \
+            /tmp/alexandria-sample.zh-CN.pdf \
+            --lang zh-CN
+          python scripts/validate_report.py \
+            tests/fixtures/sample-report.zh-CN.md \
+            --pdf /tmp/alexandria-sample.zh-CN.pdf \
+            --expected-lang zh-CN \
+            --min-chars 100 \
+            --min-sources 1 \
+            --min-sections 4 \
+            --min-pages 3 \
+            --min-text-chars 100 \
+            --min-links 1
+
+      - name: Rasterize all sample pages
+        run: |
+          python scripts/render_pdf_pages.py \
+            /tmp/alexandria-sample.zh-CN.pdf \
+            /tmp/alexandria-pages \
+            --dpi 96
+          test "$(find /tmp/alexandria-pages -name 'page-*.png' | wc -l)" -eq 3

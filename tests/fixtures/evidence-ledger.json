@@ -1,0 +1,53 @@
+{
+  "subject": "Alexandria render pipeline",
+  "research_question": "Does the sample pipeline satisfy its basic output contract?",
+  "report_date": "2026-07-28",
+  "coverage": [
+    {
+      "area": "rendering",
+      "question": "Can the generated PDF be reopened?",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C1"
+      ],
+      "notes": null
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "S1",
+      "title": "Example source",
+      "url": "https://example.com/research/a-very-long-but-valid-path-that-must-wrap-inside-the-page-instead-of-running-through-the-margin",
+      "publisher": "Example",
+      "author": null,
+      "published": null,
+      "accessed": "2026-07-28",
+      "provenance": "primary_independent",
+      "evidence_type": "official_documentation",
+      "source_family": null,
+      "limitations": "Fixture data only"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "C1",
+      "claim": "The pipeline preserves a clickable source link.",
+      "kind": "fact",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "Fixture",
+      "confidence": "low",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "The pipeline converts Markdown into a styled PDF, builds a contents page, and keeps a source link clickable."
+      ],
+      "supports": [],
+      "contradicts": [],
+      "limitations": "This is a schema fixture, not research evidence."
+    }
+  ],
+  "unresolved_questions": []
+}

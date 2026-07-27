@@ -7,8 +7,8 @@ Alexandria turns a broad question into a researched, readable PDF report. Give i
 ## How it works
 
 1. **Frame the subject.** Alexandria classifies the topic as a person, organization, artifact, event, concept, or system. That choice sets the questions the research must answer. If your request is already clear, it starts immediately instead of making you complete a long intake form.
-2. **Research with context.** It checks how quickly the topic is changing and adjusts the source window to match. Parallel research covers the history, current state, and wider context. Sources are ranked by trust, while key facts keep their links and publication dates.
-3. **Write and produce.** A writer profile suited to the topic shapes the report. The draft is checked for gaps, stale claims, weak sourcing, and mechanical prose before it becomes a typeset PDF.
+2. **Research with context.** It checks current claims against fresh evidence without throwing away older sources that explain the history or mechanism. Each important claim keeps its source, date, confidence, and any serious contradiction.
+3. **Write and produce.** The evidence becomes one argument rather than a pile of notes. The draft is checked for gaps, stale claims, citation drift, and mechanical prose before it becomes a typeset PDF.
 
 You spend less time directing the research and sorting links. What comes back is a coherent argument with sources you can inspect.
 
@@ -20,7 +20,7 @@ It is designed for questions that deserve more than a quick summary: How did thi
 
 ## What the finished report looks like
 
-The output reads more like long-form journalism than a consulting deck or encyclopedia entry. Expect a cover, table of contents, five to eight topic-specific chapters, clear judgments, and cited sources. A normal report targets a 30–60 minute read: roughly 7,500–15,000 words in English or 5,000–10,000 Chinese characters, usually supported by 20–40 sources.
+The output reads more like long-form journalism than a consulting deck or encyclopedia entry. Expect a cover, table of contents, topic-specific chapters, clear judgments, and citations beside the claims they support. Length is deliberately substantial: every English report must stay between 7,500 and 15,000 words; every Chinese report must stay between 5,000 and 10,000 non-whitespace characters. The subject determines where it lands inside that range, with roughly ten or more finished PDF pages as the production target.
 
 ## Why try it
 

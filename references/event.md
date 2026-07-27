@@ -4,7 +4,7 @@ Research framework for wars, crises, elections, revolutions, disasters, incident
 
 ## When to Use
 
-The subject is something that *occurred* — it has a beginning, a progression, and either an end or an ongoing current state. "The 2026 Iran war", "the 2008 financial crisis", "the French Revolution", "the Fukushima disaster", "the Arab Spring", "the moon landing" all map here.
+The subject is something that *occurred* — it has a beginning, a progression, and either an end or an ongoing current state. A current conflict, the 2008 financial crisis, the French Revolution, the Fukushima disaster, the Arab Spring, and the moon landing all map here.
 
 Key distinction from System: events are bounded in time even if their consequences are ongoing. The 2008 crisis is an event; "the global financial system" is a system.
 
@@ -13,12 +13,10 @@ Key distinction from System: events are bounded in time even if their consequenc
 These dimensions define what to investigate and ensure adequate coverage of. They are **not** chapter headings — the report's TOC should be crafted fresh for each subject with unique, compelling titles. A dimension can span multiple chapters, be woven into other sections, or be combined with another dimension. The goal is coverage, not section-matching.
 
 ### One-Line Definition
-*~50-100 words*
 
 What happened, in one paragraph? When, where, who was involved, and why it mattered. Written so someone who knows nothing about it can orient themselves.
 
 ### Causal Chain
-*Deep: 2,000-5,000 words*
 
 This is the most important section for events. Events don't happen in a vacuum — they are the product of causes that compound over time. The reader must understand *why* this happened, not just *that* it happened.
 
@@ -27,14 +25,13 @@ Structure as a narrative that works backward from the event to its roots:
 - **Proximate cause**: What directly triggered it? The assassination, the vote, the market collapse, the declaration — the immediate spark.
 - **Enabling conditions**: What made the trigger possible? What had to be true for the spark to catch? This is usually a set of conditions that built up over months or years.
 - **Deep roots**: What are the structural, historical, or systemic factors that created the enabling conditions? This is where you go back years or decades.
-- **Path dependencies**: Which earlier decisions or events made this outcome increasingly likely — or even inevitable? Where were the off-ramps that weren't taken?
+- **Path dependencies**: Which earlier decisions or events changed the odds? Where were the off-ramps, and how plausible were they at the time?
 
-The goal: the reader finishes this section and thinks, "I now understand why this was almost bound to happen." Or alternatively, "I see how a chain of unlikely things had to align."
+The goal is to explain the strongest causal account while preserving contingency. Test rival explanations and avoid turning the outcome into something that only looks inevitable in hindsight.
 
 **Do not write this as a simple chronology.** The causal chain is an analytical structure — it explains *why*, organized by causal depth, not by date.
 
 ### What Happened
-*Deep: 2,000-5,000 words*
 
 The chronological narrative of the event itself. This is where timeline matters.
 
@@ -45,7 +42,6 @@ The chronological narrative of the event itself. This is where timeline matters.
 - **The human element**: What did it feel like on the ground? What were people experiencing? Use specific accounts, quotes, or reported details — not fabricated color.
 
 ### Key Players
-*Deep: 1,000-3,000 words*
 
 Who were the decisive actors, and what drove them?
 
@@ -63,7 +59,6 @@ Include:
 - **External actors**: Third parties whose involvement (or non-involvement) mattered
 
 ### Consequences and Impact
-*Moderate-to-Deep: 1,000-3,000 words*
 
 What happened as a result of this event?
 
@@ -73,7 +68,6 @@ What happened as a result of this event?
 - **What didn't change**: Sometimes the most interesting analysis is about what *didn't* change despite expectations.
 
 ### State of Play
-*Moderate: 500-2,000 words*
 
 Where things stand now, as of the report date.
 
@@ -82,7 +76,6 @@ Where things stand now, as of the report date.
 - Current relevance: why does this event still matter today?
 
 ### Context (Reference Points)
-*Light: 300-1,000 words*
 
 Historical parallels or comparisons — **only when they make a specific analytical point.**
 
@@ -93,7 +86,6 @@ Bad use: "Let us now compare this event to three similar historical events acros
 **Rule**: Reference points are footnotes to the analysis, not standalone sections. Work them into the narrative where they add insight. If no comparison adds anything, skip this section entirely.
 
 ### Verdict
-*Deep: 1,000-2,500 words*
 
 Analytical synthesis — the "so what?"
 
@@ -103,12 +95,6 @@ Analytical synthesis — the "so what?"
 - **Future implications**: What does this event set in motion? What should we watch for next?
 - **Unresolved questions**: What do we still not know? What will only become clear with time?
 
-## Research Sub-Agent Split
+## Coverage priority
 
-- **Sub-agent 1 (Causes + Chronology)**: Historical background, causal chain, timeline of events, key moments
-- **Sub-agent 2 (Players + Impact)**: Key actors and their motivations, consequences, aftermath, ripple effects
-- **Sub-agent 3 (Current + Context)**: Latest developments, ongoing situation, current analysis, expert commentary
-
-## Word Count Target
-
-**Total: 7,500-15,000 words.** Causal Chain and What Happened should together comprise 50-65% of the report. These are the heart of an event analysis.
+Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

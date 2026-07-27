@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wallmage/Alexandria/references/evidence-ledger.schema.json",
+  "title": "Alexandria Evidence Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subject",
+    "research_question",
+    "report_date",
+    "coverage",
+    "sources",
+    "claims",
+    "unresolved_questions"
+  ],
+  "properties": {
+    "subject": {
+      "type": "string",
+      "minLength": 1
+    },
+    "research_question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "report_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "coverage": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/coverageItem"
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/claim"
+      }
+    },
+    "unresolved_questions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "coverageItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["area", "question", "status", "claim_ids"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": ["supported", "disputed"]
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "claim_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "area": {
+          "type": "string",
+          "minLength": 1
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "enum": ["unstarted", "in_progress", "supported", "disputed", "gap"]
+        },
+        "claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "title",
+        "url",
+        "publisher",
+        "accessed",
+        "provenance",
+        "evidence_type"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": ["string", "null"]
+        },
+        "published": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "accessed": {
+          "type": "string",
+          "format": "date"
+        },
+        "provenance": {
+          "enum": [
+            "primary_independent",
+            "primary_interested",
+            "secondary_independent",
+            "secondary_dependent",
+            "unverified"
+          ]
+        },
+        "evidence_type": {
+          "enum": [
+            "accountable_record",
+            "peer_reviewed",
+            "preprint",
+            "official_documentation",
+            "dataset_or_test",
+            "reported_interview",
+            "news_report",
+            "opinion_or_forecast",
+            "marketing",
+            "anecdote"
+          ]
+        },
+        "source_family": {
+          "type": ["string", "null"]
+        },
+        "limitations": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "claim",
+        "kind",
+        "source_ids",
+        "confidence",
+        "status",
+        "include_in_report",
+        "report_excerpts",
+        "supports",
+        "contradicts"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": ["fact", "reported_claim", "estimate"]
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "source_ids": {
+                "minItems": 1
+              },
+              "extract_or_location": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["extract_or_location"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "analysis"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "source_ids": {
+                    "minItems": 1
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "supports": {
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "include_in_report": {
+                "const": true
+              }
+            },
+            "required": ["include_in_report"]
+          },
+          "then": {
+            "properties": {
+              "report_excerpts": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "pattern": "^C[0-9]+$"
+        },
+        "claim": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["fact", "reported_claim", "estimate", "analysis"]
+        },
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^S[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "extract_or_location": {
+          "type": ["string", "null"]
+        },
+        "confidence": {
+          "enum": ["high", "medium", "low"]
+        },
+        "status": {
+          "enum": ["supported", "disputed", "inference", "unknown"]
+        },
+        "include_in_report": {
+          "type": "boolean"
+        },
+        "report_excerpts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 40
+          },
+          "uniqueItems": true
+        },
+        "supports": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "contradicts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "limitations": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Alexandria"
+  short_description: "Source-backed deep research reports as polished PDFs"
+  default_prompt: "Use $alexandria to research this topic and deliver a source-backed PDF report."

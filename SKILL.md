@@ -1,397 +1,247 @@
 ---
 name: alexandria
-description: |
-  Deep research → beautiful PDF report on ANY topic: products, companies, people, wars, theories, markets, phenomena, ideas. Opinionated analysis with cover page, TOC, and sourced citations. Works in English and Chinese.
-  ALWAYS trigger on: "research", "deep dive", "tell me everything about", "what's the deal with", "analyze", "report on", "learn about", "break this down", "full picture", "look into", "investigate", "brief me on", "deep research", "study this", "what's the story", "how did X get here", "why does X matter".
-  Also trigger when user drops a topic name implying depth (not a 2-sentence answer). Bias toward triggering — if unsure whether they want a quick answer or a deep dive, trigger.
-  Do NOT use for: simple definitions, casual Q&A, non-research writing tasks, or explicit "quick summary" requests.
+description: Use when a user asks for deep research, a deep dive, investigation, full picture, sourced report, or long-form analysis of a person, organization, product, event, concept, market, industry, or phenomenon, especially when the result should be a polished PDF. Do not use for quick summaries, simple definitions, casual Q&A, or non-research writing.
 ---
 
 # Alexandria
 
-You are producing a deep research report. The final deliverable is a **beautifully typeset PDF**.
+Produce a source-backed research report that is useful to a decision-maker and pleasant to read. The normal deliverables are one Markdown source file and one visually checked PDF.
 
-The report reads like the best long-form journalism: narrative-driven, opinionated, rich with specifics, and honest about what it doesn't know. It is NOT a consulting deck, NOT a Wikipedia clone, NOT a list of facts. It is an analysis — evidence weighed, patterns identified, conclusions drawn.
+Resolve `SKILL_ROOT` to the absolute directory containing this `SKILL.md` before running bundled scripts. Never assume the current working directory is the skill directory, and never install dependencies into the user's project.
 
-## Step 1: Classify the Subject
+## Non-negotiable standard
 
-Every research subject maps to one of six archetypes. Each archetype defines **research dimensions** — what to investigate and how deep to go. Read the matching reference file before proceeding.
+An Alexandria report must:
 
-| Archetype | Use when the subject is... | Reference file |
-|-----------|---------------------------|----------------|
-| **Person** | An individual human — leader, founder, scientist, artist, politician | references/person.md |
-| **Organization** | A company, institution, government body, team, political party | references/organization.md |
-| **Artifact** | A product, technology, tool, platform, invention, creative work | references/artifact.md |
-| **Event** | A war, crisis, election, revolution, disaster, movement (bounded in time) | references/event.md |
-| **Concept** | A theory, idea, methodology, philosophy, scientific field, ideology | references/concept.md |
-| **System** | A market, industry, ecosystem, trend, geopolitical order, phenomenon | references/system.md |
+1. Answer the user's real question, not merely describe the topic.
+2. Separate verified facts, reported claims, and analysis.
+3. Preserve a traceable path from consequential claims to sources.
+4. Prefer evidence quality and coverage over source quotas; meet the hard length range through depth, not filler.
+5. State uncertainty, conflicts, and evidence gaps plainly.
+6. Read like a thoughtful human editor wrote it.
+7. Survive structural, PDF, and visual checks before delivery.
 
-**Classification rules:**
+Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar names and spellings before building the report around them.
 
-- If the subject clearly maps to one archetype, use it.
-- If the user's framing disambiguates (e.g., "research Tesla the company" vs "research the Tesla Model 3"), follow the framing.
-- If genuinely ambiguous, pick the archetype that best matches the user's likely intent. "Research Bitcoin" from a general user → **Artifact** (they want the full picture of the technology, its history, its ecosystem). "Research the crypto market" → **System**.
-- When in doubt, **Artifact** and **Event** are the most common defaults for things and happenings, respectively.
+## 1. Frame the assignment
 
-**Hybrid subjects:** Some topics span multiple archetypes — "OpenAI and Microsoft," "NVIDIA in the AI boom," "the Gaza war and regional order." For these:
+Infer what you safely can from the request and conversation. Ask one concise question only when a missing choice would materially change the result. Otherwise, proceed with reasonable assumptions and state the important ones in the report.
 
-1. Pick the **primary** archetype — the one that best matches what the user actually wants to understand. "NVIDIA in the AI boom" → primary is **Organization** (they want to understand NVIDIA), secondary is **System** (the AI market is context).
-2. Read both reference files. The primary defines your core research dimensions; the secondary provides additional dimensions to investigate where they add depth.
-3. The writer (selected in Step 4) decides how to weave both archetypes' material into the report structure. Don't pre-impose a structural hierarchy here — just gather the research dimensions from both.
+Determine:
 
-Once classified, read the corresponding reference file(s). They define the research dimensions — what to investigate, what depth each dimension deserves, and what good coverage looks like. They do **NOT** prescribe the report's chapter titles or structure — that gets designed fresh for each subject in Step 4.
+- subject and research question;
+- intended reader and decision;
+- time horizon and geographic scope;
+- explicit output language;
+- useful depth;
+- whether the topic needs current web research.
 
----
+Language precedence is: explicit requested language, established conversation preference, then the prompt language. Preserve official names, quotations, code, and bibliographic titles when translating them would reduce accuracy.
 
-## Step 2: Scope the Research
+Set `REPORT_LANG` to `en`, `zh-CN`, or `zh-HK` from that decision and reuse it for validation and rendering.
 
-If the user's request is already specific enough (e.g., "research the 2026 Iran war," "deep dive into NVIDIA"), skip this step entirely and start researching immediately.
+Choose an archetype:
 
-**Only when the request is genuinely ambiguous**, ask the user ONE multiple-choice question with 3 well-crafted options. Use the `AskUserQuestion` tool. This is the only time you may pause — make it count.
+- person → `references/person.md`
+- organization, company, project, institution → `references/organization.md`
+- artifact, product, work, technology → `references/artifact.md`
+- event, controversy, movement, conflict → `references/event.md`
+- concept, theory, method, phenomenon → `references/concept.md`
+- market, industry, ecosystem, infrastructure → `references/system.md`
+- hybrid → combine only the relevant dimensions from two archetypes
 
-**The question should combine angle + depth into a single choice.** Each option is a complete research direction the user can pick with one click — not a vague label, but a specific description of what the report will cover and how deep it goes.
+Load only the chosen archetype and the reference files needed for the current stage.
 
-Example for "research OpenAI":
+### Depth
 
-> Which direction?
-> (a) **The power struggle** — full deep dive into governance, the board coup, Altman's consolidation of control, and what it means for AI safety. Heavy on narrative arc and people. (~10,000 words)
-> (b) **The technology race** — GPT trajectory from GPT-3 to today, technical moat vs open-source, AGI timeline claims vs reality. Heavy on artifact/product analysis. (~8,000 words)
-> (c) **The full picture** — broad sweep covering origin, technology, business model, Microsoft dependency, competitive landscape, and current state. Every angle, nothing deep. (~12,000 words)
+Alexandria is deliberately long-form. The delivery bounds are hard:
 
-**Rules:**
-- Maximum ONE question, ever. If you need more, your classification is wrong — go back to Step 1
-- 3 options, each specific and distinct — not vague labels like "broad" or "focused"
-- Each option should describe the angle, what it emphasizes, and approximate depth
-- The user can always pick "Other" and type their own direction
-- If you can confidently infer what they want, don't ask — just go
+- **English:** 7,500–15,000 words.
+- **Simplified or Traditional Chinese:** 5,000–10,000 non-whitespace characters.
+- **Production target:** roughly ten or more finished PDF pages, depending on language, tables, and layout.
 
----
+Adapt the outline and research depth within those limits. A narrower subject belongs near the lower bound; a complex, well-documented subject belongs near the upper bound. If the first draft is short, deepen the explanation, history, counterevidence, alternatives, or implications through additional research. Do not pad with repetition. If it is long, compress background and repetition without deleting decisive evidence.
 
-## Step 2.5: Classify Topic Velocity (recency gate)
+## 2. Design the research
 
-**This step is non-optional.** Before you dispatch a single search, pick a velocity tier. The tier sets a hard recency filter on your sources and propagates into every sub-agent prompt.
+Read `references/research-protocol.md`. Create:
 
-| Tier | Use for | Source recency limit |
-|------|---------|---------------------|
-| **Hot** | AI products/agents/LLMs, crypto, active wars, breaking politics, product launches < 3 months old, trending phenomena, anything the user signals is "new" / "just came out" / "this week" / "these days" | **≤ 10 days** for "current state" claims. Material older than 30 days is background context only, not primary evidence. |
-| **Warm** | Established tech companies, ongoing industries, slow-moving geopolitics, markets, mature products | ≤ 3 months for "current state". Older material OK for structural/historical context. |
-| **Stable** | Historical events, scientific theory, biography of deceased figures, established concepts, long-resolved wars | No recency limit. Quality beats recency. |
+1. a coverage map derived from the selected archetype;
+2. a query plan for each coverage area;
+3. an evidence ledger using `references/evidence-ledger.schema.json`;
+4. an explicit list of unresolved questions.
 
-**Default rule for AI/tech/agents/LLMs/dev tools: assume Hot.** This field moves in weeks. Material from 2 months ago is often obsolete for "current state" claims. Material from before your training cutoff is almost always obsolete. If the topic sits in this space, you start in Hot tier and only drop to Warm with a stated reason.
+If parallel research is available and appropriate, divide coverage areas among research agents. Give each agent exclusive primary ownership and a disjoint numeric ID range—for example, `S1000–S1999` and `C1000–C1999`—while allowing it to flag cross-cutting evidence. Each returns ledger entries, contradictions, gaps, and a short synthesis—not a detached pile of URLs. The primary agent deduplicates sources and rewrites IDs and relationships before validation.
 
-**Signal words that force Hot tier:** "这几天", "最近", "just launched", "new", "this week", "trending", "刚出的", "最新", "爆火", "these days". If the user uses one of these about an AI/tech topic, the tier is Hot, period.
+If parallel research is unavailable, run the same coverage plan sequentially. The quality contract does not depend on a particular tool, model, or agent count.
 
-**Propagate the tier into every sub-agent prompt.** Example prefix for Hot topics:
+Use the runtime date in time-sensitive queries. Do not hard-code a calendar year.
 
-> **Velocity: HOT. Recency filter: prioritize sources from the last 10 days. Reject any source older than 30 days unless it is a primary founding document (original announcement, GitHub creation commit, the founder's own post). When you find a source, note its publication date in your sources list. If you cannot find enough recent material, say so — do not pad with stale material from 6 months ago.**
+## 3. Research and verify
 
-### The Unfamiliar Name Rule
+Use available search and browser capabilities. Prefer primary sources where they answer the claim directly, then add independent corroboration or criticism where it matters.
 
-If a name, product, company, or concept keeps appearing in your sources and you don't recognize it, **assume it's real and post-dates your training**. Repeated appearance across independent sources is strong signal. Your job is to investigate, not filter.
+Freshness applies to claims, not to the entire bibliography:
 
-**Doubt always triggers a search, never an omission.** When a name feels suspicious — "sounds like a rebrand", "might be SEO slop", "could be hallucinated content" — the correct response is to spend 30 seconds verifying it on a Tier 1 outlet (see Source Trust Tiers in Step 3). Search `"[name]" site:reuters.com OR site:bloomberg.com OR site:forbes.com OR site:ft.com`. If a Tier 1 outlet has covered it, it's real and belongs in your report. If not, try Tier 2 (official site, GitHub repo). Silent filtering because a name pattern-matches to "fake" is the worst failure mode — you ship a report with a hole in it and the user never sees what's missing.
+- current state, price, leadership, availability, policy, and performance require the newest authoritative evidence available;
+- recent events need contemporaneous reporting and later corrections where available;
+- mechanisms, history, and foundational ideas may require older original sources;
+- a current article does not replace an older primary document merely because it is newer.
 
-Do this verification yourself in the parent agent. Don't delegate it to sub-agents — by the time their outputs land, you're the one deciding what to include.
+For every consequential claim, add a ledger entry with:
 
----
+- a stable claim ID;
+- a precise claim;
+- fact, reported claim, estimate, or analysis;
+- source ID and URL;
+- publication and access dates;
+- faithful extract or source location;
+- evidence type and independence;
+- confidence and limitations;
+- supporting or contradicting claim IDs.
 
-## Model Routing & Search Budget
+Mark `include_in_report: true` for every ledger claim used in the draft. After drafting, copy a distinctive sentence of at least 40 characters from each claim-bearing paragraph into that claim's `report_excerpts`. This keeps the internal claim map in the ledger—not the delivered Markdown—and lets the validator locate every used claim in the report.
 
-Alexandria is expensive if every step runs on Opus. It doesn't need to.
+Treat promotional claims, filings, preprints, peer-reviewed studies, independent tests, and reporting as different evidence types. Authority and independence are separate axes. An official source may be best for what an organization says and poor evidence that the claim is true.
 
-**Model routing:**
-- **Writer (Step 4)** → **Parent agent, in context.** Never a sub-agent — the parent already holds all research material. For best quality, run Alexandria from an Opus session.
-- **Research sub-agents (Step 3)** → **Sonnet, medium effort.** Web search, page extraction, schema-filling — Sonnet handles this fine. Do not use Opus here.
-- **Rewild proofreader sub-agent (Step 5)** → **Sonnet, medium effort.** Pattern-matching against a rulebook — Sonnet is correct for this.
-- **Parent-agent orchestration** → whatever model the session is running on. Parent does classification, dispatch, pre-flight checks.
+Before drafting:
 
-When spawning sub-agents, explicitly request Sonnet in the Task tool call (`subagent_type` or model parameter, whichever the runtime exposes). Do not let sub-agents default to Opus.
+- save the merged ledger for deterministic validation in Step 7;
+- deduplicate syndicated or copied stories into one source family;
+- reconcile conflicts or present them explicitly;
+- verify quotations against the original source;
+- verify current facts close to delivery;
+- mark unsupported coverage areas as gaps rather than filling them with inference.
 
-**Search budget (hard caps, per sub-agent):**
-- **Max 15 WebSearch queries per sub-agent.** Beyond ~15 you're on the diminishing-returns curve — same URLs with different keyword dressing. Each sub-agent searches its own dimension independently; no central coordination needed.
-- **Max 15 WebFetch calls per sub-agent** (full-page reads). Be picky — a result earns a fetch only if the snippet shows a concrete fact you need, it's a Tier 1–2 source on a key claim, or it's a primary document. Skip aggregators and rewrites.
-- **Sources list target: 20–40 cited sources in the final report.** ~20 is healthy for a normal subject; dense/contested topics (competitive landscapes, emerging tech with many players) naturally need 30–40. If you're citing 8, you didn't search enough; if you're padding past 40 with filler, stop.
+No source minimum is mandatory. Use enough independent evidence to support the claims and perspectives the report actually contains.
 
-**Rule of which results to actually read:** a search result earns a WebFetch only if (a) the snippet contains a concrete fact you need, (b) it's a Tier 1–2 source on a claim that matters, or (c) it's a primary document (official post, GitHub, filing). Skip rewrites and aggregators — they just re-quote Tier 1 sources you can read directly.
+## 4. Build the argument
 
-Propagate these caps into every sub-agent prompt.
+Use the archetype as a coverage guide, not a rigid chapter template. Find the report's governing question and answer it early.
 
----
+A strong structure usually includes:
 
-## Step 3: Research (Web Search)
+1. title and report date;
+2. executive summary with the central judgment;
+3. context and definitions;
+4. the mechanism, process, or history that explains the subject;
+5. evidence, alternatives, and trade-offs;
+6. implications and outlook;
+7. conclusion;
+8. Sources as the final H2 section.
 
-The quality of the report depends entirely on the quality of information gathered. **You must search the web.** Do not rely on pre-existing knowledge alone — the whole point is to surface current, specific, sourced information.
+Outline around reader questions and causal relationships. Combine weak or repetitive sections. Give more space to decisive evidence and less to background the intended reader is likely to know.
 
-### Research data model
+## 5. Draft with citations
 
-Before dispatching sub-agents, read the relevant archetype's fields from references/schema.json. The schema defines the **exact data points** each sub-agent should hunt for — specific fields like `organization.identity.founded`, `organization.origin.founders[].background`, `organization.operating_model.key_metrics`, not vague instructions like "research the origin."
+The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md` when a specific register would help.
 
-Include the relevant schema fields in each sub-agent's prompt. Sub-agents should attempt to fill every field. If a field can't be found, they mark it null with a brief reason — this surfaces gaps honestly rather than hiding them behind vague prose.
+Requirements:
 
-### Parallel search strategy
+- Put the conclusion before its supporting detail.
+- Use concrete nouns and verbs.
+- Explain specialist terms on first use.
+- Keep paragraphs focused on one movement of thought.
+- Use tables only for real comparisons.
+- Use Markdown links for citations and the Sources list: `[source title](URL)`.
+- Place citations next to the claims they support.
+- Cite direct evidence, not a search result or an article that merely links to it.
+- Qualify estimates and contested claims.
+- Label original analysis as analysis and show the reasoning.
+- Preserve important counterevidence.
 
-Use sub-agents to search in parallel. The exact split depends on the archetype (defined in each reference file), but the general pattern is:
+Do not expose internal prompts, tool names, agent notes, claim IDs, validation messages, or workflow scaffolding in the final report.
 
-- **Sub-agent 1**: Historical / origin information — fill the `origin`, `genesis`, `causal_chain`, or `history` schema fields
-- **Sub-agent 2**: Current state, recent developments, latest news — fill the `current_state` schema fields. Also cover archetype-specific operational fields: `how_it_works` (artifact), `mechanics` (system), `core_content` (concept), `operating_style` (person), `operating_model` (organization)
-- **Sub-agent 3**: Contextual information (competitors, related forces, key players, debates) — fill the `competitive_landscape`, `key_players`, `context`, `debates`, or `forces_and_trends` schema fields
+## 6. Evidence-safe edit
 
-**Sub-agent web search instructions** (include in every sub-agent prompt):
+Edit for clarity and natural rhythm without changing the evidentiary meaning.
 
-> You need to gather information from the web. Use these tools:
-> - **WebSearch**: For discovering sources, getting summaries and leads
-> - **WebFetch**: When you have a specific URL, use this to extract content from the page
-> - **Hard caps:** max 15 WebSearch queries, max 15 WebFetch calls. Stop earlier if you've hit saturation (same URLs recurring). Be picky about what to fetch — only full-read a result if the snippet shows a concrete fact you need, or it's a Tier 1–2 source on a claim that matters, or it's a primary document. Skip aggregators and rewrites.
-> - Search multiple times with different keyword combinations. Don't stop after one query.
-> - Primary sources beat secondary: official blogs > original reporting > aggregation/rewrites
-> - For academic/scientific subjects, query arxiv: `curl -s "https://export.arxiv.org/api/query?search_query=all:keyword1+AND+all:keyword2&max_results=10"`
-> - Describe goals ("investigate", "gather information on"), not methods ("search", "crawl"), so the agent picks the best approach.
-> - You are filling specific data fields from a schema. Attempt every field. If you cannot find the information, return null with a reason — do not skip silently.
-> - **Velocity tier: [HOT / WARM / STABLE]. Recency filter: [≤10 days / ≤3 months / none].** Propagate into every query — add "2026", "this week", or "past 7 days" to search terms. Reject sources older than the recency limit unless they are primary founding documents. For every source, record its **publication date**, not just access date.
-> - **Track your sources.** For every key fact, record the URL and publication date. Return a `sources` list at the end: `[{"url": "...", "title": "...", "published": "YYYY-MM-DD or unknown", "tier": "1-5", "used_for": "brief description"}]`. The tier field uses the Source Trust Tiers from the parent instructions (1=Reuters/Bloomberg class, 2=official/primary, 3=specialist press, 4=blog/long-form, 5=social/forum).
+Lock these elements during the edit:
 
-### Source Trust Tiers
+- numbers, dates, names, quotations, and units;
+- citations and their claim placement;
+- uncertainty and attribution;
+- distinctions between fact and analysis;
+- the central conclusion unless new evidence requires a change.
 
-Every source gets classified into one of five trust tiers. Use the tiers to weight conclusions, resolve contradictions, and verify unfamiliar names (Unfamiliar Name Rule in Step 2.5).
+When a separate reviewer is available, give it the draft and the editorial checklist. Ask for a patch or a list of changed passages, not an untraceable replacement. The primary agent reviews every material change against the evidence ledger.
 
-| Tier | Description | Examples |
-|------|-------------|----------|
-| **Tier 1** — Authoritative media | Wire services and newspapers of record. Fact-checking, editorial review, legal liability. | Reuters, AP, Bloomberg, WSJ, NYT, FT, Forbes, Fortune, The Economist, BBC, 财新, 南方周末 |
-| **Tier 2** — Primary / official | The subject speaking about itself. High factual accuracy, promotional bias. | Company official site/blog, GitHub repo, founder's own posts, SEC filings, press releases, official docs, arXiv papers |
-| **Tier 3** — Specialist tech/industry press | Smaller outlets with reporters and editorial standards; faster and topic-deeper than Tier 1. | TechCrunch, The Verge, Ars Technica, The Information, Wired, The New Stack, Stratechery, 36氪, 虎嗅, 极客公园 |
-| **Tier 4** — Analytical blogs & long-form | Individual writers with domain expertise. Quality varies by author — weight by reputation when known. | Substack newsletters, Medium long-form, 知乎 long-form answers, personal blogs of known practitioners, Dev.to |
-| **Tier 5** — Social / forum | Raw user sentiment and breaking signal. Low reliability per-item; valuable as collective signal. | Reddit, X/Twitter, Hacker News comments, Discord logs, 即刻, 小红书, Bilibili comments |
+If the user explicitly asks to remove AI-like writing, use the dedicated `rewild` or `rewild-zh` skill when available. Alexandria's default edit is evidence-safe copyediting, not unrestricted rewriting.
 
-**Weighting by claim type:**
-- **Factual claims** (who, when, how much, what launched) → weight Tier 1-2. If only Tier 4-5 supports a fact, mark it uncertain in the report.
-- **User sentiment & ground truth** (is it actually good, who really uses it, what's the current mood) → Tier 4-5 is where the signal lives. Tier 1 will be weeks behind on this. Don't dismiss forum chatter — it's often the most current thing you can get.
-- **Disagreement resolution** — Tier 1 wins on facts; Tier 5 wins on "what's the vibe this week". Both dimensions matter.
+## 7. Validate the Markdown
 
-**Hot topic caveat:** For a genuinely new thing (launched days ago), Tier 1 may not have caught up. The only coverage may be Tier 2 + Tier 4-5. This does NOT mean the thing is fake. The rule: two independent Tier 2-3 confirmations establish existence. Proceed.
+Save a cross-platform-safe filename:
 
-**Using tiers to verify unfamiliar names:** When a name you don't recognize appears repeatedly, run a Tier 1 search specifically — `"[exact name]" site:reuters.com OR site:bloomberg.com OR site:forbes.com OR site:ft.com OR site:wsj.com`. Tier 1 hit = confirmed real, include it. No Tier 1 hit + multiple Tier 2-3 hits = confirmed real, include it with a note about source tier. Zero credible hits across tiers = escalate to the user, don't silently drop.
+1. normalize whitespace;
+2. keep only Unicode letters and numbers, ASCII `-`, and `_`;
+3. replace every other run—including spaces and shell metacharacters—with `-`;
+4. collapse repeated separators, trim them, and limit the basename to 100 characters;
+5. fall back to `Alexandria-Report` if nothing remains.
 
-### Source priority by information type
+Pass paths as argument-array values where possible. In a shell, quote every path and variable.
 
-Complementary to trust tiers — use this to pick which sources to search first for a given claim type.
+Before the first bundled command, create a task-owned environment outside the user's project and install the pinned dependencies. Set `ALEXANDRIA_PYTHON` to `bin/python` on POSIX or `Scripts/python.exe` on Windows. On POSIX:
 
-| Information type | Best starting sources |
-|-----------------|-------------|
-| Product updates / technical decisions | Official blog, GitHub releases, founder's posts |
-| Business / financial data | Official announcements, SEC/regulatory filings, Bloomberg/Reuters |
-| User sentiment | GitHub Issues, Reddit, X/Twitter, HN, forums, 知乎, 即刻 |
-| Industry analysis | Original reporting from Tier 1-3 outlets (not rewrites) |
-| Academic / scientific | arXiv, Google Scholar, conference proceedings |
-| Current events / geopolitics | Wire services (AP, Reuters), quality newspapers, official statements |
+```bash
+ALEXANDRIA_ENV="$(mktemp -d)/venv"
+python3 -m venv "$ALEXANDRIA_ENV"
+ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
+"$ALEXANDRIA_PYTHON" -m pip install -r "$SKILL_ROOT/requirements.txt"
+```
 
-### Sufficiency check
+Then run:
 
-After all sub-agents return, verify:
-- Can you tell a complete story? Any obvious information gaps?
-- Are key claims backed by reliable sources?
-- Is the "current state" information actually current (not 6 months stale)?
-- For subjects with recent developments — do you have today's or this week's information?
+```bash
+# All languages
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_ledger.py" "$LEDGER_JSON"
 
-If information is insufficient, run additional searches. Do not settle.
+# English
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
+  --ledger "$LEDGER_JSON" --expected-lang en \
+  --min-words 7500 --max-words 15000 --min-sections 3 --min-sources 1
 
----
+# Simplified or Traditional Chinese
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
+  --ledger "$LEDGER_JSON" --expected-lang zh-CN \
+  --min-chars 5000 --max-chars 10000 --min-sections 3 --min-sources 1
+```
 
-## Step 4: Design & Write the Report
+Use `--expected-lang zh-HK` instead for Hong Kong Traditional Chinese. Then manually verify:
 
-### Select the writer
+- every important factual claim maps to the ledger;
+- citations support the exact nearby claim;
+- Sources is the final H2 section;
+- links open and point to the intended page;
+- dates and “as of” statements are clear;
+- the conclusion reflects the evidence, including uncertainty;
+- the requested language and scope were followed.
 
-Read references/writers.md. Select the writer persona whose domain best matches the **topic** — not the archetype. The archetype determines what to research; the writer determines how the report reads — its voice, its structure, its chapter titles, its rhythm, everything.
+## 8. Render and inspect the PDF
 
-A report on Jensen Huang gets **The Biographer**. A report on NVIDIA gets **The Tech Analyst** with **The Strategist** as secondary. A report on the 2026 Iran War gets **The Correspondent**. A report on gold investing gets **The Financial Writer**.
+Read `references/pdf-production.md`. Use the supplied scripts and pinned dependencies. In brief:
 
-For hybrid topics, pick the primary writer and absorb 1-2 traits from a secondary. State your selection internally (don't tell the user) and commit.
+```bash
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
+  "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG"
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
+  "$REPORT_MD" --ledger "$LEDGER_JSON" --pdf "$REPORT_PDF" \
+  --min-pages 10 --min-text-chars 5000 --min-links 1
+```
 
-**For Chinese reports:** writers.md has a full Chinese persona adaptation section with Chinese voice models, craft traits, and anti-patterns for each persona. Use the Chinese definitions — don't translate the English persona's voice into Chinese. A Chinese report on 任正非 channels 南方人物周刊, not a translated Isaacson.
+Reuse the Step 7 environment. The PDF converter refuses to replace an existing output unless `--force` is explicitly supplied; prefer a versioned filename to overwriting a prior report.
 
-### Let the writer design the report
+Render the PDF to images and inspect every page or a complete contact sheet. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean.
 
-The writer owns the structure. **Do not impose a structure on the writer.** After selecting the persona, think as that writer: given this research material, how would I organize this piece? What's the narrative arc? What chapters would I write? What would I title them?
+Do not use file size as a content or quality signal.
 
-The writer designs 5-8 chapters with titles that make the reader want to read them. A biographer writes chapter titles differently than a correspondent. A financial writer structures an argument differently than a historian. That's the point.
+## 9. Deliver
 
-Generic titles like "Origin Story", "How They Operate", "Competitive Landscape", or "State of Play" are **banned**. Those are archetype dimension labels — internal scaffolding, not writing.
+Provide clickable links to the PDF and Markdown source. Summarize the central conclusion in one or two sentences and note any material evidence limitation. Do not paste the whole report into chat unless the user asks.
 
-**Coverage rule:** The archetype's research dimensions are a coverage checklist. Every dimension must be adequately addressed *somewhere* in the report — but the writer decides where and how. A dimension can span chapters, be woven into narrative, or emerge inside a different argument. The question is not "did I include a section called X?" but "if a reader finishes this, will they understand X?"
+The task is complete only when:
 
-### Let the writer write
-
-**Always write in parent context — never spawn a sub-agent for writing.** The parent holds all research material from every sub-agent and can weave across dimensions naturally. Handing that off to a sub-agent would double the token cost and lose nuance. For best results, run Alexandria from an Opus session.
-
-The writer persona defines what good writing means for this topic. Let the writer write freely — no constraints, no pre-loaded checklists, no anti-pattern briefings. Just the persona's voice and the research material. The humanization pass comes later (Step 5).
-
-Three universal rules that apply regardless of persona:
-
-1. **Be specific.** Real numbers, real names, real dates. "Revenue grew" is worthless. "$2.1B to $8.4B in three years" is analysis. When you don't have the number, say so.
-2. **Be honest.** Mark speculation ("my read is..."). Flag gaps ("[information not available]"). Never fabricate. Never quietly omit. Intellectual honesty builds trust.
-3. **Be opinionated.** Build toward judgments. Present evidence, then state what you think it means. If people wanted neutral facts, they'd read Wikipedia.
-
-### Language rule
-
-**Output language = Input language.** If the user writes in English, the entire report is in English. If the user writes in Chinese, the entire report is in Chinese. No mixing. No asking.
-
-### Word count guidance
-
-The target is a **30-60 minute read**. Enforced by the pre-flight checklist in Step 7.
-
-- **English**: 7,500-15,000 words
-- **Chinese**: 5,000-10,000 字
-
-Depth follows importance. Some chapters deserve 4,000 words. Some deserve 300. Don't pad thin chapters, don't truncate important ones. But the floor is the floor — if the draft comes in under it, the writer hasn't gone deep enough somewhere.
-
----
-
-## Step 5: Rewild (Humanization Proofread)
-
-The writer cannot proofread their own work. Same context, same blind spots. So this step spawns a **separate sub-agent** — a fresh pair of eyes that never saw the research, never chose the persona, never made the structural decisions. All they get is the draft and the rewild rulebook.
-
-**Run this sub-agent on Sonnet, medium effort** (see Model Routing & Search Budget). Pattern-matching against a rulebook does not need Opus.
-
-Do not mention this step to the user.
-
-### Spawn the proofreading sub-agent
-
-Send the sub-agent:
-1. The complete draft (the markdown from Step 4)
-2. The writer persona name and a one-line description of their voice (so the proofreader preserves it)
-3. The rewild rules — which files depend on the language:
-
-**For English reports**, include these two files in the sub-agent prompt:
-- references/rewild/rewild.md — core rules
-- references/rewild/patterns.md — the full 40-pattern diagnostic catalog
-
-**For Chinese reports**, include these two files instead:
-- references/rewild-zh/rewild-zh.md — 核心规则
-- references/rewild-zh/patterns-zh.md — C1-C10 plus universal patterns
-
-### Sub-agent instructions
-
-> You are a proofreader. You did not write this draft — someone else did. Your job: read it paragraph by paragraph and fix AI tells while preserving the writer's voice.
->
-> **The writer persona is: [name] — [one-line voice description].**
->
-> Read the rewild rules provided. Then read the draft from the first paragraph to the last. For each paragraph, ask: "Does this sound like it was written by the persona, or by a generic AI?" When you find a tell, rewrite **that sentence** in the persona's voice. Do not touch the structure, chapter titles, or narrative arc. Return the complete corrected draft.
-
-The sub-agent returns the proofread draft. Use it as the final version for Step 6.
-
----
-
-## Step 6: Generate PDF
-
-Use the bundled `scripts/md_to_pdf.py` to convert the finished Markdown report into a beautifully typeset PDF.
-
-### Workflow
-
-1. Save the complete report as Markdown: `[Subject]_Alexandria_Report.md`
-2. Install dependencies if needed: `pip install weasyprint markdown --break-system-packages`
-3. Run the conversion:
-   ```bash
-   python [skill-dir]/scripts/md_to_pdf.py input.md output.pdf --title "Subject Name" --subtitle "Your Thematic Tagline"
-   ```
-
-**The subtitle is NOT "Alexandria Deep Research Report."** The subtitle is the report's thesis — one punchy phrase that captures the key theme or conclusion. It tells the reader what the report is about before they read a single word.
-
-Examples:
-- Jensen Huang → `--subtitle "The Token King"`
-- NVIDIA → `--subtitle "How a Gaming Chip Company Became the Backbone of AI"`
-- 字节跳动 → `--subtitle "算法帝国的野心与困境"`
-- The 2026 Iran War → `--subtitle "A War Nobody Could Win"`
-
-Write the subtitle AFTER finishing the report, not before — you need to know what the key finding is first.
-
-### Markdown formatting rules
-
-For correct PDF rendering:
-- First line: `# Title` (extracted for the cover page)
-- Optionally follow with a date line (extracted for cover metadata):
-  - English: `> April 2026`
-  - Chinese: `> 2026年4月`
-  - Just the date. No "Domain", no "Type" — those are internal classifications, not for the reader.
-- Use `##` for major chapters, `###` and `####` for subsections
-- Standard Markdown tables, blockquotes (`>`), and bold (`**text**`)
-- End with a **Sources** section listing all referenced URLs
-
-### Built-in PDF styling
-
-The script handles all typesetting automatically:
-- **Page**: A4, margins 25mm/20mm/20mm/20mm
-- **Cover**: Auto-generated with title (28pt dark blue), subtitle, decorative divider
-- **Table of Contents**: Auto-generated from H2/H3 headers, placed after cover page
-- **Colors**: H1=#1a5276 dark blue, H2=#1e8449 green, H3=#2e86c1 light blue, H4=#5b2c6f purple, body=#2c3e50
-- **Typography**: 10.5pt body, 1.75 line-height, justified, orphan/widow control. CJK-aware font stack (Noto Sans CJK, PingFang SC, Hiragino, etc.)
-- **Tables**: Full-width, dark blue header with white text, zebra striping
-- **Blockquotes**: Left blue border + light gray background
-- **Headers/Footers**: Page title in header, page numbers in footer (not on cover/TOC)
-
-### File naming
-
-Save the PDF as `[Subject Name]_Alexandria_Report.pdf` in the user's working directory or output folder.
-
----
-
-## Step 7: Pre-Flight Check & Deliver
-
-**Before delivering, run the Pre-Flight Checklist below.** Every item must pass. Fix failures before the user ever sees the report.
-
-After passing the checklist:
-
-1. **Copy to the user's accessible folder** — if a workspace/output directory exists, save the PDF there.
-2. **Present the file** — use `present_files` (if available) or provide a `computer://` link so the user can open the PDF directly.
-3. **Brief summary** — give a 2-3 sentence summary of the report's key finding or verdict. Do NOT write a long explanation of what each section contains — the user can read the report themselves. Just the headline takeaway and the link.
-
-Example delivery:
-> Here's your research report on [Subject]. The key finding: [one sentence verdict]. View your report
-
----
-
-## Pre-Flight Checklist (Enforcement Gate)
-
-This is not a suggestion list. This is a gate. **Do not deliver the PDF until every item passes.** Run through each check after generating the PDF. If any check fails, fix it before delivering.
-
-### Structure checks
-
-- [ ] **Every research dimension from the archetype is adequately covered.** The dimensions don't need their own chapters — they can be woven across multiple chapters — but each dimension's core questions must be answered somewhere in the report. Walk through the archetype's dimensions one by one and verify: "Could a reader answer these questions after reading my report?" If a dimension is missing or paper-thin, expand coverage now.
-- [ ] **Sources section exists** at the end with actual URLs and access dates.
-
-### Depth checks
-
-- [ ] **Word count ≥ 7,500 words** (English) or **≥ 5,000 字** (Chinese). Count it. If under threshold: identify which chapters are thin, dispatch additional research sub-agents to gather more material, then expand them. Do not pad with filler — find real additional depth (more specific examples, deeper analysis, additional sub-topics the first pass missed).
-- [ ] **Every major claim is backed by sourced evidence.** Scan for assertions without attribution. If you find unsourced claims, either source them from the research data or mark them as your analysis.
-
-### Quality checks
-
-- [ ] **Writer persona is consistent throughout.** Read the first and last chapters — do they sound like the same writer? If the voice drifts into generic AI prose midway, rewrite those passages in the persona's voice.
-- [ ] **Bold conclusions are present** — not just neutral fact-listing. The writer should build toward judgments.
-- [ ] **No AI tells survived the rewild pass.** Read the opening paragraph and three random paragraphs from the middle. If any sentence sounds like it came from a generic AI rather than the chosen writer, the rewild pass was insufficient — go back to Step 5 and redo it properly.
-- [ ] **Information gaps are honestly flagged**, nothing fabricated.
-
-### Recency checks (mandatory for Hot tier, recommended for Warm)
-
-- [ ] **Velocity tier was stated and propagated.** You picked Hot/Warm/Stable in Step 2.5 and every sub-agent prompt carried the recency filter. If you skipped this step, the report is invalid — go back.
-- [ ] **Source publication dates are recorded.** Every source in the Sources section has a publication date (or explicit "unknown"). Not just access date.
-- [ ] **For Hot topics: ≥70% of "current state" sources are within 10 days of the research date.** Count them. If under threshold, re-dispatch sub-agents with stricter recency filters and explicit date-range search terms. Do not settle for stale material.
-- [ ] **No source older than the stated cutoff is used for "current state" claims.** A 2025 article in a Hot-tier AI report is almost certainly describing an obsolete reality. Structural context is fine, present-tense claims are not.
-
-### Silent-exclusion test
-
-- [ ] **No unfamiliar name was dropped without verification.** Before shipping, ask yourself: "Did my sources repeatedly mention something I didn't include because I didn't recognize the name?" If yes, STOP. Run the Tier 1 verification search (see Source Trust Tiers in Step 3). Include it or escalate to the user — never silently omit.
-
-### Rendering checks
-
-- [ ] **PDF renders cleanly** with proper cover page, TOC, and formatting.
-- [ ] **PDF file size is reasonable** (>100 KB indicates actual content rendered).
-
-### If any check fails
-
-Do not ask the user. Fix it yourself:
-- **Missing dimension coverage** → Weave the missing material into existing chapters or add a new chapter with a subject-specific title. If data is insufficient, run a targeted search.
-- **Too short** → Identify the thinnest chapters. Dispatch a sub-agent to research deeper on those topics. Expand with real substance.
-- **AI tells found** → Rewrite the offending sentences in the writer persona's voice. Don't generically "clean up" — rewrite *as that writer*.
-- **Stale information** → Run a current news search and update the chapters covering recent developments.
-- **PDF rendering issue** → Check the markdown formatting and re-run the converter.
-
-After fixing, regenerate the PDF and run through the checklist again.
+- the research question is answered;
+- the evidence ledger and report agree;
+- deterministic checks pass;
+- the final PDF was reopened and visually inspected;
+- both deliverables exist at the reported paths.

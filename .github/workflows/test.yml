@@ -37,18 +37,24 @@ jobs:
       - name: Validate evidence ledger
         run: python scripts/validate_ledger.py tests/fixtures/evidence-ledger.json
 
+      - name: Build Rewild-gated PDF fixtures
+        run: python tests/build_gated_fixtures.py /tmp/alexandria-fixtures
+
       - name: Render and validate English PDF
         run: |
           python scripts/md_to_pdf.py \
-            tests/fixtures/sample-report.md \
+            /tmp/alexandria-fixtures/en/report.md \
             /tmp/alexandria-sample.pdf \
-            --lang en
+            --lang en \
+            --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json
           python scripts/validate_report.py \
-            tests/fixtures/sample-report.md \
+            /tmp/alexandria-fixtures/en/report.md \
             --ledger tests/fixtures/evidence-ledger.json \
+            --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
             --pdf /tmp/alexandria-sample.pdf \
             --expected-lang en \
-            --min-words 40 \
+            --min-words 7500 \
+            --max-words 15000 \
             --min-sources 1 \
             --min-sections 4 \
             --min-pages 3 \
@@ -58,14 +64,17 @@ jobs:
       - name: Render and validate Hong Kong PDF
         run: |
           python scripts/md_to_pdf.py \
-            tests/fixtures/sample-report.zh-HK.md \
+            /tmp/alexandria-fixtures/zh-HK/report.md \
             /tmp/alexandria-sample.zh-HK.pdf \
-            --lang zh-HK
+            --lang zh-HK \
+            --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json
           python scripts/validate_report.py \
-            tests/fixtures/sample-report.zh-HK.md \
+            /tmp/alexandria-fixtures/zh-HK/report.md \
+            --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json \
             --pdf /tmp/alexandria-sample.zh-HK.pdf \
             --expected-lang zh-HK \
-            --min-chars 100 \
+            --min-chars 5000 \
+            --max-chars 10000 \
             --min-sources 1 \
             --min-sections 4 \
             --min-pages 3 \
@@ -75,14 +84,17 @@ jobs:
       - name: Render and validate Simplified Chinese PDF
         run: |
           python scripts/md_to_pdf.py \
-            tests/fixtures/sample-report.zh-CN.md \
+            /tmp/alexandria-fixtures/zh-CN/report.md \
             /tmp/alexandria-sample.zh-CN.pdf \
-            --lang zh-CN
+            --lang zh-CN \
+            --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json
           python scripts/validate_report.py \
-            tests/fixtures/sample-report.zh-CN.md \
+            /tmp/alexandria-fixtures/zh-CN/report.md \
+            --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json \
             --pdf /tmp/alexandria-sample.zh-CN.pdf \
             --expected-lang zh-CN \
-            --min-chars 100 \
+            --min-chars 5000 \
+            --max-chars 10000 \
             --min-sources 1 \
             --min-sections 4 \
             --min-pages 3 \
@@ -95,4 +107,4 @@ jobs:
             /tmp/alexandria-sample.zh-CN.pdf \
             /tmp/alexandria-pages \
             --dpi 96
-          test "$(find /tmp/alexandria-pages -name 'page-*.png' | wc -l)" -eq 3
+          test "$(find /tmp/alexandria-pages -name 'page-*.png' | wc -l)" -ge 3

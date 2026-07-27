@@ -124,6 +124,13 @@ class RepositoryContractTests(unittest.TestCase):
                     (profile_root / "scripts" / "naturalness-check.py").is_file()
                 )
 
+    def test_ci_pdf_samples_pass_through_the_rewild_gate(self):
+        workflow = (
+            ROOT / ".github" / "workflows" / "test.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("tests/build_gated_fixtures.py", workflow)
+        self.assertGreaterEqual(workflow.count("--rewild-receipt"), 6)
+
     def test_evidence_schema_declares_real_json_schema(self):
         schema = json.loads(
             (ROOT / "references" / "evidence-ledger.schema.json").read_text(

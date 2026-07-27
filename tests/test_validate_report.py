@@ -120,6 +120,41 @@ payload payload payload payload payload payload payload payload payload payload
         )
         self.assertFalse(any("expected zh-CN" in error for error in errors))
 
+        traditional = (
+            "# 报告\n\n## 分析\n\n"
+            + "經濟風險評估趨勢監測維護規劃環境財務審計價值運營競爭優勢決策治理"
+            * 20
+            + "\n\n## 来源\n\n[资料](https://example.com)"
+        )
+        errors = validate_report.validate_markdown(
+            traditional,
+            min_sources=1,
+            min_sections=2,
+            expected_lang="zh-CN",
+        )
+        self.assertTrue(
+            any("Traditional" in error for error in errors),
+            errors,
+        )
+
+        simplified_with_quote = (
+            "# 报告\n\n## 分析\n\n"
+            + "市场研究显示数据支持结论风险可控方案有效。" * 250
+            + "\n\n> 「香港證券及期貨事務監察委員會指出，"
+            "該機構將繼續監察市場風險，並維護投資者權益。」"
+            "\n\n## 来源\n\n[资料](https://example.com)"
+        )
+        errors = validate_report.validate_markdown(
+            simplified_with_quote,
+            min_sources=1,
+            min_sections=2,
+            expected_lang="zh-CN",
+        )
+        self.assertFalse(
+            any("Traditional" in error for error in errors),
+            errors,
+        )
+
     def test_rejects_empty_or_structurally_incomplete_report(self):
         errors = validate_report.validate_markdown(
             "", min_words=1, min_sources=1, min_sections=1
@@ -155,6 +190,16 @@ Words after the sources section.
             path = Path(tmp) / "bad.md"
             path.write_text("", encoding="utf-8")
             self.assertEqual(1, validate_report.main([str(path), "--min-words", "1"]))
+
+    def test_cli_requires_rewild_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.md"
+            path.write_text(
+                "# Report\n\n## Finding\n\nEvidence.\n\n"
+                "## Sources\n\n[Source](https://example.com)",
+                encoding="utf-8",
+            )
+            self.assertEqual(1, validate_report.main([str(path)]))
 
     def test_pdf_validation_counts_clickable_links(self):
         class Annotation:

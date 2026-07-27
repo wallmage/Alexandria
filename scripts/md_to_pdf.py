@@ -3,13 +3,15 @@
 Alexandria Report: Markdown -> consulting-grade PDF (WeasyPrint)
 
 Usage:
-    python3 md_to_pdf.py input.md output.pdf --template executive
+    python3 md_to_pdf.py input.md output.pdf --template executive \
+        --rewild-receipt receipt.json
 
 Dependencies: install from requirements.txt
 """
 
 import argparse
 import html
+import json
 import re
 import sys
 import tempfile
@@ -30,6 +32,7 @@ from pdf_templates import (  # noqa: E402
     cover_art_html,
     select_template,
 )
+from validate_report import validate_markdown, validate_rewild_receipt  # noqa: E402
 
 
 LANG_CHOICES = ("auto", "en", "zh-CN", "zh-HK")
@@ -698,6 +701,53 @@ def validate_cover_image(input_path, cover_image):
     return candidate.relative_to(asset_root).as_posix()
 
 
+def validate_rewild_for_render(input_path, receipt_path, lang):
+    """Reject rendering unless the exact Markdown passed the Rewild gate."""
+    if not receipt_path:
+        raise ValueError(
+            "A Rewild gate receipt is required. Run scripts/rewild_gate.py first."
+        )
+    receipt_path = Path(receipt_path)
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Rewild receipt could not be read: {exc}") from exc
+    receipt_lang = receipt.get("report_lang")
+    expected_lang = receipt_lang if lang == "auto" else lang
+    errors = validate_rewild_receipt(
+        input_path,
+        receipt,
+        expected_lang=expected_lang,
+    )
+    text = input_path.read_text(encoding="utf-8")
+    if expected_lang == "en":
+        errors.extend(
+            validate_markdown(
+                text,
+                min_words=7500,
+                max_words=15000,
+                min_sources=1,
+                min_sections=3,
+                expected_lang="en",
+            )
+        )
+    elif expected_lang in {"zh-CN", "zh-HK"}:
+        errors.extend(
+            validate_markdown(
+                text,
+                min_chars=5000,
+                max_chars=10000,
+                min_sources=1,
+                min_sections=3,
+                expected_lang=expected_lang,
+            )
+        )
+    else:
+        errors.append("Rewild receipt has no supported report language.")
+    if errors:
+        raise ValueError("Rewild production gate failed: " + " ".join(errors))
+
+
 def render_pdf(
     input_path,
     output_path,
@@ -711,11 +761,13 @@ def render_pdf(
     confidential=False,
     report_date=None,
     cover_image=None,
+    rewild_receipt=None,
     keep_html=False,
     force=False,
 ):
     """Render one Markdown file and return the output PDF path."""
     input_path, output_path = validate_paths(input_path, output_path, force=force)
+    validate_rewild_for_render(input_path, rewild_receipt, lang)
     safe_cover_image = validate_cover_image(input_path, cover_image)
     md_text = input_path.read_text(encoding="utf-8")
     rendered_html = md_to_html(
@@ -815,6 +867,11 @@ def main():
         help="Optional local raster image inside the report directory",
     )
     parser.add_argument(
+        "--rewild-receipt",
+        required=True,
+        help="passing Rewild receipt bound to the exact input Markdown",
+    )
+    parser.add_argument(
         "--keep-html",
         action="store_true",
         help="Keep the intermediate HTML file beside the PDF",
@@ -839,6 +896,7 @@ def main():
             confidential=args.confidential,
             report_date=args.report_date,
             cover_image=args.cover_image,
+            rewild_receipt=args.rewild_receipt,
             keep_html=args.keep_html,
             force=args.force,
         )

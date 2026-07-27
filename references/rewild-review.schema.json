@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wallmage/Alexandria/references/rewild-review.schema.json",
+  "title": "Alexandria Rewild blind-review note",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "report_sha256",
+    "source_sha256",
+    "report_lang",
+    "profile",
+    "fidelity_checks",
+    "findings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "const": "completed"
+    },
+    "report_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "report_lang": {
+      "enum": ["en", "zh-CN", "zh-HK"]
+    },
+    "profile": {
+      "enum": ["rewild", "rewild-zh", "rewild-hk"]
+    },
+    "fidelity_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facts_and_figures",
+        "attribution_and_uncertainty",
+        "direction_and_negation",
+        "causality"
+      ],
+      "properties": {
+        "facts_and_figures": { "const": true },
+        "attribution_and_uncertainty": { "const": true },
+        "direction_and_negation": { "const": true },
+        "causality": { "const": true }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["category", "finding", "disposition", "reason"],
+        "properties": {
+          "category": {
+            "enum": ["style", "region", "fidelity"]
+          },
+          "finding": {
+            "type": "string",
+            "minLength": 1
+          },
+          "disposition": {
+            "enum": ["resolved", "rejected"]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 10
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "category": {
+                  "enum": ["region", "fidelity"]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "disposition": {
+                  "const": "resolved"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

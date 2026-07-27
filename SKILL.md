@@ -18,7 +18,7 @@ An Alexandria report must:
 3. Preserve a traceable path from consequential claims to sources.
 4. Prefer evidence quality and coverage over source quotas; meet the hard length range through depth, not filler.
 5. State uncertainty, conflicts, and evidence gaps plainly.
-6. Read like a thoughtful human editor wrote it.
+6. Pass the bundled, language-specific Rewild gate so it reads like a thoughtful human editor wrote it.
 7. Survive structural, PDF, and visual checks before delivery.
 
 Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar names and spellings before building the report around them.
@@ -156,21 +156,53 @@ Requirements:
 
 Do not expose internal prompts, tool names, agent notes, claim IDs, validation messages, or workflow scaffolding in the final report.
 
-## 6. Evidence-safe edit
+## 6. Rewild hard gate
 
-Edit for clarity and natural rhythm without changing the evidentiary meaning.
+Every report must pass this gate, whether or not the user asked for humanization. Alexandria's mandatory use overrides only the bundled profiles' standalone trigger condition; their preservation, genre, regional, review, fidelity, and checker rules still apply in full.
 
-Lock these elements during the edit:
+Choose the bundled profile from `REPORT_LANG`, then read its `SKILL.md`. Open its pattern catalog as directed during diagnosis:
 
-- numbers, dates, names, quotations, and units;
+| `REPORT_LANG` | Profile | Checker language |
+|---|---|---|
+| `en` | `references/rewild/rewild/SKILL.md` | `en` |
+| `zh-CN` | `references/rewild/rewild-zh/SKILL.md` | `zh` |
+| `zh-HK` | `references/rewild/rewild-hk/SKILL.md` | `hk` |
+
+Immediately before each Rewild pass, preserve the current draft as `REPORT_PRE_REWILD_MD`. Mark non-rewrite zones before editing:
+
+- numbers, dates, names, quotations, units, and official titles;
 - citations and their claim placement;
-- uncertainty and attribution;
-- distinctions between fact and analysis;
+- uncertainty, attribution, severity, and causal limits;
+- distinctions between verified fact, reported claim, estimate, and analysis;
 - the central conclusion unless new evidence requires a change.
 
-When a separate reviewer is available, give it the draft and the editorial checklist. Ask for a patch or a list of changed passages, not an untraceable replacement. The primary agent reviews every material change against the evidence ledger.
+Run the selected profile over the complete report. Inspect first. Leave clean passages alone, edit isolated tells in place, and re-say dense passages only where the profile permits it. Match the report genre: professional research must remain professional, not become chatty. For `zh-HK`, regional identity and Hong Kong written-Chinese register are hard requirements.
 
-If the user explicitly asks to remove AI-like writing, use the dedicated `rewild` or `rewild-zh` skill when available. Alexandria's default edit is evidence-safe copyediting, not unrestricted rewriting.
+Give a blind reviewer only the edited report and the selected profile's quick-reference checklist, not the pre-edit draft, user request, evidence ledger, or drafting notes. The reviewer flags problems and does not rewrite. If a separate reviewer is unavailable, perform the profile's fresh-eyes fallback in a context-isolated pass; never skip the second pass. The primary agent then applies justified fixes, rejects style changes that would create a new formula, and checks every material edit against the pre-edit draft and evidence ledger. Record the blind findings, dispositions, and primary fidelity verification in `REWILD_REVIEW_NOTE` using `references/rewild-review.schema.json`. Bind the note to the exact report, pre-Rewild source, language, and bundled profile with their required hashes and identifiers; a stale note is invalid. The four fidelity checks must all be true. Region and fidelity findings must be resolved; they cannot be rejected.
+
+Run the bundled gate with both report versions. Set `ALEXANDRIA_REWILD_PYTHON` to the Step 7 environment's Python when it already exists; otherwise use the available Python 3 executable. The gate chooses the mapped checker; combines the mandatory report-bound fidelity review with deterministic backstops for AI vocabulary, fidelity, region, Hong Kong register, direction, negation, and causal-association defects; requires an exact written reason for each retainable statistical style warning; and writes a receipt bound to the hashes of the report, source, checker, and review note. The bound review is authoritative for semantic equivalence; pattern checks add fail-closed coverage for common rewrites but do not replace that review.
+
+```bash
+ALEXANDRIA_REWILD_PYTHON="${ALEXANDRIA_PYTHON:-python3}"
+"$ALEXANDRIA_REWILD_PYTHON" \
+  "$SKILL_ROOT/scripts/rewild_gate.py" "$REPORT_MD" \
+  --source "$REPORT_PRE_REWILD_MD" --lang "$REPORT_LANG" \
+  --review-note "$REWILD_REVIEW_NOTE" --receipt "$REWILD_RECEIPT"
+```
+
+The checker has no third-party dependencies and may run under `python3` before the Step 7 environment exists. Pointing `ALEXANDRIA_REWILD_PYTHON` at `ALEXANDRIA_PYTHON` keeps the commands consistent when that environment has already been created. If a retainable statistical style warning is intentionally kept, supply a JSON file with `style_waivers` entries containing the checker's exact `section`, exact `message`, and a specific `reason`, then add `--style-waivers "$REWILD_STYLE_WAIVERS"`. AI-vocabulary, fidelity, region, Hong Kong register, and semantic-association warnings cannot be waived.
+
+The gate passes only when:
+
+- all fidelity warnings are resolved;
+- for `zh-HK`, all region and conversion warnings are resolved;
+- all blind-review findings are fixed or explicitly rejected because the change would reduce fidelity, genre fit, or naturalness;
+- every remaining style warning has a concrete written justification in the internal gate note;
+- the edited report still meets the hard length range through substantive depth.
+
+If Rewild takes the report below the minimum length, deepen the research, analysis, counterevidence, or implications, then repeat this gate. Never restore filler or dilute the edit to hit the count. Do not proceed to Step 7 until the Rewild hard gate passes.
+
+Any change to report text after the receipt is written invalidates it. Return to this step, refresh `REPORT_PRE_REWILD_MD`, review the changed report, and issue a new receipt.
 
 ## 7. Validate the Markdown
 
@@ -201,12 +233,13 @@ Then run:
 
 # English
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
-  --ledger "$LEDGER_JSON" --expected-lang en \
+  --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" --expected-lang en \
   --min-words 7500 --max-words 15000 --min-sections 3 --min-sources 1
 
 # Simplified or Traditional Chinese
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
-  --ledger "$LEDGER_JSON" --expected-lang zh-CN \
+  --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --expected-lang zh-CN \
   --min-chars 5000 --max-chars 10000 --min-sections 3 --min-sources 1
 ```
 
@@ -227,13 +260,18 @@ Read `references/pdf-production.md`. Use the supplied scripts and pinned depende
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
   "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
-  --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY"
+  --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY" \
+  --rewild-receipt "$REWILD_RECEIPT"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
-  "$REPORT_MD" --ledger "$LEDGER_JSON" --pdf "$REPORT_PDF" \
+  "$REPORT_MD" --ledger "$LEDGER_JSON" \
+  --rewild-receipt "$REWILD_RECEIPT" --pdf "$REPORT_PDF" \
+  --expected-lang "$REPORT_LANG" \
   --min-pages 10 --min-text-chars 5000 --min-links 1
 ```
 
 Reuse the Step 7 environment. The PDF converter refuses to replace an existing output unless `--force` is explicitly supplied; prefer a versioned filename to overwriting a prior report.
+
+Repeat the language-specific hard length flags from Step 7 in the PDF validation command: `--min-words 7500 --max-words 15000` for English, or `--min-chars 5000 --max-chars 10000` for either Chinese variant. The converter independently rejects a missing, stale, wrong-language, or short-report receipt before loading the render engine.
 
 Add `--client "$CLIENT_NAME"` only when the user supplied a non-empty client. Add `--confidential` only when the user turned confidentiality On. Add `--cover-image "$COVER_IMAGE"` only for a verified local raster image inside the report directory.
 

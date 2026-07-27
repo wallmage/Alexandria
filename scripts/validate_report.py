@@ -2,9 +2,13 @@
 """Deterministic structural checks for Alexandria Markdown and PDF reports."""
 
 import argparse
+import hashlib
 import json
 import re
 import sys
+import tempfile
+from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -17,6 +21,15 @@ SOURCE_HEADINGS = {
     "參考資料",
 }
 LANG_CHOICES = ("en", "zh-CN", "zh-HK")
+ROOT = Path(__file__).resolve().parents[1]
+S2T_CHARACTER_MAP = (
+    ROOT / "references" / "rewild" / "opencc" / "STCharacters.txt"
+)
+REWILD_PROFILE_DIRS = {
+    "en": "rewild",
+    "zh-CN": "rewild-zh",
+    "zh-HK": "rewild-hk",
+}
 TRADITIONAL_MARKERS = set("這個為與報發後裡麼還說對時國學術據點體現關於會開")
 SIMPLIFIED_MARKERS = set("这个为与报发后里么还说对时国学术据点体现关于会开")
 
@@ -152,6 +165,99 @@ def detect_language(text):
     return "zh-HK" if traditional > simplified else "zh-CN"
 
 
+@lru_cache(maxsize=1)
+def _traditional_only_characters():
+    """Load Traditional-only forms from Alexandria's vendored OpenCC map."""
+    simplified = set()
+    traditional = set()
+    for line in S2T_CHARACTER_MAP.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        source, targets = line.split("\t", 1)
+        simplified.update(source)
+        for target in targets.split():
+            traditional.update(target)
+    return frozenset(traditional - simplified)
+
+
+def _protected_script_hits(text, sections, traditional_only):
+    """Count unique Traditional hits inside bounded verbatim candidates."""
+    source_starts = [
+        start
+        for heading, start in sections
+        if heading.casefold() in SOURCE_HEADINGS
+    ]
+    if source_starts:
+        text = text[: min(source_starts)]
+    text = _mask_fenced_code(text)
+    protected = bytearray(len(text))
+    callout_ranges = []
+
+    def mark(start, end):
+        protected[start:end] = b"\x01" * (end - start)
+
+    for block in re.finditer(
+        r"(?m)(?:^\s{0,3}>[^\n]*(?:\n|$))+",
+        text,
+    ):
+        lines = [
+            re.sub(r"^\s{0,3}>\s?", "", line)
+            for line in block.group(0).splitlines()
+        ]
+        first = next((line.strip() for line in lines if line.strip()), "")
+        if re.fullmatch(r"\[!(?:METRIC|INSIGHT|TAKEAWAY)\]", first):
+            callout_ranges.append(block.span())
+            continue
+        mark(*block.span())
+    for match in re.finditer(
+        r"「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’",
+        text,
+        flags=re.DOTALL,
+    ):
+        mark(*match.span())
+    for match in re.finditer(r"!?\[([^\]]*)\]\([^)]+\)", text):
+        mark(*match.span(1))
+    for start, end in callout_ranges:
+        protected[start:end] = b"\x00" * (end - start)
+    return sum(
+        bool(protected[index]) and char in traditional_only
+        for index, char in enumerate(text)
+    )
+
+
+def simplified_script_errors(text, *, sections=None):
+    """Reject materially Traditional or mixed script in a zh-CN report body."""
+    try:
+        traditional_only = _traditional_only_characters()
+    except (OSError, ValueError) as exc:
+        return [f"Simplified-Chinese script map could not be loaded: {exc}"]
+    protected_hits = 0
+    if sections is not None:
+        protected_hits = _protected_script_hits(
+            text,
+            sections,
+            traditional_only,
+        )
+        text = _report_prose(text, sections)
+    han_count = len(re.findall(r"[\u3400-\u9fff]", text))
+    hits = Counter(char for char in text if char in traditional_only)
+    total_hits = sum(hits.values())
+    protected_hits = min(total_hits, protected_hits)
+    protected_budget = max(100, han_count // 5)
+    hit_count = total_hits - min(protected_hits, protected_budget)
+    threshold = max(8, (han_count + 99) // 100)
+    if hit_count < threshold:
+        return []
+    examples = "、".join(
+        char for char, _ in hits.most_common(12)
+    )
+    return [
+        "Report marked zh-CN contains "
+        f"{hit_count} Traditional-only character(s) "
+        f"(examples: {examples}); use Simplified Chinese consistently."
+    ]
+
+
 def _report_prose(text, sections):
     """Return report body prose without Sources, URLs, markup, or code."""
     source_starts = [
@@ -201,6 +307,8 @@ def validate_markdown(
             errors.append(
                 f"Report language is {detected}; expected {expected_lang}."
             )
+        if expected_lang == "zh-CN":
+            errors.extend(simplified_script_errors(text, sections=sections))
     words = re.findall(r"\b[\w'-]+\b", prose, re.UNICODE)
     if len(words) < min_words:
         errors.append(f"Report has {len(words)} words; minimum is {min_words}.")
@@ -392,10 +500,125 @@ def validate_pdf(path, *, min_pages=1, min_text_chars=1, min_links=0):
     return errors
 
 
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
+    """Verify that a passing Rewild receipt belongs to this exact report."""
+    report_path = Path(report_path).resolve()
+    if not isinstance(receipt, dict):
+        return ["Rewild receipt root must be an object."]
+    errors = []
+    if receipt.get("schema_version") != 1:
+        errors.append("Rewild receipt has an unsupported schema version.")
+    if receipt.get("status") != "passed":
+        errors.append("Rewild receipt does not record a passing gate.")
+    if receipt.get("report_path") != str(report_path):
+        errors.append("Rewild receipt belongs to a different report path.")
+    if expected_lang and receipt.get("report_lang") != expected_lang:
+        errors.append(
+            "Rewild receipt language does not match the expected report language."
+        )
+    try:
+        report_hash = _file_sha256(report_path)
+    except OSError as exc:
+        errors.append(f"Report could not be hashed for Rewild validation: {exc}")
+    else:
+        if receipt.get("report_sha256") != report_hash:
+            errors.append(
+                "Rewild receipt does not match the current report; rerun the gate."
+            )
+    receipt_lang = receipt.get("report_lang")
+    profile = REWILD_PROFILE_DIRS.get(receipt_lang)
+    if profile is None:
+        errors.append("Rewild receipt has an unsupported report language.")
+    else:
+        canonical_checker = (
+            ROOT
+            / "references"
+            / "rewild"
+            / profile
+            / "scripts"
+            / "naturalness-check.py"
+        ).resolve()
+        try:
+            recorded_checker = Path(receipt.get("checker_path", "")).resolve()
+        except (OSError, TypeError):
+            recorded_checker = None
+        if recorded_checker != canonical_checker:
+            errors.append(
+                "Rewild receipt does not use Alexandria's canonical checker."
+            )
+        elif receipt.get("checker_sha256") != _file_sha256(canonical_checker):
+            errors.append("Alexandria's bundled Rewild checker has changed.")
+    if receipt.get("review_status") != "completed":
+        errors.append("Rewild receipt does not record a completed blind review.")
+    if not isinstance(receipt.get("style_waivers"), list):
+        errors.append("Rewild receipt style_waivers must be an array.")
+    for path_key, hash_key, label in (
+        ("source_path", "source_sha256", "pre-Rewild source"),
+        ("checker_path", "checker_sha256", "Rewild checker"),
+        ("review_note_path", "review_note_sha256", "blind-review note"),
+    ):
+        value = receipt.get(path_key)
+        if not value:
+            errors.append(f"Rewild receipt is missing the {label} path.")
+            continue
+        path = Path(value)
+        try:
+            digest = _file_sha256(path)
+        except OSError as exc:
+            errors.append(f"Rewild receipt {label} could not be verified: {exc}")
+            continue
+        if receipt.get(hash_key) != digest:
+            errors.append(f"Rewild receipt {label} has changed since the gate.")
+    if not errors:
+        try:
+            from .rewild_gate import run_gate
+        except ImportError:
+            from rewild_gate import run_gate
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            regenerated = work / "receipt.json"
+            waiver_path = None
+            style_waivers = receipt.get("style_waivers", [])
+            if style_waivers:
+                waiver_path = work / "style-waivers.json"
+                waiver_path.write_text(
+                    json.dumps(
+                        {"style_waivers": style_waivers},
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+            rerun_errors = run_gate(
+                report_path,
+                Path(receipt["source_path"]),
+                report_lang=receipt_lang,
+                review_note_path=Path(receipt["review_note_path"]),
+                receipt_path=regenerated,
+                waiver_path=waiver_path,
+            )
+            errors.extend(
+                f"Rewild gate recheck failed: {error}" for error in rerun_errors
+            )
+    return errors
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description="Validate an Alexandria report")
     parser.add_argument("markdown", help="Markdown report to validate")
     parser.add_argument("--ledger", help="Evidence ledger JSON to cross-check")
+    parser.add_argument(
+        "--rewild-receipt",
+        help="required Rewild gate receipt bound to this exact Markdown file",
+    )
     parser.add_argument("--pdf", help="Rendered PDF to reopen and validate")
     parser.add_argument("--min-words", type=int, default=0)
     parser.add_argument("--max-words", type=int, default=0)
@@ -436,6 +659,25 @@ def main(argv=None):
             errors.append(f"Evidence ledger could not be read: {exc}")
         else:
             errors.extend(validate_report_against_ledger(text, ledger))
+    if not args.rewild_receipt:
+        errors.append(
+            "A Rewild gate receipt is required. Run scripts/rewild_gate.py first."
+        )
+    else:
+        try:
+            receipt = json.loads(
+                Path(args.rewild_receipt).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"Rewild receipt could not be read: {exc}")
+        else:
+            errors.extend(
+                validate_rewild_receipt(
+                    markdown_path,
+                    receipt,
+                    expected_lang=args.expected_lang,
+                )
+            )
     if args.pdf:
         errors.extend(
             validate_pdf(

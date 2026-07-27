@@ -98,13 +98,22 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("--confidential", result.stdout)
         self.assertIn("--date", result.stdout)
         self.assertIn("--cover-image", result.stdout)
+        self.assertIn("--rewild-receipt", result.stdout)
 
     def test_rejects_non_pdf_output_before_loading_render_dependencies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "report.md"
             source.write_text("# Report\n", encoding="utf-8")
             result = subprocess.run(
-                [sys.executable, "-S", str(SCRIPT), str(source), str(source.with_suffix(".txt"))],
+                [
+                    sys.executable,
+                    "-S",
+                    str(SCRIPT),
+                    str(source),
+                    str(source.with_suffix(".txt")),
+                    "--rewild-receipt",
+                    str(Path(temp_dir) / "receipt.json"),
+                ],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -124,6 +133,17 @@ class ConverterUnitTests(unittest.TestCase):
             self.converter, "load_markdown", return_value=fake_markdown_module()
         ):
             return self.converter.md_to_html(source, **kwargs)
+
+    def render_pdf(self, source, output, **kwargs):
+        with mock.patch.object(
+            self.converter, "validate_rewild_for_render", return_value=None
+        ):
+            return self.converter.render_pdf(
+                source,
+                output,
+                rewild_receipt="receipt.json",
+                **kwargs,
+            )
 
     def test_detects_english_simplified_and_traditional_chinese(self):
         self.assertEqual(self.converter.detect_language("A report about markets."), "en")
@@ -380,7 +400,7 @@ class ConverterUnitTests(unittest.TestCase):
                 mock.patch.object(self.converter, "md_to_html", return_value="<html></html>"),
                 mock.patch.object(self.converter, "load_weasyprint_html", return_value=FakeHTML),
             ):
-                self.converter.render_pdf(source, output)
+                self.render_pdf(source, output)
 
             self.assertEqual(calls["base_url"], source.parent.resolve())
             self.assertTrue(output.exists())
@@ -408,7 +428,7 @@ class ConverterUnitTests(unittest.TestCase):
                 ),
             ):
                 with self.assertRaises(RuntimeError):
-                    self.converter.render_pdf(source, output, force=True)
+                    self.render_pdf(source, output, force=True)
 
             self.assertEqual(b"existing", output.read_bytes())
 
@@ -421,9 +441,19 @@ class ConverterUnitTests(unittest.TestCase):
             output.write_bytes(b"existing")
 
             with self.assertRaisesRegex(ValueError, "already exists"):
-                self.converter.render_pdf(source, output)
+                self.render_pdf(source, output)
 
             self.assertEqual(b"existing", output.read_bytes())
+
+    def test_render_requires_rewild_receipt_before_loading_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            output = temp / "report.pdf"
+            source.write_text("# Report\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "Rewild gate receipt"):
+                self.converter.render_pdf(source, output)
 
     def test_keep_html_refuses_to_overwrite_existing_sidecar(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -438,7 +468,7 @@ class ConverterUnitTests(unittest.TestCase):
                 self.converter, "md_to_html", return_value="<html></html>"
             ):
                 with self.assertRaisesRegex(ValueError, "already exists"):
-                    self.converter.render_pdf(source, output, keep_html=True)
+                    self.render_pdf(source, output, keep_html=True)
 
             self.assertEqual("mine", sidecar.read_text(encoding="utf-8"))
 

@@ -98,6 +98,32 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("Default: Off", templates)
         self.assertIn("if an answer arrives after a draft PDF was rendered", templates)
 
+    def test_rewild_is_a_bundled_hard_gate_for_every_report_language(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        expected_profiles = {
+            "en": ROOT / "references" / "rewild" / "rewild",
+            "zh-CN": ROOT / "references" / "rewild" / "rewild-zh",
+            "zh-HK": ROOT / "references" / "rewild" / "rewild-hk",
+        }
+
+        self.assertIn("Rewild hard gate", skill)
+        self.assertIn("Every report must pass", skill)
+        self.assertIn("Do not proceed to Step 7", skill)
+        self.assertIn("scripts/rewild_gate.py", skill)
+        self.assertIn("--rewild-receipt", skill)
+        self.assertNotIn(
+            "If the user explicitly asks to remove AI-like writing", skill
+        )
+        for report_lang, profile_root in expected_profiles.items():
+            with self.subTest(report_lang=report_lang):
+                self.assertTrue((profile_root / "SKILL.md").is_file())
+                self.assertTrue(
+                    (profile_root / "references" / "patterns.md").is_file()
+                )
+                self.assertTrue(
+                    (profile_root / "scripts" / "naturalness-check.py").is_file()
+                )
+
     def test_evidence_schema_declares_real_json_schema(self):
         schema = json.loads(
             (ROOT / "references" / "evidence-ledger.schema.json").read_text(

@@ -35,7 +35,8 @@ Read `references/pdf-templates.md` and resolve the intake values before renderin
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
   "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
-  --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY"
+  --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY" \
+  --rewild-receipt "$REWILD_RECEIPT"
 ```
 
 Use `--lang en`, `--lang zh-CN`, or `--lang zh-HK` when automatic script detection is ambiguous. Use `--keep-html` only when debugging layout. The converter refuses to replace an existing PDF; prefer a versioned filename, or pass `--force` only when replacement is intentional.
@@ -58,7 +59,8 @@ Run the ledger validator first, then cross-check the report and PDF:
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_ledger.py" "$LEDGER_JSON"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
-  "$REPORT_MD" --ledger "$LEDGER_JSON" --pdf "$REPORT_PDF" \
+  "$REPORT_MD" --ledger "$LEDGER_JSON" \
+  --rewild-receipt "$REWILD_RECEIPT" --pdf "$REPORT_PDF" \
   --expected-lang "$REPORT_LANG" \
   --min-sources 1 --min-sections 3 \
   --min-pages 10 --min-text-chars 5000 --min-links 1

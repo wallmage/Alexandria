@@ -30,12 +30,24 @@ On Debian/Ubuntu CI, install `fonts-noto-cjk`. A PDF that extracts the right Uni
 
 ## Render
 
+Read `references/pdf-templates.md` and resolve the intake values before rendering. Set `REPORT_TEMPLATE` to `executive`, `spectrum`, `atlas`, or `horizon`; use `auto` only when deterministic topic adaptation is intended.
+
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
-  "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG"
+  "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
+  --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY"
 ```
 
 Use `--lang en`, `--lang zh-CN`, or `--lang zh-HK` when automatic script detection is ambiguous. Use `--keep-html` only when debugging layout. The converter refuses to replace an existing PDF; prefer a versioned filename, or pass `--force` only when replacement is intentional.
+
+Optional metadata and imagery:
+
+- `--client "$CLIENT_NAME"`: show a client field only when the value is non-empty.
+- `--confidential`: add “Strictly Confidential” and controlled-copy footer wording. Omit the flag when confidentiality is Off.
+- `--date "$REPORT_DATE"`: override the Markdown metadata date and today's fallback.
+- `--cover-image "$COVER_IMAGE"`: use a local raster image inside the report directory, especially with Atlas or Horizon.
+
+The contents page includes only the report structure: section titles, short section descriptions, and page numbers. Do not add document-control or engagement panels.
 
 Relative raster-image paths resolve from the Markdown file's directory. Remote images, SVG, active HTML, local-file traversal, and network resource fetches are blocked.
 

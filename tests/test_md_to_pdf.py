@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import subprocess
 import sys
 import tempfile
@@ -9,6 +10,66 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "md_to_pdf.py"
+
+
+def fake_markdown_module():
+    """Small deterministic Markdown boundary double for renderer unit tests."""
+
+    def inline(value):
+        return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", value)
+
+    class MinimalMarkdown:
+        def __init__(self, **kwargs):
+            pass
+
+        def convert(self, source):
+            output = []
+            paragraph = []
+            quote = []
+
+            def flush_paragraph():
+                if paragraph:
+                    output.append(f"<p>{inline(' '.join(paragraph))}</p>")
+                    paragraph.clear()
+
+            def flush_quote():
+                if quote:
+                    output.append(
+                        "<blockquote><p>"
+                        + "\n".join(inline(line) for line in quote)
+                        + "</p></blockquote>"
+                    )
+                    quote.clear()
+
+            for line in [*source.splitlines(), ""]:
+                stripped = line.strip()
+                if stripped.startswith(">"):
+                    flush_paragraph()
+                    quote.append(stripped.lstrip(">").strip())
+                elif not stripped:
+                    flush_paragraph()
+                    flush_quote()
+                elif stripped.startswith("### "):
+                    flush_paragraph()
+                    flush_quote()
+                    text = stripped[4:]
+                    output.append(f'<h3 id="{text.casefold().replace(" ", "-")}">{text}</h3>')
+                elif stripped.startswith("## "):
+                    flush_paragraph()
+                    flush_quote()
+                    text = stripped[3:]
+                    output.append(f'<h2 id="{text.casefold().replace(" ", "-")}">{text}</h2>')
+                elif stripped.startswith("# "):
+                    flush_paragraph()
+                    flush_quote()
+                    text = stripped[2:]
+                    output.append(f'<h1 id="{text.casefold().replace(" ", "-")}">{text}</h1>')
+                else:
+                    flush_quote()
+                    paragraph.append(stripped)
+            return "".join(output)
+
+    return mock.Mock(Markdown=MinimalMarkdown)
 
 
 def load_converter():
@@ -31,6 +92,12 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--subtitle", result.stdout)
         self.assertIn("--lang", result.stdout)
+        self.assertIn("--template", result.stdout)
+        self.assertIn("--client", result.stdout)
+        self.assertIn("--prepared-by", result.stdout)
+        self.assertIn("--confidential", result.stdout)
+        self.assertIn("--date", result.stdout)
+        self.assertIn("--cover-image", result.stdout)
 
     def test_rejects_non_pdf_output_before_loading_render_dependencies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -52,10 +119,167 @@ class ConverterUnitTests(unittest.TestCase):
     def setUpClass(cls):
         cls.converter = load_converter()
 
+    def render_html(self, source, **kwargs):
+        with mock.patch.object(
+            self.converter, "load_markdown", return_value=fake_markdown_module()
+        ):
+            return self.converter.md_to_html(source, **kwargs)
+
     def test_detects_english_simplified_and_traditional_chinese(self):
         self.assertEqual(self.converter.detect_language("A report about markets."), "en")
         self.assertEqual(self.converter.detect_language("这是一份关于市场的研究报告。"), "zh-CN")
         self.assertEqual(self.converter.detect_language("這是一份關於市場的研究報告。"), "zh-HK")
+
+    def test_explicit_template_wins_and_auto_selection_adapts_to_subject(self):
+        cases = (
+            ("A strategy review for a global bank", "auto", "executive"),
+            ("How AI software and robotics will reshape product design", "auto", "spectrum"),
+            ("Artificial intelligence in medicine", "auto", "spectrum"),
+            ("A cultural history of river landscapes and field ecology", "auto", "atlas"),
+            ("Climate-ready infrastructure, energy resilience, and supply chains", "auto", "horizon"),
+            ("A cultural history of river landscapes", "spectrum", "spectrum"),
+            ("An unfamiliar cross-disciplinary question", "auto", "executive"),
+        )
+
+        for subject, requested, expected in cases:
+            with self.subTest(subject=subject, requested=requested):
+                self.assertEqual(
+                    self.converter.select_template(subject, requested), expected
+                )
+
+    def test_each_template_has_a_distinct_cover_and_visual_system(self):
+        for template in ("executive", "spectrum", "atlas", "horizon"):
+            rendered = self.render_html(
+                "# Research title\n\n## Finding\n\nEvidence and implications.",
+                template=template,
+                report_date="28 July 2026",
+            )
+            with self.subTest(template=template):
+                self.assertIn(f'class="report template-{template}"', rendered)
+                self.assertIn(f'class="cover cover-{template} ', rendered)
+                self.assertIn(f'data-template="{template}"', rendered)
+
+        executive = self.render_html("# T\n\n## F\n\nBody.", template="executive")
+        spectrum = self.render_html("# T\n\n## F\n\nBody.", template="spectrum")
+        atlas = self.render_html("# T\n\n## F\n\nBody.", template="atlas")
+        horizon = self.render_html("# T\n\n## F\n\nBody.", template="horizon")
+        self.assertIn("#123047", executive)
+        self.assertIn("#4f46e5", spectrum)
+        self.assertIn("#173d2a", atlas)
+        self.assertIn("#0b63f6", horizon)
+
+    def test_cover_metadata_omits_empty_client_and_non_confidential_labels(self):
+        rendered = self.render_html(
+            "# Research title\n\n## Finding\n\nBody.",
+            template="executive",
+            report_date="28 July 2026",
+        )
+
+        self.assertIn("Prepared by", rendered)
+        self.assertIn("Alexandria", rendered)
+        self.assertIn("28 July 2026", rendered)
+        self.assertNotIn(">Client<", rendered)
+        self.assertNotIn("Strictly Confidential", rendered)
+        self.assertNotIn("Controlled copy", rendered)
+        self.assertNotIn("Not for external distribution", rendered)
+
+    def test_confidential_client_metadata_is_opt_in(self):
+        rendered = self.render_html(
+            "# Research title\n\n## Finding\n\nBody.",
+            template="spectrum",
+            client="Asteron Group",
+            prepared_by="Northline Advisory",
+            confidential=True,
+            report_date="28 July 2026",
+        )
+
+        self.assertIn(">Client<", rendered)
+        self.assertIn("Asteron Group", rendered)
+        self.assertIn("Northline Advisory", rendered)
+        self.assertIn("Strictly Confidential", rendered)
+        self.assertIn("Controlled copy", rendered)
+        self.assertIn("Not for external distribution", rendered)
+
+    def test_long_cover_content_activates_compact_title_and_metadata_layouts(self):
+        rendered = self.render_html(
+            "# A very long research title about infrastructure resilience, "
+            "capital allocation, institutional change, and the next decade of adaptation\n\n"
+            "## Finding\n\nBody.",
+            subtitle=(
+                "A decision-grade assessment of interconnected systems, constraints, "
+                "trade-offs, and strategic choices."
+            ),
+            template="horizon",
+            client="Northstar International Infrastructure and Resilience Partners",
+            prepared_by="Alexandria Strategic Research and Transformation Advisory",
+            confidential=True,
+            report_date="28 July 2026",
+        )
+
+        self.assertIn("cover-title-very-long", rendered)
+        self.assertIn("cover-meta-4", rendered)
+        self.assertIn("cover-meta-long", rendered)
+        self.assertIn(".cover.cover-title-very-long h1", rendered)
+        self.assertIn(".cover.cover-horizon.cover-meta-4", rendered)
+
+    def test_contents_page_uses_section_summaries_without_document_control(self):
+        rendered = self.render_html(
+            "# Research title\n\n"
+            "## Market structure\n\n"
+            "How value pools, incentives, and competitive positions are changing.\n\n"
+            "### Evidence\n\n"
+            "Supporting detail.\n\n"
+            "## Recommendations\n\n"
+            "The actions, sequencing, and trade-offs that follow.",
+            template="atlas",
+        )
+
+        self.assertIn("How value pools, incentives, and competitive positions", rendered)
+        self.assertIn("The actions, sequencing, and trade-offs", rendered)
+        self.assertNotIn("Document control", rendered)
+        self.assertNotIn("Reading guide", rendered)
+        self.assertNotIn("Report to", rendered)
+        self.assertNotIn("Version issued", rendered)
+
+    def test_consulting_callout_markers_become_designed_components(self):
+        rendered = self.render_html(
+            "# Research title\n\n"
+            "## Finding\n\n"
+            "> [!METRIC]\n"
+            "> **2.4×**\n"
+            "> Higher renewal intent.\n\n"
+            "> [!INSIGHT]\n"
+            "> Judgment changes the decision.\n\n"
+            "> [!TAKEAWAY]\n"
+            "> Act before the window closes.",
+            template="executive",
+        )
+
+        self.assertIn('class="metric-card"', rendered)
+        self.assertIn('class="metric-value"', rendered)
+        self.assertIn('class="insight-panel"', rendered)
+        self.assertIn('class="takeaway-band"', rendered)
+        self.assertNotIn("[!METRIC]", rendered)
+        self.assertNotIn("[!INSIGHT]", rendered)
+        self.assertNotIn("[!TAKEAWAY]", rendered)
+
+    def test_adjacent_callouts_split_when_markdown_merges_their_blockquote(self):
+        merged = (
+            "<blockquote>\n"
+            "<p>[!METRIC]\n<strong>2.4×</strong>\nHigher renewal intent.</p>\n"
+            "<p>[!INSIGHT]\nJudgment changes the decision.</p>\n"
+            "<p>[!TAKEAWAY]\nAct before the window closes.</p>\n"
+            "</blockquote>"
+        )
+
+        transformed = self.converter.transform_callouts(merged)
+
+        self.assertEqual(transformed.count('class="metric-card"'), 1)
+        self.assertEqual(transformed.count('class="insight-panel"'), 1)
+        self.assertEqual(transformed.count('class="takeaway-band"'), 1)
+        self.assertNotIn("[!METRIC]", transformed)
+        self.assertNotIn("[!INSIGHT]", transformed)
+        self.assertNotIn("[!TAKEAWAY]", transformed)
 
     def test_toc_escapes_heading_text_and_keeps_anchor(self):
         body = '<h2 id="risk">Risk &amp; <em>reward</em> &lt;script&gt;</h2>'

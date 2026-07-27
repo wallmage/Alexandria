@@ -25,7 +25,9 @@ Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar
 
 ## 1. Frame the assignment
 
-Infer what you safely can from the request and conversation. Ask one concise question only when a missing choice would materially change the result. Otherwise, proceed with reasonable assumptions and state the important ones in the report.
+Infer what you safely can from the request and conversation. Immediately after the user's first research request, acknowledge the topic, then read `references/pdf-templates.md` and ask its four intake questions together in one non-blocking commentary update: template, prepared by, client name, and confidentiality. Present all four named templates and retain the full two-sentence look, color, and topic-fit description for each; do not compress them into labels. This is the normal intake, not four separate turns.
+
+Begin research in the same turn immediately after sending the questions. Never wait for an answer or make the intake a gate. If the user answers while research is underway, incorporate the supplied preferences into final production and keep the stated defaults for everything else. Resolve the final values immediately before rendering. If no answer arrives, finish normally: adapt the template to the topic, fall back to Executive when ambiguous, use Alexandria under “Prepared by,” omit the client field, use today's date, and leave confidentiality Off.
 
 Determine:
 
@@ -35,6 +37,8 @@ Determine:
 - explicit output language;
 - useful depth;
 - whether the topic needs current web research.
+- PDF template and optional cover image;
+- prepared-by name, optional client name, and confidentiality state.
 
 Language precedence is: explicit requested language, established conversation preference, then the prompt language. Preserve official names, quotations, code, and bibliographic titles when translating them would reduce accuracy.
 
@@ -134,7 +138,7 @@ Outline around reader questions and causal relationships. Combine weak or repeti
 
 ## 5. Draft with citations
 
-The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md` when a specific register would help.
+The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md` when a specific register would help. Read the visual-component section of `references/pdf-templates.md` before drafting; use metric, insight, and takeaway blocks only for content that deserves that visual weight.
 
 Requirements:
 
@@ -222,13 +226,16 @@ Read `references/pdf-production.md`. Use the supplied scripts and pinned depende
 
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
-  "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG"
+  "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
+  --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
   "$REPORT_MD" --ledger "$LEDGER_JSON" --pdf "$REPORT_PDF" \
   --min-pages 10 --min-text-chars 5000 --min-links 1
 ```
 
 Reuse the Step 7 environment. The PDF converter refuses to replace an existing output unless `--force` is explicitly supplied; prefer a versioned filename to overwriting a prior report.
+
+Add `--client "$CLIENT_NAME"` only when the user supplied a non-empty client. Add `--confidential` only when the user turned confidentiality On. Add `--cover-image "$COVER_IMAGE"` only for a verified local raster image inside the report directory.
 
 Render the PDF to images and inspect every page or a complete contact sheet. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean.
 

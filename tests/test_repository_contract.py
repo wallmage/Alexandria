@@ -79,6 +79,25 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertIn(f'$SKILL_ROOT/scripts/{script}', production)
         self.assertNotIn("python3 scripts/", production)
 
+    def test_pdf_intake_is_non_blocking_and_offers_all_four_templates(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        templates = (ROOT / "references" / "pdf-templates.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Begin research in the same turn", skill)
+        self.assertIn("Never wait for an answer", skill)
+        self.assertIn("full two-sentence", skill)
+        for label in (
+            "A — Executive (Default)",
+            "B — Spectrum",
+            "C — Atlas",
+            "D — Horizon",
+        ):
+            self.assertIn(label, templates)
+        self.assertIn("Default: Off", templates)
+        self.assertIn("if an answer arrives after a draft PDF was rendered", templates)
+
     def test_evidence_schema_declares_real_json_schema(self):
         schema = json.loads(
             (ROOT / "references" / "evidence-ledger.schema.json").read_text(

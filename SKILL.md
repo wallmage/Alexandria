@@ -27,9 +27,16 @@ Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar
 
 ## 1. Frame the assignment
 
-Infer what you safely can from the request and conversation. Immediately after the user's first research request, acknowledge the topic, then read `references/pdf-templates.md` and ask its four intake questions together in one non-blocking commentary update: template, prepared by, client name, and confidentiality. Present all eleven named templates with their complete one-sentence look, color, and topic-fit descriptions; do not compress them into labels. This is the normal intake, not four separate turns.
+Infer what is safe from context. Read `references/pdf-templates.md`, then ask its
+four intake questions—template, prepared by, client, and confidentiality—in one
+non-blocking update. Include all eleven templates with their complete one-sentence
+descriptions. Begin research in the same turn.
+Never wait for an answer.
 
-Begin research in the same turn immediately after sending the questions. Never wait for an answer or make the intake a gate. If the user answers while research is underway, incorporate the supplied preferences into final production and keep the stated defaults for everything else. Resolve the final values immediately before rendering. If no answer arrives, finish normally with two PDFs containing identical report content: Executive plus the non-Executive template selected for the topic. Use Alexandria under “Prepared by,” omit the client field, use today's date, and leave confidentiality Off. An explicit template choice produces one PDF.
+Apply later answers before rendering. Without answers, use Alexandria as
+prepared by, omit client, use today's date, leave confidentiality Off, and
+deliver identical-content Executive and topic-adaptive PDFs. An explicit
+template choice produces one PDF.
 
 Determine:
 
@@ -66,7 +73,9 @@ Alexandria is deliberately long-form. The delivery bounds are hard:
 - **Simplified or Traditional Chinese:** 5,000–10,000 non-whitespace characters.
 - **Production target:** roughly ten or more finished PDF pages, depending on language, tables, and layout.
 
-Adapt the outline and research depth within those limits. A narrower subject belongs near the lower bound; a complex, well-documented subject belongs near the upper bound. If the first draft is short, deepen the explanation, history, counterevidence, alternatives, or implications through additional research. Do not pad with repetition. If it is long, compress background and repetition without deleting decisive evidence.
+Adapt depth within those limits. Deepen short drafts with research into history,
+counterevidence, alternatives, or implications; never pad. Compress repetition
+in long drafts without deleting decisive evidence.
 
 ## 2. Design the research
 
@@ -78,9 +87,10 @@ Read `references/research-protocol.md` and `references/content-quality.md`. Crea
 4. a version-3 evidence ledger using `references/evidence-ledger.schema.json`;
 5. an explicit list of unresolved questions and their effect on the verdict.
 
-If parallel research is available and appropriate, divide coverage areas among research agents. Give each agent exclusive primary ownership and a disjoint numeric ID range—for example, `S1000–S1999` and `C1000–C1999`—while allowing it to flag cross-cutting evidence. Each returns ledger entries, contradictions, gaps, and a short synthesis—not a detached pile of URLs. The primary agent deduplicates sources and rewrites IDs and relationships before validation.
-
-If parallel research is unavailable, run the same coverage plan sequentially. The quality contract does not depend on a particular tool, model, or agent count.
+For parallel research, assign exclusive coverage and disjoint source/claim ID
+ranges. Each agent returns ledger entries, contradictions, gaps, and synthesis.
+The primary agent deduplicates and reconciles IDs before validation. Apply the
+same coverage plan sequentially when parallel work is unavailable.
 
 Use the runtime date in time-sensitive queries. Do not hard-code a calendar year.
 
@@ -102,12 +112,23 @@ For every consequential claim, add a ledger entry with:
 - fact, reported claim, estimate, or analysis;
 - source ID and URL;
 - publication and access dates;
+- `undated_reason` when a living source has no publication date;
 - faithful extract or source location;
 - evidence type, source family, role, and independence;
 - importance, confidence, limitations, and decision relevance;
 - the reasoning behind analysis and what would change it;
 - honest triangulation status;
 - reciprocal supporting or contradicting claim IDs and conflict resolution.
+
+Mark changing claims such as price, availability, leadership, policy, and
+current product behavior as `time_sensitive`, and record a non-null `as_of`
+date. The validator treats evidence older than 30 days at delivery as stale
+unless the claim is no longer time-sensitive.
+
+Negative existence claims such as “no independent benchmark was found” need
+an `evidence_of_absence` record with the queries run, the locations where the
+evidence should have appeared, and the search date. Do not turn a search limit
+into a factual conclusion.
 
 Mark `include_in_report: true` for every ledger claim used in the draft. After drafting, copy a distinctive sentence of at least 40 characters from each claim-bearing paragraph into that claim's `report_excerpts`. This keeps the internal claim map in the ledger—not the delivered Markdown—and lets the validator locate every used claim in the report.
 
@@ -271,6 +292,9 @@ Reuse the task-owned environment from Step 7. On Windows, set `ALEXANDRIA_PYTHON
 Use `--expected-lang zh-HK` instead for Hong Kong Traditional Chinese. Then manually verify:
 
 - every important factual claim maps to the ledger;
+- every recommendation, winner, preference, or claimed advantage maps to a
+  ledger claim or carries a nearby citation;
+- every negative existence claim carries its search record;
 - citations support the exact nearby claim;
 - Sources is the final H2 section;
 - links open and point to the intended page;
@@ -302,7 +326,13 @@ Repeat the language-specific hard length flags from Step 7 in the PDF validation
 
 Add `--client "$CLIENT_NAME"` only when the user supplied a non-empty client. Add `--confidential` only when the user turned confidentiality On. Add `--cover-image "$COVER_IMAGE"` only for a verified local raster image inside the report directory.
 
-When the user did not choose a template, render `REPORT_PDF_DEFAULT` with `--template executive`, call `select_adaptive_companion()` from `scripts/pdf_templates.py` on the report title and opening text, then render `REPORT_PDF_ADAPTIVE` with that returned template. Reuse the exact Markdown and Rewild receipt; do not research, redraft, or rerun Rewild merely to change the layout. The second PDF is permitted because it adds no model-writing tokens and normally costs only one extra local render; abandon it only if that extra render actually exceeds five minutes or the runtime cannot complete it.
+Put a concise standfirst in the first blockquote immediately after the H1,
+followed by the report date. The renderer uses that standfirst on the cover and
+removes the metadata blockquote from the body.
+
+Without a template choice, render Executive and the result of
+`select_adaptive_companion()` using identical Markdown and receipts. Do not
+redraft for the second layout; skip it only when rendering cannot complete.
 
 Render the PDF to images and inspect every page or a complete contact sheet. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean.
 

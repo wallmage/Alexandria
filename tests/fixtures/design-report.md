@@ -1,5 +1,6 @@
 # Rewiring the enterprise: AI-native growth
 
+> A leadership brief on where evidence, specialist judgment, and delivery now create advantage.
 > 28 July 2026
 
 ## Executive perspective

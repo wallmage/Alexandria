@@ -88,3 +88,10 @@ Analytical synthesis and forward look.
 ## Coverage priority
 
 Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.
+
+## Coverage ledger mapping
+
+Turn every relevant dimension above into one or more ledger coverage items with
+an explicit priority, decision relevance, completion criterion, and evidence
+target. If a dimension is relevant but cannot be resolved, keep it in the
+ledger as `status: gap` with a concrete `gap_impact`; never omit it silently.

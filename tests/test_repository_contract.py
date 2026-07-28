@@ -9,6 +9,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryContractTests(unittest.TestCase):
+    def test_every_archetype_requires_explicit_coverage_mapping(self):
+        for name in (
+            "artifact.md",
+            "concept.md",
+            "event.md",
+            "organization.md",
+            "person.md",
+            "system.md",
+        ):
+            text = (ROOT / "references" / name).read_text(encoding="utf-8")
+            self.assertIn("## Coverage ledger mapping", text, name)
+            self.assertIn("status: gap", text, name)
+
     def test_readmes_explain_the_name_unlimited_scope_and_pdf_output(self):
         required_phrases = {
             "README.md": (

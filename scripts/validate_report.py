@@ -11,6 +11,15 @@ from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+try:
+    from .report_contract import detect_language
+except ImportError:
+    from report_contract import detect_language
+
 SOURCE_HEADINGS = {
     "sources",
     "references",
@@ -29,8 +38,6 @@ REWILD_PROFILE_DIRS = {
     "zh-CN": "rewild-zh",
     "zh-HK": "rewild-hk",
 }
-TRADITIONAL_MARKERS = set("這個為與報發後裡麼還說對時國學術據點體現關於會開")
-SIMPLIFIED_MARKERS = set("这个为与报发后里么还说对时国学术据点体现关于会开")
 
 
 def _h2_sections(text):
@@ -149,19 +156,14 @@ def find_raw_urls(text):
     masked = list(_mask_nonlink_regions(text))
     for _, start, end in _markdown_url_entries(text, include_images=True):
         masked[start:end] = " " * (end - start)
-    return re.findall(r"https?://[^\s<>]+", "".join(masked))
-
-
-def detect_language(text):
-    han_count = len(re.findall(r"[\u3400-\u9fff]", text))
-    latin_count = len(re.findall(r"[A-Za-z]", text))
-    if han_count <= latin_count * 0.3:
-        return "en"
-    traditional = sum(text.count(char) for char in TRADITIONAL_MARKERS)
-    simplified = sum(text.count(char) for char in SIMPLIFIED_MARKERS)
-    if traditional == simplified:
-        return "zh"
-    return "zh-HK" if traditional > simplified else "zh-CN"
+    masked_text = "".join(masked)
+    masked_text = re.sub(
+        r"(?m)^\s{0,3}\[[^\]\n]+\]:\s*<?https?://[^\s>]+>?"
+        r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*$",
+        lambda match: " " * len(match.group(0)),
+        masked_text,
+    )
+    return re.findall(r"https?://[^\s<>]+", masked_text)
 
 
 @lru_cache(maxsize=1)
@@ -417,6 +419,66 @@ def validate_report_against_ledger(text, ledger):
         for paragraph in re.split(r"\n\s*\n", body)
         if paragraph.strip()
     ]
+    normalized_paragraphs = {
+        paragraph: re.sub(
+            r"\s+",
+            " ",
+            _report_prose(paragraph, []),
+        ).strip()
+        for paragraph in paragraphs
+    }
+    excerpt_claims = []
+    for claim in claims:
+        if not isinstance(claim, dict) or claim.get("include_in_report") is not True:
+            continue
+        for excerpt in claim.get("report_excerpts", []):
+            normalized = re.sub(r"\s+", " ", str(excerpt)).strip()
+            if normalized:
+                excerpt_claims.append((normalized, claim))
+
+    decision_pattern = re.compile(
+        r"(?i)\b(?:choose|select|prefer|recommend(?:ed|ation)?|wins?|"
+        r"advantage|stronger option|safer default)\b|"
+        r"(?:選擇|选择|建議|建议|推薦|推荐|較強|较强|更適合|更适合)"
+    )
+    absence_pattern = re.compile(
+        r"(?i)\bno\b.{0,100}\b(?:was|were|could be)\s+found\b|"
+        r"(?:未找到|沒有找到|没有找到|找不到|未發現|未发现)"
+    )
+    for paragraph, normalized_paragraph in normalized_paragraphs.items():
+        if not normalized_paragraph or normalized_paragraph.startswith("#"):
+            continue
+        mapped_claims = [
+            claim
+            for excerpt, claim in excerpt_claims
+            if excerpt in normalized_paragraph
+        ]
+        if (
+            decision_pattern.search(normalized_paragraph)
+            and not mapped_claims
+            and not extract_markdown_urls(paragraph)
+        ):
+            errors.append(
+                "Decision language is not traceable to a mapped claim or "
+                f"nearby citation: {normalized_paragraph[:120]}"
+            )
+        if absence_pattern.search(normalized_paragraph):
+            search_records = [
+                claim.get("evidence_of_absence")
+                for claim in mapped_claims
+                if isinstance(claim.get("evidence_of_absence"), dict)
+            ]
+            if not any(
+                record.get("queries")
+                and record.get("expected_locations")
+                and record.get("searched_at")
+                for record in search_records
+            ):
+                errors.append(
+                    "Negative existence claim has no evidence-of-absence "
+                    f"search record: {normalized_paragraph[:120]}"
+                )
+
     for claim in claims:
         if not isinstance(claim, dict) or claim.get("include_in_report") is not True:
             continue
@@ -514,6 +576,8 @@ def validate_pdf(
     if not str(metadata.get("/Author") or "").strip():
         errors.append("PDF is missing author metadata.")
     mark_info = root.get("/MarkInfo", {})
+    if hasattr(mark_info, "get_object"):
+        mark_info = mark_info.get_object()
     if not mark_info.get("/Marked") or "/StructTreeRoot" not in root:
         errors.append("PDF is not tagged for assistive technology.")
     pdf_lang = str(root.get("/Lang") or "").strip()

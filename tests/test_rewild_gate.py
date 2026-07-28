@@ -59,6 +59,19 @@ class RewildGateTests(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn("Serial enumeration", result.stdout)
 
+    def test_repeated_short_epigram_closers_are_blocked(self):
+        paragraphs = []
+        for index in range(5):
+            paragraphs.append(
+                "The evidence in this section explains the operating constraint "
+                "and follows it through the decision with enough detail for a "
+                f"reader to verify the reasoning in case {index}. "
+                "Controls should follow the risk."
+            )
+        result = run_checker("\n\n".join(paragraphs), report_lang="en")
+        self.assertEqual(1, result.returncode)
+        self.assertIn("Paragraph closers", result.stdout)
+
     def test_simplified_chinese_ai_formula_is_blocked(self):
         result = run_checker(
             "近年来，随着人工智能技术的快速发展，行业经历了深刻变革。"

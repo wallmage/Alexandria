@@ -282,6 +282,37 @@ Words after the sources section.
         for phrase in ("title metadata", "author metadata", "tagged", "language", "A4", "bookmarks"):
             self.assertIn(phrase, joined)
 
+    def test_pdf_validation_resolves_indirect_mark_info(self):
+        class Indirect:
+            def get_object(self):
+                return {"/Marked": True}
+
+        class Page:
+            mediabox = SimpleNamespace(width=595.28, height=841.89)
+
+            def extract_text(self):
+                return "report text"
+
+            def get(self, key, default):
+                return default
+
+        fake_pypdf = SimpleNamespace(PdfReader=lambda path: SimpleNamespace(
+            pages=[Page()],
+            metadata={"/Title": "Title", "/Author": "Author"},
+            root_object={
+                "/MarkInfo": Indirect(),
+                "/StructTreeRoot": {},
+                "/Outlines": {},
+                "/Lang": "en",
+            },
+        ))
+        with mock.patch.dict("sys.modules", {"pypdf": fake_pypdf}):
+            errors = validate_report.validate_pdf(
+                Path("report.pdf"),
+                expected_lang="en",
+            )
+        self.assertFalse(any("could not be reopened" in error for error in errors), errors)
+
     def test_report_ledger_check_requires_known_urls_and_claim_locations(self):
         report = GOOD_REPORT
         ledger = {
@@ -325,6 +356,13 @@ Words after the sources section.
             ["https://example.com/a(b)", "https://example.com/a"],
             validate_report.extract_markdown_urls(text),
         )
+        self.assertEqual([], validate_report.find_raw_urls(text))
+
+    def test_reference_style_link_definitions_are_not_raw_urls(self):
+        text = """A [reference-style link][source].
+
+[source]: https://example.com/research "Source title"
+"""
         self.assertEqual([], validate_report.find_raw_urls(text))
 
     def test_fenced_sources_heading_does_not_satisfy_structure(self):
@@ -440,6 +478,102 @@ This analytical conclusion is mapped but does not cite its foundation.
         errors = validate_report.validate_report_against_ledger(report, ledger)
         self.assertTrue(any("nearby citation" in error for error in errors))
         self.assertTrue(any("foundation" in error and "Sources" in error for error in errors))
+
+    def test_unmapped_decision_language_requires_a_citation_or_claim(self):
+        report = """# Title
+
+## Decision
+
+Choose Alpha because it wins on the operating constraints that matter.
+
+## Sources
+
+- [Source](https://example.com/evidence)
+"""
+        ledger = {
+            "sources": [{"source_id": "S1", "url": "https://example.com/evidence"}],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("Decision language is not traceable" in error for error in errors),
+            errors,
+        )
+
+    def test_mapped_decision_language_is_traceable(self):
+        sentence = (
+            "Choose Alpha because it wins on the operating constraints "
+            "that matter."
+        )
+        report = f"""# Title
+
+## Decision
+
+{sentence} [Evidence](https://example.com/evidence)
+
+## Sources
+
+- [Source](https://example.com/evidence)
+"""
+        ledger = {
+            "sources": [{"source_id": "S1", "url": "https://example.com/evidence"}],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                    "report_excerpts": [sentence],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertFalse(
+            any("Decision language is not traceable" in error for error in errors),
+            errors,
+        )
+
+    def test_evidence_of_absence_requires_a_search_record(self):
+        sentence = "No independent benchmark was found for the two systems."
+        report = f"""# Title
+
+## Evidence limits
+
+{sentence}
+
+## Sources
+
+- [Search index](https://example.com/search)
+"""
+        ledger = {
+            "sources": [{"source_id": "S1", "url": "https://example.com/search"}],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "include_in_report": True,
+                    "source_ids": [],
+                    "supports": [],
+                    "report_excerpts": [sentence],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("evidence-of-absence search record" in error for error in errors),
+            errors,
+        )
+
+        ledger["claims"][0]["evidence_of_absence"] = {
+            "queries": ["independent benchmark Claude Code Codex"],
+            "expected_locations": [
+                "vendor benchmark pages and independent evaluation indexes"
+            ],
+            "searched_at": "2026-07-28",
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertFalse(
+            any("evidence-of-absence search record" in error for error in errors),
+            errors,
+        )
 
 
 if __name__ == "__main__":

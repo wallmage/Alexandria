@@ -321,6 +321,9 @@
         },
         "limitations": {
           "type": ["string", "null"]
+        },
+        "undated_reason": {
+          "type": ["string", "null"]
         }
       }
     },
@@ -559,6 +562,39 @@
         },
         "limitations": {
           "type": ["string", "null"]
+        },
+        "time_sensitive": {
+          "type": "boolean",
+          "default": false
+        },
+        "evidence_of_absence": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["queries", "expected_locations", "searched_at"],
+          "properties": {
+            "queries": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "expected_locations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "searched_at": {
+              "type": "string",
+              "format": "date"
+            }
+          }
         }
       }
     },

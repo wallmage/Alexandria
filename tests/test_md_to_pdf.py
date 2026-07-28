@@ -130,6 +130,187 @@ class CommandLineTests(unittest.TestCase):
 
 
 class ConverterUnitTests(unittest.TestCase):
+    def test_immediate_blockquote_deck_becomes_default_cover_standfirst(self):
+        report = """# A Report Title
+
+> A decision-grade standfirst for the intended reader.
+> 28 July 2026
+
+## Analysis
+
+Body.
+
+## Sources
+
+- [Source](https://example.com)
+"""
+        rendered = self.converter.md_to_html(
+            report,
+            lang="en",
+            template="executive",
+        )
+        self.assertIn(
+            '<div class="subtitle">A decision-grade standfirst for the intended reader.</div>',
+            rendered,
+        )
+        self.assertNotIn("A decision-grade standfirst for the intended reader.</blockquote>", rendered)
+
+    def test_standfirst_without_date_uses_the_current_date_slot(self):
+        title, report_date, standfirst = self.converter.extract_report_header(
+            "# Title\n\n> A useful standfirst.\n\n## Body\n\nText."
+        )
+        self.assertEqual("Title", title)
+        self.assertEqual("", report_date)
+        self.assertEqual("A useful standfirst.", standfirst)
+
+    def test_formatted_standfirst_does_not_leak_into_report_body(self):
+        rendered = self.converter.md_to_html(
+            "# Title\n\n> A *useful* standfirst.\n> 28 July 2026\n\n"
+            "## Body\n\nText.\n\n## Sources\n\n- [Source](https://example.com)",
+            lang="en",
+            template="executive",
+        )
+        self.assertIn('<div class="subtitle">A useful standfirst.</div>', rendered)
+        self.assertNotIn("<blockquote><p>A <em>useful</em> standfirst.", rendered)
+
+    def test_inline_citations_receive_print_source_numbers(self):
+        rendered = self.converter.md_to_html(
+            "# Title\n\n> A useful standfirst.\n> 28 July 2026\n\n"
+            "## Finding\n\nA claim with [evidence](https://example.com/a).\n\n"
+            "## Sources\n\n- [Source A](https://example.com/a)",
+            lang="en",
+            template="executive",
+        )
+        self.assertIn(
+            '<sup class="source-ref">[01]</sup>',
+            rendered,
+        )
+
+    def test_image_covers_have_contrast_protection_for_all_overlay_text(self):
+        css = self.converter.build_css(
+            "terrain",
+            font_sans="sans",
+            font_display="serif",
+            font_mono="mono",
+            header_text="header",
+            page_label="",
+            page_suffix="",
+            footer_text="footer",
+            insight_label="insight",
+            takeaway_label="takeaway",
+        )
+        self.assertIn(".template-terrain .cover-kicker", css)
+        self.assertIn("text-shadow:", css)
+        self.assertIn("linear-gradient", css)
+
+    def test_maison_cover_copy_stays_below_the_image_plate(self):
+        css = self.converter.build_css(
+            "maison",
+            font_sans="sans",
+            font_display="serif",
+            font_mono="mono",
+            header_text="header",
+            page_label="",
+            page_suffix="",
+            footer_text="footer",
+            insight_label="insight",
+            takeaway_label="takeaway",
+        )
+        self.assertIn(".maison-art {\n    inset: 0 0 auto;\n    height: 88mm;", css)
+        self.assertIn(
+            ".template-maison .cover-copy {\n"
+            "    position: absolute;\n"
+            "    left: 17mm;\n"
+            "    right: 17mm;\n"
+            "    top: 104mm;",
+            css,
+        )
+
+    def test_section_leads_stay_with_the_first_body_block(self):
+        css = self.converter.build_css(
+            "executive",
+            font_sans="sans",
+            font_display="serif",
+            font_mono="mono",
+            header_text="header",
+            page_label="",
+            page_suffix="",
+            footer_text="footer",
+            insight_label="insight",
+            takeaway_label="takeaway",
+        )
+        self.assertRegex(
+            css,
+            r"h1 \+ p,\s*h2 \+ p \{[^}]*break-after: avoid",
+        )
+
+    def test_multi_page_toc_exposes_page_index_for_crop_variation(self):
+        headings = "\n\n".join(
+            f"## Section {index}\n\nDistinct section summary {index}."
+            for index in range(1, 14)
+        )
+        report = (
+            "# Report\n\n> A useful standfirst.\n> 28 July 2026\n\n"
+            + headings
+            + "\n\n## Sources\n\n- [Source](https://example.com)"
+        )
+        rendered = self.converter.md_to_html(
+            report,
+            lang="en",
+            template="terrain",
+        )
+        self.assertIn("toc-chunk-01", rendered)
+        self.assertIn("toc-chunk-02", rendered)
+        self.assertIn("toc-chunk-03", rendered)
+
+    def test_template_css_has_no_accidental_nested_duplicate_selector(self):
+        for template in self.converter.TEMPLATES:
+            css = self.converter.build_css(
+                template,
+                font_sans="sans",
+                font_display="serif",
+                font_mono="mono",
+                header_text="header",
+                page_label="",
+                page_suffix="",
+                footer_text="footer",
+                insight_label="insight",
+                takeaway_label="takeaway",
+            )
+            self.assertNotRegex(
+                css,
+                r"(?m)^([.#][^{\n]+)\s*\{\s*\n\1\s*\{",
+                template,
+            )
+
+    def test_data_url_limit_matches_decoded_asset_limit(self):
+        with mock.patch.object(self.converter, "MAX_ASSET_BYTES", 3):
+            fetcher = self.converter.make_url_fetcher(
+                Path("."),
+                default_fetcher=lambda url: {"string": url},
+            )
+            self.assertEqual(
+                {"string": "data:image/png;base64,AAAA"},
+                fetcher("data:image/png;base64,AAAA"),
+            )
+            with self.assertRaisesRegex(ValueError, "resource limit"):
+                fetcher("data:image/png;base64,AAAAAAAA")
+
+    def test_every_visual_system_reaches_the_report_body(self):
+        for template in self.converter.TEMPLATES:
+            css = self.converter.build_css(
+                template,
+                font_sans="sans",
+                font_display="serif",
+                font_mono="mono",
+                header_text="header",
+                page_label="",
+                page_suffix="",
+                footer_text="footer",
+                insight_label="insight",
+                takeaway_label="takeaway",
+            )
+            self.assertIn(f".template-{template} .report-body", css, template)
     @classmethod
     def setUpClass(cls):
         cls.converter = load_converter()

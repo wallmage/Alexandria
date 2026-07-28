@@ -5,7 +5,9 @@ from pathlib import Path
 
 from scripts.md_to_pdf import validate_rewild_for_render
 from scripts.rewild_gate import (
+    _carrier_predicate_tokens,
     _checker_prose,
+    _direction_terms,
     _semantic_fidelity_errors,
     file_sha256,
     run_gate,
@@ -44,6 +46,32 @@ def write_review(path, *, report=None, source=None, report_lang="en"):
 
 
 class RewildReceiptTests(unittest.TestCase):
+    def test_semantic_tokenizers_cache_repeated_clauses(self):
+        _carrier_predicate_tokens.cache_clear()
+        _direction_terms.cache_clear()
+        clause = "Costs remain above the industry average."
+        _carrier_predicate_tokens(clause, "en")
+        _carrier_predicate_tokens(clause, "en")
+        _direction_terms(clause)
+        _direction_terms(clause)
+        self.assertGreaterEqual(_carrier_predicate_tokens.cache_info().hits, 1)
+        self.assertGreaterEqual(_direction_terms.cache_info().hits, 1)
+
+    def test_document_fallback_does_not_override_successful_clause_alignment(self):
+        source = (
+            "Costs remain above the industry average. "
+            "The deployment guide describes the supported platforms."
+        )
+        report = (
+            "The deployment guide describes the supported platforms. "
+            "A separate appendix discusses results below the average."
+        )
+        errors = _semantic_fidelity_errors(source, report, "en")
+        self.assertFalse(
+            any("Semantic direction reversal:" in error for error in errors),
+            errors,
+        )
+
     def test_document_level_direction_words_do_not_reject_a_faithful_rewrite(self):
         source = "Costs are above the average across every plant we reviewed."
         report = (

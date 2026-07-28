@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -302,6 +303,7 @@ def _causal_phrases(text, report_lang):
     ]
 
 
+@lru_cache(maxsize=4096)
 def _clauses(text, report_lang):
     if report_lang == "en":
         parts = re.split(
@@ -313,6 +315,7 @@ def _clauses(text, report_lang):
     return [re.sub(r"\s+", " ", part).strip() for part in parts if part.strip()]
 
 
+@lru_cache(maxsize=8192)
 def _anchor_tokens(clause, report_lang):
     stripped = clause.casefold()
     for left, right in DIRECTION_PAIRS:
@@ -333,6 +336,7 @@ def _anchor_tokens(clause, report_lang):
     return {chars[index : index + 2] for index in range(len(chars) - 1)}
 
 
+@lru_cache(maxsize=8192)
 def _raw_tokens(text, report_lang):
     if report_lang == "en":
         return {
@@ -346,6 +350,7 @@ def _raw_tokens(text, report_lang):
     return {chars[index : index + 2] for index in range(len(chars) - 1)}
 
 
+@lru_cache(maxsize=8192)
 def _carrier_predicate_tokens(clause, report_lang):
     folded = clause.casefold()
     markers = [term for pair in DIRECTION_PAIRS for term in pair]
@@ -459,6 +464,7 @@ def _aligned_clauses(source, report, report_lang):
     return aligned
 
 
+@lru_cache(maxsize=8192)
 def _direction_terms(clause):
     return {
         term
@@ -612,28 +618,29 @@ def _semantic_fidelity_errors(source, report, report_lang):
                     f"'{source_clause}' → '{report_clause}'."
                 )
 
-    # Fallback for a short or heavily rephrased passage that could not be
-    # aligned. These document-level checks are weaker but still catch a lone
-    # reversal, added negation, or invented cause.
-    for left, right in DIRECTION_PAIRS:
-        source_left = contains(source_folded, left)
-        source_right = contains(source_folded, right)
-        report_left = contains(report_folded, left)
-        report_right = contains(report_folded, right)
-        if source_left and not source_right and report_right and not report_left:
-            errors.append(
-                f"Semantic direction reversal: source uses '{left}', "
-                f"report uses '{right}'."
-            )
-        if source_right and not source_left and report_left and not report_right:
-            errors.append(
-                f"Semantic direction reversal: source uses '{right}', "
-                f"report uses '{left}'."
-            )
-    source_causes = _causal_phrases(source, report_lang)
-    report_causes = _causal_phrases(report, report_lang)
-    if report_causes and not source_causes:
-        errors.append("Causal claim added where the pre-Rewild report had none.")
+    # Document-level comparison is safe only when clause alignment found
+    # nothing. Once any claims align, global term co-occurrence cannot tell
+    # whether opposite terms belong to the same claim.
+    if not aligned:
+        for left, right in DIRECTION_PAIRS:
+            source_left = contains(source_folded, left)
+            source_right = contains(source_folded, right)
+            report_left = contains(report_folded, left)
+            report_right = contains(report_folded, right)
+            if source_left and not source_right and report_right and not report_left:
+                errors.append(
+                    f"Semantic direction reversal: source uses '{left}', "
+                    f"report uses '{right}'."
+                )
+            if source_right and not source_left and report_left and not report_right:
+                errors.append(
+                    f"Semantic direction reversal: source uses '{right}', "
+                    f"report uses '{left}'."
+                )
+        source_causes = _causal_phrases(source, report_lang)
+        report_causes = _causal_phrases(report, report_lang)
+        if report_causes and not source_causes:
+            errors.append("Causal claim added where the pre-Rewild report had none.")
     return errors
 
 
@@ -668,12 +675,16 @@ def _length_errors(text, report_lang):
                 sections=_h2_sections(text),
             )
         )
+    try:
+        from .report_contract import report_length_policy
+    except ImportError:
+        from report_contract import report_length_policy
+
     if report_lang == "en":
         count = len(re.findall(r"\b[\w'-]+\b", prose, re.UNICODE))
-        minimum, maximum, unit = 7500, 15000, "words"
     else:
         count = len(re.findall(r"[A-Za-z0-9\u3400-\u9fff]", prose))
-        minimum, maximum, unit = 5000, 10000, "report-body characters"
+    minimum, maximum, unit = report_length_policy(report_lang)
     if count < minimum:
         errors.append(
             f"Rewild report has {count} {unit}; minimum is {minimum}."

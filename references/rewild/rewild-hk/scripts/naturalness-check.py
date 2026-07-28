@@ -805,6 +805,37 @@ def check_paragraphs(paragraphs, lang):
               else "uniform; human paragraphs range from 1 line to 10"))
 
 
+def check_paragraph_closers(paragraphs, lang):
+    if lang != "en" or len(paragraphs) < 5:
+        return
+    eligible = []
+    short_closers = []
+    for paragraph in paragraphs:
+        sentences = split_sentences(paragraph, lang)
+        if len(sentences) < 2:
+            continue
+        eligible.append(paragraph)
+        if (
+            sentence_length(sentences[-1], lang) < 15
+            and sentence_length(sentences[-2], lang) >= 18
+        ):
+            short_closers.append(sentences[-1])
+    if len(eligible) < 5:
+        return
+    share = len(short_closers) / len(eligible)
+    section("Paragraph closers")
+    report(
+        share <= 0.4 or len(short_closers) < 3,
+        f"{len(short_closers)}/{len(eligible)} multi-sentence paragraphs "
+        "end with a short sentence after a long one"
+        + (
+            ""
+            if share <= 0.4 or len(short_closers) < 3
+            else " — keep implications at section level, not as a repeated epigram"
+        ),
+    )
+
+
 def check_vocabulary(text, lang):
     section("AI vocabulary")
     words, phrases, watch = VOCAB[lang]
@@ -1157,7 +1188,7 @@ CAP_STOPWORDS = {
     "this", "to", "we", "what", "when", "where", "which", "who", "why",
     "with", "yes", "you", "your", "every", "most", "some", "one", "two",
     "der", "die", "das", "und", "wir", "sie", "ich", "es", "ein", "eine",
-    "der", "den", "dem", "aber", "auch", "nicht", "wenn", "dann", "hier",
+    "den", "dem", "aber", "auch", "nicht", "wenn", "dann", "hier",
 }
 ATTRIBUTION_RE = {
     "en": r"\b(according to|observers?|experts?|critics?|analysts?|"
@@ -1430,7 +1461,7 @@ def fidelity_tokens(text, lang, generous=False):
             numbers.add(n.rstrip("%"))
     if lang in CJK_LANGS:
         # Chinese prose writes its quantities in Chinese numerals, so a text
-        # like 三個星期，凌晨兩點至六點 contains no ASCII digit at all and the
+        # like 三個星期, 凌晨兩點至六點 contains no ASCII digit at all and the
         # figure check used to run on an empty set — inert exactly where it
         # was needed. Both forms normalise to the same token, which also stops
         # 兩點 → 2 點 being reported as an invented figure.
@@ -1736,8 +1767,8 @@ def run_siblings(paths, lang):
 
         Two blind judges found the same defect from opposite sides: a Hong Kong
         and a Taiwanese rewrite of one source come out as the same document in
-        two accents. 「也許哪天會裝，也許不會⋯我還蠻喜歡的」 against 「或許有一天
-        會裝，或許不會⋯我覺得幾好」 is one sentence through two filters. Word
+        two accents. 「也許哪天會裝, 也許不會⋯我還蠻喜歡的」 against 「或許有一天
+        會裝, 或許不會⋯我覺得幾好」 is one sentence through two filters. Word
         overlap cannot see it — every word differs. The shape does not.
         """
         paras = split_paragraphs(text)
@@ -1755,7 +1786,7 @@ def run_siblings(paths, lang):
             share = len(common) / len(union) if union else 0
             longest = sorted(common, key=len, reverse=True)[:3]
             # Shared facts and shared genre furniture are expected — T19 says
-            # 不便之處，敬請見諒 is *supposed* to repeat verbatim — so overlap is
+            # 不便之處, 敬請見諒 is *supposed* to repeat verbatim — so overlap is
             # reported, not failed. Only near-duplication is a defect.
             if share >= 0.35:
                 flagged += 1
@@ -1780,7 +1811,7 @@ def run_siblings(paths, lang):
             x, y = bones[a], bones[b]
             if len(x) < 3 or len(x) != len(y):
                 continue
-            aligned = sum(1 for p, q in zip(x, y) if p == q) / len(x)
+            aligned = sum(1 for p, q in zip(x, y, strict=False) if p == q) / len(x)
             if aligned < 0.8:
                 continue
             flagged += 1
@@ -1939,6 +1970,7 @@ def main():
     check_openers(sentences, lang)
     check_serial_enumeration(sentences, lang)
     check_paragraphs(paragraphs, lang)
+    check_paragraph_closers(paragraphs, lang)
     check_vocabulary(folded, lang)
     check_punctuation(text, folded, lang, sentences)
     check_language_flavor(text, folded, lang, sentences)

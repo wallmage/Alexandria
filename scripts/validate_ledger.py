@@ -258,6 +258,26 @@ def validate_references(data):
             for source_id in foundation_source_ids(claim_id)
             if source_id in sources_by_id
         }
+        if claim.get("time_sensitive") is True:
+            if claim_day is None:
+                errors.append(
+                    f"{claim_id}: time-sensitive claim requires a non-null as_of date."
+                )
+            elif report_day and (report_day - claim_day).days > 30:
+                errors.append(
+                    f"{claim_id}: time-sensitive claim is dated "
+                    f"{(report_day - claim_day).days} days before the report date."
+                )
+            for source_id in foundations:
+                source = sources_by_id[source_id]
+                if (
+                    not source.get("published")
+                    and not str(source.get("undated_reason") or "").strip()
+                ):
+                    errors.append(
+                        f"{source_id}: source for time-sensitive {claim_id} "
+                        "has no publication date or undated_reason."
+                    )
         if (
             claim.get("confidence") == "high"
             and claim.get("status") == "inference"

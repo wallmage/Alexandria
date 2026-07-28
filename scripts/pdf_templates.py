@@ -906,10 +906,11 @@ p {
 h1 + p,
 h2 + p {
     margin-bottom: 5mm;
-    max-width: 150mm;
+    max-width: 126mm;
     font-size: 11.4pt;
     line-height: 1.48;
     color: __MUTED__;
+    break-after: avoid;
 }
 
 strong, b {
@@ -921,6 +922,14 @@ a {
     color: __LINK__;
     text-decoration: none;
     overflow-wrap: anywhere;
+}
+.source-ref {
+    margin-left: 0.4mm;
+    font-family: __FONT_MONO__;
+    font-size: 6.4pt;
+    font-weight: 700;
+    color: __ACCENT_TEXT__;
+    vertical-align: super;
 }
 
 ul, ol {
@@ -1469,6 +1478,9 @@ TEMPLATE_CSS = {
 .template-executive h2 {
     font-weight: 600;
 }
+.template-executive .report-body {
+    max-width: 159mm;
+}
 """,
     "spectrum": """
 .template-spectrum .cover {
@@ -1585,6 +1597,15 @@ TEMPLATE_CSS = {
 .template-spectrum .metric-value {
     color: #fff;
 }
+.template-spectrum .report-body {
+    padding-left: 5mm;
+    border-left: 1.2mm solid #6f35f2;
+    background-image: linear-gradient(
+        90deg,
+        rgba(201,255,23,0.08),
+        transparent 18mm
+    );
+}
 """,
     "atlas": """
 .template-atlas .cover-copy {
@@ -1688,6 +1709,15 @@ TEMPLATE_CSS = {
 }
 .template-atlas .metric-card {
     border-radius: 2mm;
+}
+.template-atlas .report-body {
+    max-width: 148mm;
+    font-family: __FONT_DISPLAY__;
+    line-height: 1.7;
+}
+.template-atlas .report-body table,
+.template-atlas .report-body code {
+    font-family: __FONT_SANS__;
 }
 """,
     "horizon": """
@@ -2395,7 +2425,7 @@ TEMPLATE_CSS = {
 }
 .maison-art {
     inset: 0 0 auto;
-    height: 96mm;
+    height: 88mm;
 }
 .maison-art .maison-photo {
     opacity: 1;
@@ -2403,7 +2433,12 @@ TEMPLATE_CSS = {
 .maison-photo-shade {
     position: absolute;
     inset: 0;
-    background: linear-gradient(to bottom, rgba(0,0,0,0.28), transparent 58%, rgba(0,0,0,0.22));
+    background: linear-gradient(
+        to bottom,
+        rgba(0,0,0,0.48),
+        rgba(0,0,0,0.12) 58%,
+        rgba(0,0,0,0.36)
+    );
 }
 .maison-sector,
 .maison-folio {
@@ -2418,8 +2453,12 @@ TEMPLATE_CSS = {
 .maison-sector { left: 17mm; }
 .maison-folio { right: 17mm; font-size: 8pt; }
 .template-maison .cover-copy {
-    width: 176mm;
-    margin: 97mm auto 0;
+    position: absolute;
+    left: 17mm;
+    right: 17mm;
+    top: 104mm;
+    width: auto;
+    margin: 0;
     text-align: center;
 }
 .template-maison .cover-kicker {
@@ -2530,6 +2569,16 @@ TEMPLATE_CSS = {
 .template-maison .insight-panel {
     background: #1a1a1a;
 }
+.template-maison .report-body {
+    max-width: 142mm;
+    font-family: __FONT_DISPLAY__;
+    font-size: 10.6pt;
+    line-height: 1.72;
+}
+.template-maison .report-body code,
+.template-maison .report-body table {
+    font-family: __FONT_SANS__;
+}
 """,
     "blueprint": """
 @page toc {
@@ -2614,16 +2663,6 @@ TEMPLATE_CSS = {
 .template-blueprint .cover-record {
     background: #fff;
 }
-.template-maison .report-body {
-    max-width: 142mm;
-    font-family: __FONT_DISPLAY__;
-    font-size: 10.6pt;
-    line-height: 1.72;
-}
-.template-maison .report-body code,
-.template-maison .report-body table {
-    font-family: __FONT_SANS__;
-}
 .toc-blueprint {
     background:
         linear-gradient(to right, rgba(74,159,216,0.08) 0.35pt, transparent 0.35pt),
@@ -2704,7 +2743,12 @@ TEMPLATE_CSS = {
 .terrain-wash {
     position: absolute;
     inset: 0;
-    background: linear-gradient(to bottom, rgba(15,45,28,0.12), rgba(15,45,28,0.64));
+    background: linear-gradient(
+        to bottom,
+        rgba(10,32,19,0.46),
+        rgba(15,45,28,0.38) 48%,
+        rgba(15,45,28,0.72)
+    );
 }
 .terrain-grid {
     position: absolute;
@@ -2733,6 +2777,11 @@ TEMPLATE_CSS = {
 .template-terrain .cover-topline {
     color: #fff;
     border-color: rgba(255,255,255,0.5);
+    text-shadow: 0 0.5mm 1.2mm rgba(0,0,0,0.55);
+}
+.template-terrain .cover-kicker {
+    color: #fff;
+    text-shadow: 0 0.5mm 1.2mm rgba(0,0,0,0.55);
 }
 .template-terrain .cover-copy {
     width: 174mm;
@@ -2776,6 +2825,9 @@ TEMPLATE_CSS = {
     object-fit: cover;
     opacity: 0.64;
 }
+.toc-terrain.toc-chunk-01 .terrain-toc-map img { object-position: 50% 24%; }
+.toc-terrain.toc-chunk-02 .terrain-toc-map img { object-position: 28% 58%; }
+.toc-terrain.toc-chunk-03 .terrain-toc-map img { object-position: 74% 72%; }
 .terrain-toc-map span {
     position: absolute;
     left: 5mm;
@@ -2799,6 +2851,10 @@ TEMPLATE_CSS = {
 .template-terrain h2,
 .template-terrain h3 {
     color: #1b3a28;
+}
+.template-terrain .report-body {
+    padding-left: 6mm;
+    border-left: 1mm solid #2d5e3a;
 }
 """,
     "orbit": """
@@ -2979,6 +3035,12 @@ TEMPLATE_CSS = {
 .template-orbit .insight-panel,
 .template-orbit .takeaway-band {
     background: #0062ff;
+}
+.template-orbit .report-body {
+    padding-right: 6mm;
+    border-right: 0.7mm solid #0062ff;
+    background-image:
+        radial-gradient(circle at 100% 0, rgba(0,98,255,0.09), transparent 24mm);
 }
 """,
     "sunbeam": """
@@ -3203,6 +3265,10 @@ TEMPLATE_CSS = {
 .template-sunbeam .takeaway-band {
     background: #ff6b35;
 }
+.template-sunbeam .report-body {
+    padding-left: 6mm;
+    border-left: 2mm solid #ffd84d;
+}
 """,
     "current": """
 @page toc {
@@ -3369,6 +3435,13 @@ TEMPLATE_CSS = {
 .template-current .insight-panel,
 .template-current .takeaway-band {
     background: linear-gradient(120deg, #ff5c00, #ff8533);
+}
+.template-current .report-body {
+    padding-left: 5mm;
+    border-left: 1mm solid #ff5c00;
+    background-image:
+        linear-gradient(rgba(255,92,0,0.035) 0.35pt, transparent 0.35pt);
+    background-size: 100% 8mm;
 }
 """,
     "apricot": """
@@ -3553,6 +3626,16 @@ TEMPLATE_CSS = {
 }
 .template-apricot .takeaway-band {
     background: #ffb04a;
+}
+.template-apricot .report-body {
+    padding-right: 6mm;
+    border-right: 1mm solid #ff9800;
+    font-family: __FONT_DISPLAY__;
+    line-height: 1.7;
+}
+.template-apricot .report-body table,
+.template-apricot .report-body code {
+    font-family: __FONT_SANS__;
 }
 """,
 }

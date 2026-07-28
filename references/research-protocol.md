@@ -91,10 +91,19 @@ Make contradiction links reciprocal in the ledger. A disputed claim records the 
 ### Evidence of absence
 
 Claims that no equivalent, correction, benchmark, policy, or record was found
-need their own ledger entry. Record the queries run, the repositories or
-authorities checked, the date of the search, and where the evidence would
-normally appear. Phrase the report as a bounded search result, not proof that
-the thing cannot exist.
+need their own ledger entry. Fill `evidence_of_absence.queries`,
+`expected_locations`, and `searched_at` with the searches run, the repositories
+or authorities checked, and where the evidence would normally appear. Phrase
+the report as a bounded search result, not proof that the thing cannot exist.
+
+### Freshness records
+
+Mark claims whose truth can change during the report cycle as
+`time_sensitive: true`. They require a current `as_of` date. Their foundation
+sources require either a publication date or an `undated_reason` explaining
+why the source is a continuously updated record. The validator treats an
+`as_of` date more than 30 days before the report date as stale; use a shorter
+window when the subject moves faster.
 
 ## Evidence coverage gate
 

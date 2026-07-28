@@ -363,6 +363,32 @@ class LedgerReferenceTests(unittest.TestCase):
         self.assertTrue(any("S1 is accessed after the report date" in error for error in errors), errors)
         self.assertTrue(any("C1 is dated after the report date" in error for error in errors), errors)
 
+    def test_time_sensitive_claims_need_current_dates_and_dated_sources(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = None
+        data["sources"][0]["published"] = None
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("time-sensitive", joined)
+        self.assertIn("undated_reason", joined)
+
+        data["claims"][0]["as_of"] = "2026-07-28"
+        data["sources"][0]["undated_reason"] = (
+            "This is a continuously updated official documentation page."
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertFalse(any("time-sensitive" in error for error in errors), errors)
+        self.assertFalse(any("undated_reason" in error for error in errors), errors)
+
+    def test_stale_time_sensitive_claim_is_reported(self):
+        data = valid_quality_ledger()
+        data["report_date"] = "2026-07-28"
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = "2026-05-01"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("88 days before" in error for error in errors), errors)
+
     def test_gap_coverage_cannot_hide_claims(self):
         data = valid_quality_ledger()
         data["coverage"][0]["status"] = "gap"

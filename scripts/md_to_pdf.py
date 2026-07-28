@@ -20,31 +20,43 @@ import tempfile
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, unquote_to_bytes, urlparse
 from urllib.request import url2pathname
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from content_gate import validate_content_receipt
-from pdf_templates import (
-    TEMPLATE_CHOICES,
-    TEMPLATES,
-    build_css,
-    bundled_horizon_image_data_uri,
-    bundled_template_image_data_uri,
-    cover_art_html,
-    select_adaptive_companion,  # noqa: F401 -- intentional public helper
-    select_template,
-)
-from validate_report import (
-    detect_language as detect_report_language,
-)
-from validate_report import (
-    validate_markdown,
-    validate_rewild_receipt,
-)
+try:
+    from .content_gate import validate_content_receipt
+    from .pdf_templates import (
+        TEMPLATE_CHOICES,
+        TEMPLATES,
+        build_css,
+        bundled_horizon_image_data_uri,
+        bundled_template_image_data_uri,
+        cover_art_html,
+        select_adaptive_companion,
+        select_template,
+    )
+    from .report_contract import detect_language as detect_report_language
+    from .report_contract import localized_date, report_length_policy
+    from .validate_report import validate_markdown, validate_rewild_receipt
+except ImportError:
+    from content_gate import validate_content_receipt
+    from pdf_templates import (
+        TEMPLATE_CHOICES,
+        TEMPLATES,
+        build_css,
+        bundled_horizon_image_data_uri,
+        bundled_template_image_data_uri,
+        cover_art_html,
+        select_adaptive_companion,  # noqa: F401 -- intentional public helper
+        select_template,
+    )
+    from report_contract import detect_language as detect_report_language
+    from report_contract import localized_date, report_length_policy
+    from validate_report import validate_markdown, validate_rewild_receipt
 
 LANG_CHOICES = ("auto", "en", "zh-CN", "zh-HK")
 SAFE_TAGS = {
@@ -176,13 +188,21 @@ def make_url_fetcher(asset_root, default_fetcher=None):
     def secure_fetch(url):
         parsed = urlparse(url)
         if parsed.scheme == "data":
-            media_type = url[5:].split(",", 1)[0].split(";", 1)[0].lower()
+            header, separator, payload = url[5:].partition(",")
+            if not separator:
+                raise ValueError("Malformed embedded image data URL.")
+            media_type = header.split(";", 1)[0].lower()
             allowed_media_types = {
                 item.removeprefix("data:") for item in SAFE_IMAGE_DATA_TYPES
             }
             if media_type not in allowed_media_types:
                 raise ValueError("Only PNG, JPEG, GIF, and WebP data URLs are allowed.")
-            if len(url) > MAX_ASSET_BYTES * 2:
+            if ";base64" in header.casefold():
+                maximum_payload = 4 * ((MAX_ASSET_BYTES + 2) // 3)
+                too_large = len(payload) > maximum_payload
+            else:
+                too_large = len(unquote_to_bytes(payload)) > MAX_ASSET_BYTES
+            if too_large:
                 raise ValueError("Embedded image exceeds the resource limit.")
             if default_fetcher is None:
                 from weasyprint import default_url_fetcher as fetch
@@ -453,6 +473,7 @@ def build_toc_html(html_body, lang="en", template="executive"):
             is_first = page_index == 0
             pages.append(
                 f'<section class="toc-page {special["class"]}'
+                + f' toc-chunk-{page_index + 1:02d}'
                 + ("" if is_first else " toc-special-cont")
                 + '">'
                 f'<div class="toc-kicker">{html.escape(kicker)} / {page_index + 1:02d}</div>'
@@ -992,6 +1013,36 @@ def wrap_sources_section(html_body):
     return html_body
 
 
+def annotate_inline_citations(html_body):
+    """Add stable printed source numbers to body links found in the bibliography."""
+    marker = '<section class="sources-section">'
+    if marker not in html_body:
+        return html_body
+    body, sources = html_body.split(marker, 1)
+    ordered_urls = []
+    for match in re.finditer(r'<a\b[^>]*href="(https?://[^"]+)"', sources):
+        url = html.unescape(match.group(1))
+        if url not in ordered_urls:
+            ordered_urls.append(url)
+    source_numbers = {
+        url: f"{index:02d}" for index, url in enumerate(ordered_urls, 1)
+    }
+
+    def add_number(match):
+        number = source_numbers.get(html.unescape(match.group("url")))
+        if not number:
+            return match.group(0)
+        return match.group(0) + f'<sup class="source-ref">[{number}]</sup>'
+
+    body = re.sub(
+        r'<a\b[^>]*href="(?P<url>https?://[^"]+)"[^>]*>.*?</a>',
+        add_number,
+        body,
+        flags=re.DOTALL,
+    )
+    return body + marker + sources
+
+
 def escape_css_content(value):
     """Escape text for a double-quoted CSS content string."""
     return (
@@ -1033,17 +1084,19 @@ def load_weasyprint_html():
 
 def localized_today(lang, today=None):
     today = today or datetime.now().astimezone().date()
-    if lang == "en":
-        months = (
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
-        )
-        return f"{today.day:02d} {months[today.month - 1]} {today.year}"
-    return f"{today.year}年{today.month}月{today.day}日"
+    return localized_date(lang, today)
 
 
-def extract_report_meta(md_text):
-    """Extract the first H1 and an optional immediate blockquote metadata line."""
+def plain_markdown_inline(value):
+    """Reduce a short Markdown metadata line to safe cover text."""
+    value = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", value)
+    value = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", value)
+    value = re.sub(r"(?<!\\)[*_~`]+", "", value)
+    return re.sub(r"\\([\\`*_{}\[\]()#+\-.!])", r"\1", value).strip()
+
+
+def extract_report_header(md_text):
+    """Extract the first H1, date, and standfirst from the immediate blockquote."""
     try:
         from validate_report import _mask_fenced_code
     except ImportError:
@@ -1077,8 +1130,19 @@ def extract_report_meta(md_text):
     )
     report_date = next(
         (value for value in metadata_lines if date_pattern.match(value)),
-        metadata_lines[0] if metadata_lines else "",
+        "",
     )
+    standfirst = " ".join(
+        plain_markdown_inline(value)
+        for value in metadata_lines
+        if value and not date_pattern.match(value)
+    )
+    return title, report_date, standfirst
+
+
+def extract_report_meta(md_text):
+    """Compatibility wrapper returning the first H1 and report date."""
+    title, report_date, _ = extract_report_header(md_text)
     return title, report_date
 
 
@@ -1185,7 +1249,7 @@ def md_to_html(
     markdown = load_markdown()
     lang = detect_language(md_text) if lang == "auto" else lang
 
-    source_title, meta_line = extract_report_meta(md_text)
+    source_title, meta_line, source_standfirst = extract_report_header(md_text)
     provisional_title = title or source_title or "Alexandria Research Report"
     selected_template = select_template(
         f"{provisional_title}\n{md_text[:5000]}", template
@@ -1193,7 +1257,7 @@ def md_to_html(
     localized = localized_settings(lang, selected_template)
     if not title:
         title = source_title or localized["default_title"]
-    subtitle = subtitle or ""
+    subtitle = subtitle or source_standfirst
     report_date = report_date or meta_line or localized_today(lang)
     prepared_by = prepared_by or "Alexandria"
     client = client.strip() if client and client.strip() else None
@@ -1209,18 +1273,18 @@ def md_to_html(
     if first_h1_match:
         html_body = html_body.replace(first_h1_match.group(0), "", 1)
 
-    if meta_line:
-        meta_line_html = html.escape(meta_line)
-        meta_bq_pattern = re.compile(
-            r"<blockquote>(?:(?!</blockquote>).)*"
-            + re.escape(meta_line_html)
-            + r"(?:(?!</blockquote>).)*</blockquote>",
-            re.DOTALL,
+    if meta_line or source_standfirst:
+        html_body = re.sub(
+            r"<blockquote>.*?</blockquote>",
+            "",
+            html_body,
+            count=1,
+            flags=re.DOTALL,
         )
-        html_body = meta_bq_pattern.sub("", html_body, count=1)
 
     html_body = transform_callouts(html_body)
     html_body = wrap_sources_section(html_body)
+    html_body = annotate_inline_citations(html_body)
     toc_html = build_toc_html(html_body, lang, selected_template)
 
     safe_title_css = escape_css_content(title)
@@ -1457,22 +1521,24 @@ def validate_rewild_for_render(input_path, receipt_path, lang):
     )
     text = input_path.read_text(encoding="utf-8")
     if expected_lang == "en":
+        minimum, maximum, _ = report_length_policy(expected_lang)
         errors.extend(
             validate_markdown(
                 text,
-                min_words=7500,
-                max_words=15000,
+                min_words=minimum,
+                max_words=maximum,
                 min_sources=1,
                 min_sections=3,
                 expected_lang="en",
             )
         )
     elif expected_lang in {"zh-CN", "zh-HK"}:
+        minimum, maximum, _ = report_length_policy(expected_lang)
         errors.extend(
             validate_markdown(
                 text,
-                min_chars=5000,
-                max_chars=10000,
+                min_chars=minimum,
+                max_chars=maximum,
                 min_sources=1,
                 min_sections=3,
                 expected_lang=expected_lang,

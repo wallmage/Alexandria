@@ -246,6 +246,55 @@ class ConverterUnitTests(unittest.TestCase):
         self.assertIn("#ff5c00", current)
         self.assertIn("#ff9800", apricot)
 
+    def test_every_template_css_resolves_all_placeholders(self):
+        for template in self.converter.TEMPLATES:
+            with self.subTest(template=template):
+                css = self.converter.build_css(
+                    template,
+                    font_sans="sans",
+                    font_display="serif",
+                    font_mono="mono",
+                    header_text="Header",
+                    page_label="",
+                    page_suffix="",
+                    footer_text="Footer",
+                    insight_label="Insight",
+                    takeaway_label="Takeaway",
+                )
+                self.assertIsNone(re.search(r"__[A-Z_]+__", css))
+
+    def test_paged_media_css_keeps_rules_and_rows_out_of_content(self):
+        css = self.converter.build_css(
+            "executive",
+            font_sans="sans",
+            font_display="serif",
+            font_mono="mono",
+            header_text="Header",
+            page_label="",
+            page_suffix="",
+            footer_text="Footer",
+            insight_label="Insight",
+            takeaway_label="Takeaway",
+        )
+        self.assertNotRegex(css, r"@top-(?:left|right)\s*\{[^}]*padding-bottom")
+        self.assertNotRegex(css, r"@bottom-(?:left|right)\s*\{[^}]*padding-top")
+        self.assertRegex(css, r"tr,\s*td,\s*th\s*\{[^}]*break-inside:\s*avoid")
+
+    def test_sanitizer_drops_contents_of_active_or_embedded_elements(self):
+        value = (
+            "<p>Visible</p><script>alert(1)</script>"
+            "<style>body{display:none}</style><iframe>fallback</iframe>"
+        )
+        sanitized = self.converter.sanitize_html_fragment(value)
+        self.assertEqual(sanitized, "<p>Visible</p>")
+
+    def test_extract_report_meta_ignores_headings_inside_fenced_code(self):
+        source = "```markdown\n# Not the title\n```\n\n# Actual title\n\n> 28 July 2026\n"
+        self.assertEqual(
+            self.converter.extract_report_meta(source),
+            ("Actual title", "28 July 2026"),
+        )
+
     def test_every_small_text_palette_token_meets_wcag_aa_on_white(self):
         def luminance(color):
             channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]

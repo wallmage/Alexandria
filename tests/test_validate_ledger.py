@@ -99,6 +99,45 @@ def valid_quality_ledger():
 
 
 class LedgerReferenceTests(unittest.TestCase):
+    def test_v3_ledger_requires_an_independent_source_portfolio(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["provenance"] = "primary_interested"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("portfolio has no independent source" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_supported_coverage_cannot_rely_only_on_interested_sources(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["source_ids"] = ["S1"]
+        data["claims"][0]["triangulation"] = {
+            "status": "limited",
+            "rationale": "Only the subject's record was available.",
+        }
+        data["claims"][0]["confidence"] = "medium"
+        data["claims"][0]["limitations"] = "No independent corroboration was found."
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("supported coverage decision relies only on interested sources" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_high_confidence_inference_requires_independent_foundation(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["status"] = "inference"
+        data["claims"][0]["source_ids"] = ["S1"]
+        data["claims"][0]["triangulation"] = {
+            "status": "limited",
+            "rationale": "Only the subject's record was available.",
+        }
+        data["claims"][0]["limitations"] = "No independent corroboration was found."
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("high-confidence inference" in error.lower() for error in errors),
+            errors,
+        )
+
     def test_schema_requires_the_research_brief_and_synthesis_contract(self):
         schema = json.loads(
             (ROOT / "references" / "evidence-ledger.schema.json").read_text(

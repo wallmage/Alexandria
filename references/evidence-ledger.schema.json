@@ -76,6 +76,7 @@
         "intended_reader",
         "decision_or_use",
         "report_language",
+        "editorial_mode",
         "scope"
       ],
       "properties": {
@@ -89,6 +90,16 @@
         },
         "report_language": {
           "enum": ["en", "zh-CN", "zh-HK"]
+        },
+        "editorial_mode": {
+          "enum": [
+            "analytical",
+            "narrative",
+            "explanatory",
+            "investigative",
+            "historical",
+            "critical"
+          ]
         },
         "scope": {
           "type": "object",

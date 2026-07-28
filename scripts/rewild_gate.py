@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -166,10 +167,21 @@ def file_sha256(path):
 
 
 def _checker_result(stdout):
-    marker = stdout.rfind("\n{")
-    if marker < 0:
-        raise ValueError("checker did not emit its JSON result")
-    return json.loads(stdout[marker + 1 :])
+    value = stdout.strip()
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(value):
+            if char != "{":
+                continue
+            try:
+                result, end = decoder.raw_decode(value[index:])
+            except json.JSONDecodeError:
+                continue
+            if not value[index + end :].strip():
+                return result
+    raise ValueError("checker did not emit its JSON result")
 
 
 def _load_style_waivers(path):
@@ -608,12 +620,12 @@ def _semantic_fidelity_errors(source, report, report_lang):
         source_right = contains(source_folded, right)
         report_left = contains(report_folded, left)
         report_right = contains(report_folded, right)
-        if source_left and not source_right and report_right:
+        if source_left and not source_right and report_right and not report_left:
             errors.append(
                 f"Semantic direction reversal: source uses '{left}', "
                 f"report uses '{right}'."
             )
-        if source_right and not source_left and report_left:
+        if source_right and not source_left and report_left and not report_right:
             errors.append(
                 f"Semantic direction reversal: source uses '{right}', "
                 f"report uses '{left}'."
@@ -687,8 +699,6 @@ def run_gate(
     source_path = Path(source_path).resolve()
     review_note_path = Path(review_note_path).resolve()
     receipt_path = Path(receipt_path).resolve()
-    receipt_path.unlink(missing_ok=True)
-
     errors = []
     if report_lang not in PROFILES:
         return [f"Unsupported report language: {report_lang}"]
@@ -711,8 +721,21 @@ def run_gate(
     )
     if review_errors:
         return review_errors
+    if file_sha256(report_path) == file_sha256(source_path) and any(
+        isinstance(finding, dict)
+        and finding.get("disposition") == "resolved"
+        for finding in review_note.get("findings", [])
+    ):
+        return [
+            "Pre-Rewild source and final report are identical, but the "
+            "review note claims resolved findings."
+        ]
     errors.extend(
-        _semantic_fidelity_errors(source_text, report_text, report_lang)
+        _semantic_fidelity_errors(
+            _checker_prose(source_text),
+            _checker_prose(report_text),
+            report_lang,
+        )
     )
     errors.extend(_length_errors(report_text, report_lang))
 
@@ -740,12 +763,16 @@ def run_gate(
             checker_lang,
             "--json",
         ]
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            return ["Rewild checker timed out after 300 seconds."]
     try:
         result = _checker_result(completed.stdout)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -847,10 +874,26 @@ def run_gate(
         ],
     }
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    receipt_path.write_text(
-        json.dumps(receipt, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=receipt_path.parent,
+            prefix=f".{receipt_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_name = handle.name
+            json.dump(receipt, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(temp_name).replace(receipt_path)
+    except Exception:
+        if temp_name:
+            Path(temp_name).unlink(missing_ok=True)
+        raise
     return []
 
 

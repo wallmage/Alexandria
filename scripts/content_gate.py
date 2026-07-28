@@ -64,6 +64,11 @@ def _normalized_heading(text):
     return _normalized(text).casefold()
 
 
+def _same_bound_name(recorded, actual):
+    """Allow a hash-bound artifact directory to move without weakening identity."""
+    return bool(recorded) and Path(str(recorded)).name == Path(actual).name
+
+
 def _section_review_errors(report_text, review):
     report_headings = [
         heading
@@ -162,13 +167,31 @@ def run_content_gate(report_path, ledger_path, review_note_path, receipt_path):
             "Content review language does not match the evidence ledger."
         )
 
+    scores = review.get("scores", {})
+    if isinstance(scores, dict):
+        for name, result in scores.items():
+            if (
+                isinstance(result, dict)
+                and isinstance(result.get("score"), int)
+                and result["score"] < 4
+            ):
+                errors.append(
+                    f"Content review score {name} is {result['score']}; "
+                    "minimum passing score is 4."
+                )
+    checks = review.get("checks", {})
+    if isinstance(checks, dict):
+        for name, passed in checks.items():
+            if passed is False:
+                errors.append(f"Content review check {name} did not pass.")
+
     report_hash = file_sha256(report_path)
     ledger_hash = file_sha256(ledger_path)
-    if review.get("report_path") != str(report_path):
+    if not _same_bound_name(review.get("report_path"), report_path):
         errors.append("Content review belongs to a different final report.")
     if review.get("report_sha256") != report_hash:
         errors.append("Content review does not match the final report.")
-    if review.get("ledger_path") != str(ledger_path):
+    if not _same_bound_name(review.get("ledger_path"), ledger_path):
         errors.append("Content review belongs to a different evidence ledger.")
     if review.get("ledger_sha256") != ledger_hash:
         errors.append("Content review does not match the evidence ledger.")
@@ -241,9 +264,9 @@ def validate_content_receipt(
         errors.append("Content receipt does not record a passing gate.")
     if expected_lang and receipt.get("report_lang") != expected_lang:
         errors.append("Content receipt language does not match the expected report language.")
-    if receipt.get("report_path") != str(report_path):
+    if not _same_bound_name(receipt.get("report_path"), report_path):
         errors.append("Content receipt belongs to a different report.")
-    if receipt.get("ledger_path") != str(ledger_path):
+    if not _same_bound_name(receipt.get("ledger_path"), ledger_path):
         errors.append("Content receipt belongs to a different ledger.")
 
     for path, key, label in (

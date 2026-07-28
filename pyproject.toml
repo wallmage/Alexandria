@@ -1,3 +1,20 @@
+[project]
+name = "alexandria-research-skill"
+version = "3.1.0"
+description = "Source-backed research reports with validated PDF production"
+requires-python = ">=3.10"
+dependencies = [
+  "Markdown==3.10.2",
+  "WeasyPrint==69.0",
+  "pypdf==6.14.2",
+  "jsonschema==4.25.1",
+  "pypdfium2==5.12.1",
+  "Pillow==12.1.1",
+]
+
+[project.optional-dependencies]
+dev = ["ruff==0.14.14"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100

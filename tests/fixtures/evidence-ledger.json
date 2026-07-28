@@ -6,6 +6,7 @@
     "intended_reader": "Alexandria maintainers",
     "decision_or_use": "Confirm that the test fixture exercises the required render path.",
     "report_language": "en",
+    "editorial_mode": "analytical",
     "scope": {
       "time_horizon": "Current fixture behavior",
       "geography": "Not applicable",

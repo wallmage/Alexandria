@@ -47,6 +47,18 @@ class RewildGateTests(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn("warning", result.stdout.lower())
 
+    def test_english_serial_enumeration_is_blocked(self):
+        result = run_checker(
+            "The system inspects repositories, edits files, runs commands, "
+            "opens browsers, delegates work, reviews patches, writes reports, "
+            "and publishes results. A short sentence changes the rhythm. "
+            "The remaining prose is direct and uses ordinary words. "
+            "Readers can verify each claim from the cited record.",
+            report_lang="en",
+        )
+        self.assertEqual(1, result.returncode)
+        self.assertIn("Serial enumeration", result.stdout)
+
     def test_simplified_chinese_ai_formula_is_blocked(self):
         result = run_checker(
             "近年来，随着人工智能技术的快速发展，行业经历了深刻变革。"

@@ -558,7 +558,8 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
         errors.append("Rewild receipt has an unsupported schema version.")
     if receipt.get("status") != "passed":
         errors.append("Rewild receipt does not record a passing gate.")
-    if receipt.get("report_path") != str(report_path):
+    recorded_report = receipt.get("report_path")
+    if not recorded_report or Path(str(recorded_report)).name != report_path.name:
         errors.append("Rewild receipt belongs to a different report path.")
     if expected_lang and receipt.get("report_lang") != expected_lang:
         errors.append(

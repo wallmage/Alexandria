@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import html
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -353,9 +354,10 @@ def bundled_horizon_image_data_uri():
 
 def cover_art_html(template, cover_image=None):
     """Return decorative, non-text cover elements for one visual system."""
+    safe_cover_image = html.escape(str(cover_image), quote=True) if cover_image else None
     image = (
-        f'<img class="cover-photo" src="{cover_image}" alt="">'
-        if cover_image
+        f'<img class="cover-photo" src="{safe_cover_image}" alt="">'
+        if safe_cover_image
         else ""
     )
     if template == "executive":
@@ -521,8 +523,7 @@ COMMON_CSS = """
         font-weight: 700;
         letter-spacing: 1.25pt;
         color: __DARK__;
-        border-bottom: 0.6pt solid __RULE__;
-        padding-bottom: 3.2mm;
+        vertical-align: bottom;
     }
     @top-right {
         content: "__HEADER__";
@@ -530,8 +531,7 @@ COMMON_CSS = """
         font-size: 7pt;
         letter-spacing: 0.65pt;
         color: __MUTED__;
-        border-bottom: 0.6pt solid __RULE__;
-        padding-bottom: 3.2mm;
+        vertical-align: bottom;
     }
     @bottom-left {
         content: "__FOOTER__";
@@ -539,8 +539,7 @@ COMMON_CSS = """
         font-size: 6.6pt;
         letter-spacing: 0.7pt;
         color: __MUTED__;
-        border-top: 0.5pt solid __RULE__;
-        padding-top: 2.8mm;
+        vertical-align: top;
     }
     @bottom-right {
         content: "__PAGE_LABEL__ " counter(page) "__PAGE_SUFFIX__";
@@ -548,8 +547,7 @@ COMMON_CSS = """
         font-size: 7.5pt;
         font-weight: 700;
         color: __DARK__;
-        border-top: 0.5pt solid __RULE__;
-        padding-top: 2.8mm;
+        vertical-align: top;
     }
 }
 
@@ -768,7 +766,7 @@ body {
     color: __MUTED__;
 }
 
-.toc-list {
+.toc-page {
     counter-reset: tocitem;
 }
 
@@ -784,7 +782,7 @@ body {
 }
 
 .toc-number::before {
-    content: counter(tocitem, decimal-leading-zero);
+    content: attr(data-toc-index);
     font-size: 7.5pt;
     font-weight: 800;
     letter-spacing: 0.7pt;
@@ -829,6 +827,8 @@ h1 {
     padding: 16mm 0 5mm;
     border-bottom: 1.4pt solid __DARK__;
     page-break-before: always;
+    break-after: avoid;
+    break-inside: avoid;
     font-family: __FONT_DISPLAY__;
     font-size: 28pt;
     line-height: 1.08;
@@ -933,9 +933,9 @@ blockquote p {
 }
 
 .metric-card {
-    display: inline-block;
+    display: block;
     box-sizing: border-box;
-    width: 54mm;
+    width: 100%;
     margin: 5mm 0;
     padding: 5mm;
     background: __PALE__;
@@ -955,6 +955,7 @@ blockquote p {
     font-size: 27pt;
     font-weight: 700;
     line-height: 1;
+    white-space: nowrap;
     color: __DARK__;
 }
 
@@ -1023,6 +1024,12 @@ table {
     break-inside: auto;
 }
 
+tr,
+td,
+th {
+    break-inside: avoid;
+}
+
 thead {
     display: table-header-group;
 }
@@ -1049,7 +1056,8 @@ tbody tr:nth-child(even) {
 
 code {
     font-family: __FONT_MONO__;
-    padding: 0.4mm 1.2mm;
+    padding: 0.2mm 0.7mm;
+    margin: 0 -0.2mm;
     background: __PALE__;
     color: __DARK__;
     font-size: 9pt;
@@ -1083,6 +1091,31 @@ hr {
     margin: 7mm 0;
     border: 0;
     border-top: 0.55pt solid __RULE__;
+}
+
+.sources-section {
+    counter-reset: sourceitem;
+}
+.sources-section li {
+    counter-increment: sourceitem;
+    list-style: none;
+    padding-left: 0;
+}
+.sources-section li::before {
+    content: "[" counter(sourceitem, decimal-leading-zero) "] ";
+    color: __ACCENT_TEXT__;
+    font-family: __FONT_MONO__;
+    font-size: 7pt;
+}
+.sources-section a[href^="http"]::after {
+    content: "\\A" attr(href);
+    display: block;
+    white-space: pre-wrap;
+    color: __MUTED__;
+    font-family: __FONT_MONO__;
+    font-size: 6.8pt;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
 }
 """
 
@@ -1504,8 +1537,8 @@ TEMPLATE_CSS = {
 }
 .template-spectrum .toc-page {
     background-image:
-        linear-gradient(to right, rgba(79,70,229,0.07) 0.35pt, transparent 0.35pt),
-        linear-gradient(to bottom, rgba(79,70,229,0.045) 0.35pt, transparent 0.35pt);
+        linear-gradient(to right, rgba(79,70,229,0.025) 0.35pt, transparent 0.35pt),
+        linear-gradient(to bottom, rgba(79,70,229,0.02) 0.35pt, transparent 0.35pt);
     background-size: 33mm 33mm;
 }
 .template-spectrum h2::before {
@@ -2318,6 +2351,10 @@ TEMPLATE_CSS = {
 .template-horizon img {
     border-left: 2mm solid #0062ff;
 }
+.template-horizon .report-body {
+    border-left: 1.2mm solid #0062ff;
+    padding-left: 7mm;
+}
 """,
     "maison": """
 @page toc {
@@ -2438,6 +2475,17 @@ TEMPLATE_CSS = {
 .toc-maison .toc-list {
     margin: -18mm 0 0 62mm;
 }
+.toc-maison.toc-special-cont .toc-title {
+    margin: 4mm 0 8mm;
+    font-size: 28pt;
+    letter-spacing: -0.6pt;
+}
+.toc-maison.toc-special-cont .maison-toc-note {
+    display: none;
+}
+.toc-maison.toc-special-cont .toc-list {
+    margin: 0;
+}
 .toc-maison .toc-entry {
     grid-template-columns: 10mm 1fr 10mm;
 }
@@ -2544,6 +2592,16 @@ TEMPLATE_CSS = {
 .template-blueprint .cover-record {
     background: #fff;
 }
+.template-maison .report-body {
+    max-width: 142mm;
+    font-family: __FONT_DISPLAY__;
+    font-size: 10.6pt;
+    line-height: 1.72;
+}
+.template-maison .report-body code,
+.template-maison .report-body table {
+    font-family: __FONT_SANS__;
+}
 .toc-blueprint {
     background:
         linear-gradient(to right, rgba(74,159,216,0.08) 0.35pt, transparent 0.35pt),
@@ -2593,6 +2651,13 @@ TEMPLATE_CSS = {
 .template-blueprint h2,
 .template-blueprint h3 {
     font-weight: 720;
+}
+.template-blueprint .report-body {
+    padding-left: 6mm;
+    border-left: 0.5pt solid rgba(74,159,216,0.55);
+    background-image:
+        linear-gradient(to right, rgba(74,159,216,0.04) 0.35pt, transparent 0.35pt);
+    background-size: 8mm 8mm;
 }
 """,
     "terrain": """
@@ -2812,7 +2877,7 @@ TEMPLATE_CSS = {
     bottom: 20mm;
     width: 78mm;
     height: 78mm;
-    border: 0.6pt solid rgba(255,255,255,0.46);
+    border: 0.6pt solid rgba(255,255,255,0.09);
     border-radius: 50%;
 }
 .toc-orbit > * {
@@ -2848,10 +2913,13 @@ TEMPLATE_CSS = {
     top: -11mm;
     width: 50mm;
     height: 50mm;
-    border: 0.6pt solid rgba(255,255,255,0.6);
+    border: 0.6pt solid rgba(255,255,255,0.09);
     border-radius: 50%;
+    z-index: 0;
 }
 .toc-orbit .toc-list {
+    position: relative;
+    z-index: 3;
     margin-left: 61mm;
     color: #fff;
 }
@@ -3559,9 +3627,6 @@ def build_css(
             "apricot": "#fff3e6",
         }[template],
     }
-    css = COMMON_CSS
-    for placeholder, value in values.items():
-        css = css.replace(placeholder, value)
     shared_feature = (
         SHARED_REFERENCE_FEATURE_CSS
         if template
@@ -3576,4 +3641,13 @@ def build_css(
         }
         else ""
     )
-    return css + shared_feature + TEMPLATE_CSS[template] + RESPONSIVE_COVER_CSS
+    css = COMMON_CSS + shared_feature + TEMPLATE_CSS[template] + RESPONSIVE_COVER_CSS
+    for placeholder, value in values.items():
+        css = css.replace(placeholder, value)
+    unresolved = sorted(set(re.findall(r"__[A-Z_]+__", css)))
+    if unresolved:
+        raise ValueError(
+            f"Unresolved CSS placeholders for template {template}: "
+            + ", ".join(unresolved)
+        )
+    return css

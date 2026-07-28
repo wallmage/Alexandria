@@ -22,7 +22,7 @@ It is designed for questions that deserve more than a quick summary: How did thi
 
 ## What the finished report looks like
 
-You receive a professionally crafted, beautiful PDF—not a rough text export. It has a considered cover, table of contents, topic-specific chapters, clear judgments, careful typography, and citations beside the claims they support. The finished report is designed to be genuinely beautiful.
+You receive a professionally produced PDF—not a rough text export. It has a considered cover, table of contents, topic-specific chapters, clear judgments, careful typography, and citations beside the claims they support.
 
 There are eleven complete visual systems:
 

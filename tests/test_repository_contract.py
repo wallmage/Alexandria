@@ -16,8 +16,8 @@ class RepositoryContractTests(unittest.TestCase):
                 "the world's knowledge",
                 "anything",
                 "no fixed subject limits",
-                "professionally crafted",
-                "beautiful PDF",
+                "professionally produced PDF",
+                "citations beside the claims",
             ),
             "README.zh-CN.md": (
                 "亚历山大图书馆",
@@ -25,7 +25,7 @@ class RepositoryContractTests(unittest.TestCase):
                 "任何主题",
                 "没有固定的选题限制",
                 "专业制作",
-                "漂亮的 PDF",
+                "紧跟在相关事实后的引用",
             ),
             "README.zh-HK.md": (
                 "亞歷山大圖書館",
@@ -33,7 +33,7 @@ class RepositoryContractTests(unittest.TestCase):
                 "任何題目",
                 "沒有固定的選題限制",
                 "專業製作",
-                "漂亮的 PDF",
+                "緊貼相關事實的引用",
             ),
         }
         for filename, phrases in required_phrases.items():
@@ -177,7 +177,13 @@ class RepositoryContractTests(unittest.TestCase):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self.assertEqual(2, schema["properties"]["schema_version"]["const"])
         self.assertIn("section_reviews", schema["required"])
-        self.assertEqual(4, schema["$defs"]["score"]["properties"]["score"]["minimum"])
+        self.assertEqual(1, schema["$defs"]["score"]["properties"]["score"]["minimum"])
+        self.assertEqual(
+            "boolean",
+            schema["properties"]["checks"]["properties"][
+                "counterevidence_tested"
+            ]["type"],
+        )
         result = subprocess.run(
             [sys.executable, "-S", str(ROOT / "scripts" / "content_gate.py"), "--help"],
             capture_output=True,

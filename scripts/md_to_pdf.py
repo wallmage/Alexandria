@@ -21,6 +21,7 @@ from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -37,15 +38,22 @@ from pdf_templates import (
     select_adaptive_companion,  # noqa: F401 -- intentional public helper
     select_template,
 )
-from validate_report import validate_markdown, validate_rewild_receipt
+from validate_report import (
+    detect_language as detect_report_language,
+)
+from validate_report import (
+    validate_markdown,
+    validate_rewild_receipt,
+)
 
 LANG_CHOICES = ("auto", "en", "zh-CN", "zh-HK")
-TRADITIONAL_MARKERS = set("這個為與報發後裡麼還說對時國學術據點體現關於會開")
-SIMPLIFIED_MARKERS = set("这个为与报发后里么还说对时国学术据点体现关于会开")
 SAFE_TAGS = {
     "a", "b", "blockquote", "br", "code", "del", "div", "em", "h1", "h2",
     "h3", "h4", "h5", "h6", "hr", "i", "img", "li", "ol", "p", "pre",
     "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
+}
+SUPPRESSED_CONTENT_TAGS = {
+    "script", "style", "template", "noscript", "iframe", "object", "embed"
 }
 SAFE_ATTRIBUTES = {
     "a": {"href", "title"},
@@ -96,8 +104,14 @@ class SafeHTMLParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=False)
         self.parts = []
+        self.suppressed_depth = 0
 
     def handle_starttag(self, tag, attrs):
+        if tag in SUPPRESSED_CONTENT_TAGS:
+            self.suppressed_depth += 1
+            return
+        if self.suppressed_depth:
+            return
         if tag not in SAFE_TAGS:
             return
         allowed = SAFE_ATTRIBUTES.get(tag, set())
@@ -117,19 +131,32 @@ class SafeHTMLParser(HTMLParser):
         self.parts.append(f"<{tag}{''.join(safe_attrs)}>")
 
     def handle_startendtag(self, tag, attrs):
+        if tag in SUPPRESSED_CONTENT_TAGS:
+            return
         self.handle_starttag(tag, attrs)
 
     def handle_endtag(self, tag):
+        if tag in SUPPRESSED_CONTENT_TAGS:
+            self.suppressed_depth = max(0, self.suppressed_depth - 1)
+            return
+        if self.suppressed_depth:
+            return
         if tag in SAFE_TAGS and tag not in {"br", "hr", "img"}:
             self.parts.append(f"</{tag}>")
 
     def handle_data(self, data):
+        if self.suppressed_depth:
+            return
         self.parts.append(html.escape(data, quote=False))
 
     def handle_entityref(self, name):
+        if self.suppressed_depth:
+            return
         self.parts.append(f"&{name};")
 
     def handle_charref(self, name):
+        if self.suppressed_depth:
+            return
         self.parts.append(f"&#{name};")
 
 
@@ -164,7 +191,11 @@ def make_url_fetcher(asset_root, default_fetcher=None):
         if parsed.scheme not in {"", "file"}:
             raise ValueError(f"Remote resource blocked during PDF rendering: {url}")
 
-        raw_path = unquote(parsed.path if parsed.scheme == "file" else url)
+        raw_path = (
+            url2pathname(unquote(parsed.path))
+            if parsed.scheme == "file"
+            else unquote(parsed.path)
+        )
         resource_path = Path(raw_path).resolve()
         if not resource_path.is_relative_to(asset_root):
             raise ValueError(f"Asset is outside the report directory: {resource_path}")
@@ -185,14 +216,8 @@ def make_url_fetcher(asset_root, default_fetcher=None):
 
 def detect_language(text):
     """Return a practical HTML language tag for English or Chinese text."""
-    chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
-    total_alpha = len(re.findall(r"[a-zA-Z]", text))
-    if chinese_chars <= total_alpha * 0.3:
-        return "en"
-
-    traditional = sum(text.count(char) for char in TRADITIONAL_MARKERS)
-    simplified = sum(text.count(char) for char in SIMPLIFIED_MARKERS)
-    return "zh-HK" if traditional > simplified else "zh-CN"
+    detected = detect_report_language(text)
+    return "zh-CN" if detected == "zh" else detected
 
 
 def plain_text(fragment):
@@ -254,7 +279,7 @@ def build_toc_html(html_body, lang="en", template="executive"):
     kicker, toc_title, toc_intro, fallback_summary = labels
 
     items = []
-    for match in sections:
+    for item_index, match in enumerate(sections, 1):
         if has_ids:
             hid, heading, content = match.groups()
         else:
@@ -282,7 +307,7 @@ def build_toc_html(html_body, lang="en", template="executive"):
             page_html = '<span class="toc-page-number"></span>'
         items.append(
             '<div class="toc-entry">'
-            '<span class="toc-number"></span>'
+            f'<span class="toc-number" data-toc-index="{item_index:02d}"></span>'
             f'<div class="toc-copy">{title_html}'
             f'<span class="toc-summary">{safe_summary}</span></div>'
             f"{page_html}</div>"
@@ -513,7 +538,14 @@ def build_toc_html(html_body, lang="en", template="executive"):
     )
 
 
-def build_horizon_feature_html(html_body, lang, image_src, label_overrides=None):
+def build_horizon_feature_html(
+    html_body,
+    lang,
+    image_src,
+    label_overrides=None,
+    *,
+    decorative_image=False,
+):
     """Move the opening section into Horizon's photographic feature page."""
     heading = re.search(
         r'<h2\s+id="([^"]+)"[^>]*>(.*?)</h2>',
@@ -612,6 +644,16 @@ def build_horizon_feature_html(html_body, lang, image_src, label_overrides=None)
     )
 
     safe_image = html.escape(image_src, quote=True)
+    figure_label_html = (
+        ""
+        if decorative_image
+        else f'<div class="horizon-feature-figure-label">{html.escape(labels["figure"])}</div>'
+    )
+    caption_html = (
+        ""
+        if decorative_image
+        else f'<p class="horizon-feature-caption">{html.escape(labels["caption"])}</p>'
+    )
     feature_html = (
         '<section class="horizon-feature-page">'
         f'<div class="horizon-feature-running">{html.escape(labels["running"])}</div>'
@@ -620,7 +662,7 @@ def build_horizon_feature_html(html_body, lang, image_src, label_overrides=None)
         f"{heading.group(2)}</h2>"
         f'<p>{html.escape(labels["descriptor"])}</p>'
         "</div>"
-        f'<div class="horizon-feature-figure-label">{html.escape(labels["figure"])}</div>'
+        f"{figure_label_html}"
         '<div class="horizon-feature-photo">'
         f'<img src="{safe_image}" alt="">'
         '<span class="horizon-feature-datum"></span>'
@@ -628,7 +670,7 @@ def build_horizon_feature_html(html_body, lang, image_src, label_overrides=None)
         f'<aside class="{insight_class}">'
         f'<span>{html.escape(labels["observation"])}</span>'
         f"{card_html}</aside>"
-        f'<p class="horizon-feature-caption">{html.escape(labels["caption"])}</p>'
+        f"{caption_html}"
         '<div class="horizon-feature-lower">'
         '<div class="horizon-feature-narrative">'
         f'<h3>{html.escape(labels["terrain"])}</h3>'
@@ -647,7 +689,14 @@ def build_horizon_feature_html(html_body, lang, image_src, label_overrides=None)
     return feature_html, remaining_html
 
 
-def build_reference_feature_html(html_body, lang, template, image_src):
+def build_reference_feature_html(
+    html_body,
+    lang,
+    template,
+    image_src,
+    *,
+    decorative_image=False,
+):
     """Build the supplied editorial opener while preserving report content."""
     overrides = {
         "maison": {
@@ -838,6 +887,7 @@ def build_reference_feature_html(html_body, lang, template, image_src):
         lang,
         image_src,
         label_overrides=overrides,
+        decorative_image=decorative_image,
     )
 
     def add_template_class(match):
@@ -911,6 +961,30 @@ def transform_callouts(html_body):
     )
 
 
+def wrap_sources_section(html_body):
+    """Mark the terminal bibliography so printed copies retain link targets."""
+    headings = {
+        "sources",
+        "references",
+        "source list",
+        "参考资料",
+        "资料来源",
+        "來源",
+        "參考資料",
+        "資料來源",
+    }
+    matches = list(re.finditer(r"<h2\b[^>]*>(.*?)</h2>", html_body, re.DOTALL))
+    for match in reversed(matches):
+        if plain_text(match.group(1)).casefold() in headings:
+            return (
+                html_body[: match.start()]
+                + '<section class="sources-section">'
+                + html_body[match.start() :]
+                + "</section>"
+            )
+    return html_body
+
+
 def escape_css_content(value):
     """Escape text for a double-quoted CSS content string."""
     return (
@@ -953,12 +1027,21 @@ def load_weasyprint_html():
 def localized_today(lang, today=None):
     today = today or datetime.now().astimezone().date()
     if lang == "en":
-        return f"{today.day:02d} {today.strftime('%B')} {today.year}"
+        months = (
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        )
+        return f"{today.day:02d} {months[today.month - 1]} {today.year}"
     return f"{today.year}年{today.month}月{today.day}日"
 
 
 def extract_report_meta(md_text):
     """Extract the first H1 and an optional immediate blockquote metadata line."""
+    try:
+        from validate_report import _mask_fenced_code
+    except ImportError:
+        from scripts.validate_report import _mask_fenced_code
+    md_text = _mask_fenced_code(md_text)
     title = ""
     metadata_lines = []
     found_h1 = False
@@ -1056,7 +1139,7 @@ def localized_settings(lang, template):
             "client": "客户",
             "date": "日期",
             "confidential": "严格保密",
-            "controlled": "受控文件 · 不得对外传播",
+            "controlled": "受控文件 · 不得对外传阅",
             "insight": "核心判断",
             "takeaway": "这意味着什么",
         },
@@ -1130,6 +1213,7 @@ def md_to_html(
         html_body = meta_bq_pattern.sub("", html_body, count=1)
 
     html_body = transform_callouts(html_body)
+    html_body = wrap_sources_section(html_body)
     toc_html = build_toc_html(html_body, lang, selected_template)
 
     safe_title_css = escape_css_content(title)
@@ -1153,15 +1237,15 @@ def md_to_html(
     )
 
     cover_lead, cover_accent, cover_subtitle = split_cover_title(title, subtitle)
-    safe_cover_image = html.escape(cover_image, quote=True) if cover_image else None
-    art = cover_art_html(selected_template, safe_cover_image)
+    art = cover_art_html(selected_template, cover_image)
     feature_html = ""
     if selected_template == "horizon":
-        horizon_image = safe_cover_image or bundled_horizon_image_data_uri()
+        horizon_image = cover_image or bundled_horizon_image_data_uri()
         feature_html, html_body = build_horizon_feature_html(
             html_body,
             lang,
             horizon_image,
+            decorative_image=cover_image is None,
         )
     elif selected_template in {
         "maison",
@@ -1173,7 +1257,7 @@ def md_to_html(
         "apricot",
     }:
         feature_image = (
-            safe_cover_image
+            cover_image
             or bundled_template_image_data_uri(
                 {
                     "blueprint": "orbit",
@@ -1186,6 +1270,7 @@ def md_to_html(
             lang,
             selected_template,
             feature_image,
+            decorative_image=cover_image is None,
         )
 
     metadata = []

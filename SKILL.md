@@ -113,6 +113,10 @@ Mark `include_in_report: true` for every ledger claim used in the draft. After d
 
 Treat promotional claims, filings, preprints, peer-reviewed studies, independent tests, and reporting as different evidence types. Authority and independence are separate axes. An official source may be best for what an organization says and poor evidence that the claim is true.
 
+For judgments beyond a narrow accountable record, require independent
+evidence. If none exists, mark a gap and reduce confidence; never narrow the
+source set to make interested evidence sufficient.
+
 Before drafting:
 
 - save the merged ledger for deterministic validation in Step 7;
@@ -183,6 +187,9 @@ Immediately before each Rewild pass, preserve the current draft as `REPORT_PRE_R
 - uncertainty, attribution, severity, and causal limits;
 - distinctions between verified fact, reported claim, estimate, and analysis;
 - the central conclusion unless new evidence requires a change.
+
+Snapshot the real draft before Rewild. If the final report is byte-identical,
+the review cannot claim a resolved finding; record no change or make the edit.
 
 Run the selected profile over the complete report. Inspect first. Leave clean passages alone, edit isolated tells in place, and re-say dense passages only where the profile permits it. Match the report genre: professional research must remain professional, not become chatty. For `zh-HK`, regional identity and Hong Kong written-Chinese register are hard requirements.
 

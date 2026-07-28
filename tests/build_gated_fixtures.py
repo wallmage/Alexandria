@@ -46,6 +46,10 @@ CASES = (
         "excerpt": "The pipeline converts Markdown into a styled PDF, builds a contents page, and keeps a source link clickable.",
         "sources_heading": "## Sources",
         "section_headings": ("Executive summary", "Key process", "Outlook"),
+        "source_rewrite": (
+            "This compact fixture checks typography, navigation, citations, and special characters.",
+            "This small fixture checks typography, navigation, citations, and special characters.",
+        ),
         "depth": lambda: " ".join(f"observation{index}" for index in range(7500))
         + ".",
     },
@@ -58,6 +62,10 @@ CASES = (
         "excerpt": "系统会把 Markdown 转成 PDF，建立目录，并保留可点击的资料来源，让测试可以同时核对排版结果和引用路径。",
         "sources_heading": "## 参考资料",
         "section_headings": ("摘要", "主要流程", "未来展望"),
+        "source_rewrite": (
+            "这份简短样本用来检查简体字形、目录、页码、表格和链接。",
+            "这份小型样本用于检查简体字形、目录、页码、表格和链接。",
+        ),
         "depth": lambda: "研究数据市场方法结果分析证据" * 500 + "。",
     },
     {
@@ -69,6 +77,10 @@ CASES = (
         "excerpt": "系統會把 Markdown 轉成 PDF，建立目錄，並保留可按的資料來源，讓測試可以同時核對排版結果和引用路徑。",
         "sources_heading": "## 參考資料",
         "section_headings": ("摘要", "主要流程", "未來展望"),
+        "source_rewrite": (
+            "這份簡短樣本用來檢查繁體字形、目錄、頁碼、表格和連結。",
+            "這份小型樣本用於檢查繁體字形、目錄、頁碼、表格和連結。",
+        ),
         "depth": lambda: "研究數據市場方法結果分析證據" * 500 + "。",
     },
 )
@@ -95,7 +107,13 @@ def build_case(case, output_root):
     content_review = case_root / "content-review.json"
     content_receipt = case_root / "content-receipt.json"
     report.write_text(report_text, encoding="utf-8")
-    source.write_text(report_text, encoding="utf-8")
+    final_text, source_text = case["source_rewrite"]
+    if final_text not in report_text:
+        raise ValueError(f"{case['name']} fixture rewrite target is missing.")
+    source.write_text(
+        report_text.replace(final_text, source_text, 1),
+        encoding="utf-8",
+    )
     review.write_text(
         json.dumps(
             {

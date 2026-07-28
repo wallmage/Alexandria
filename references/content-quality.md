@@ -118,6 +118,17 @@ A key judgment records:
 
 Do not hide inference inside factual prose. A transparent reasoning chain is more useful than an unexplained confident sentence.
 
+Use these confidence anchors consistently:
+
+- **High:** direct accountable evidence or converging independent foundations,
+  with no unresolved conflict capable of reversing the claim.
+- **Medium:** credible but limited evidence, a material inference, or an
+  unresolved limitation that narrows the conclusion.
+- **Low:** sparse, indirect, disputed, stale, or interested-only evidence.
+
+An analysis or inference supported only by interested sources cannot be high
+confidence.
+
 ## 6. Resolve contradictions
 
 When sources disagree:

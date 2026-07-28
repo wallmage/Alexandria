@@ -59,6 +59,20 @@ Assign each source a family and one or more roles. Several pages from one publis
 The validator normalizes family names and source URLs before counting them. A
 key judgment may declare triangulation `met` only when at least two normalized
 families converge and at least one foundation is independent of the subject.
+An evidence portfolio with no independent source cannot support the governing
+judgment. Record the affected coverage as a gap; do not redefine the search
+scope so that interested sources appear sufficient.
+
+### Confidence anchors
+
+- **High:** direct accountable evidence or converging independent foundations;
+  no unresolved conflict that could reverse the claim.
+- **Medium:** credible but limited evidence, a material inference, or an
+  unresolved limitation that narrows the conclusion.
+- **Low:** sparse, indirect, disputed, stale, or interested-only evidence.
+
+An analytical inference founded only on interested sources cannot be high
+confidence.
 
 ## Conflict handling
 
@@ -73,6 +87,14 @@ When reliable sources disagree:
 Never average incompatible estimates without a defensible method.
 
 Make contradiction links reciprocal in the ledger. A disputed claim records the disagreement, the resolution or remaining uncertainty, and the effect on the conclusion.
+
+### Evidence of absence
+
+Claims that no equivalent, correction, benchmark, policy, or record was found
+need their own ledger entry. Record the queries run, the repositories or
+authorities checked, the date of the search, and where the evidence would
+normally appear. Phrase the report as a bounded search result, not proof that
+the thing cannot exist.
 
 ## Evidence coverage gate
 

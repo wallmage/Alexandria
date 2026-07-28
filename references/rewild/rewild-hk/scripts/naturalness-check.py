@@ -777,6 +777,21 @@ def check_openers(sentences, lang):
                            else " — vary the openings"))
 
 
+def check_serial_enumeration(sentences, lang):
+    if lang != "en":
+        return
+    section("Serial enumeration")
+    crowded = [sentence for sentence in sentences if sentence.count(",") >= 5]
+    word_count = sum(sentence_length(sentence, lang) for sentence in sentences)
+    budget = (word_count * 3) // 1000
+    report(
+        len(crowded) <= budget,
+        f"{len(crowded)} sentence(s) contain at least five commas; "
+        f"budget is {budget} for {word_count} words"
+        + ("" if len(crowded) <= budget else " — group, tabulate, or cut the list"),
+    )
+
+
 def check_paragraphs(paragraphs, lang):
     if len(paragraphs) < 4:
         return
@@ -1922,6 +1937,7 @@ def main():
 
     check_rhythm(sentences, lang)
     check_openers(sentences, lang)
+    check_serial_enumeration(sentences, lang)
     check_paragraphs(paragraphs, lang)
     check_vocabulary(folded, lang)
     check_punctuation(text, folded, lang, sentences)

@@ -78,6 +78,23 @@ def validate_references(data):
         for claim in claims
         if isinstance(claim, dict) and claim.get("claim_id")
     }
+    independent_provenance = {
+        "primary_independent",
+        "secondary_independent",
+    }
+    interested_provenance = {
+        "primary_interested",
+        "secondary_dependent",
+    }
+
+    if data.get("schema_version") == 3 and sources_by_id and not any(
+        source.get("provenance") in independent_provenance
+        for source in sources_by_id.values()
+    ):
+        errors.append(
+            "Evidence portfolio has no independent source; record affected "
+            "coverage as a gap rather than supported."
+        )
 
     errors.extend(f"Duplicate source ID: {item}" for item in _duplicates(source_ids))
     errors.extend(f"Duplicate claim ID: {item}" for item in _duplicates(claim_ids))
@@ -172,6 +189,25 @@ def validate_references(data):
                 foundations.update(foundation_source_ids(related_id, visited))
         return foundations
 
+    for item in coverage:
+        if not isinstance(item, dict) or item.get("status") != "supported":
+            continue
+        linked_sources = {
+            source_id
+            for claim_id in item.get("claim_ids", [])
+            for source_id in foundation_source_ids(claim_id)
+            if source_id in sources_by_id
+        }
+        if linked_sources and all(
+            sources_by_id[source_id].get("provenance") in interested_provenance
+            for source_id in linked_sources
+        ):
+            errors.append(
+                f"Supported coverage {item.get('area', '<unknown>')} relies "
+                "only on interested sources; mark it as a gap or add "
+                "independent evidence."
+            )
+
     for claim in claims:
         if not isinstance(claim, dict):
             continue
@@ -217,6 +253,26 @@ def validate_references(data):
                     f"{claim_id} is disputed but has no contradicting claim."
                 )
 
+        foundations = {
+            source_id
+            for source_id in foundation_source_ids(claim_id)
+            if source_id in sources_by_id
+        }
+        if (
+            claim.get("confidence") == "high"
+            and claim.get("status") == "inference"
+            and foundations
+            and not any(
+                sources_by_id[source_id].get("provenance")
+                in independent_provenance
+                for source_id in foundations
+            )
+        ):
+            errors.append(
+                f"{claim_id}: high-confidence inference requires an "
+                "independent source foundation."
+            )
+
         if (
             claim.get("kind") == "analysis"
             and claim.get("importance") == "key"
@@ -240,10 +296,6 @@ def validate_references(data):
                     f"{claim_id} declares triangulation met but has "
                     f"{len(families)} normalized source family."
                 )
-            independent_provenance = {
-                "primary_independent",
-                "secondary_independent",
-            }
             if triangulation_status == "met" and not any(
                 sources_by_id[source_id].get("provenance")
                 in independent_provenance

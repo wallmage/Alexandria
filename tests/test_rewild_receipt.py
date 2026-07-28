@@ -44,6 +44,55 @@ def write_review(path, *, report=None, source=None, report_lang="en"):
 
 
 class RewildReceiptTests(unittest.TestCase):
+    def test_document_level_direction_words_do_not_reject_a_faithful_rewrite(self):
+        source = "Costs are above the average across every plant we reviewed."
+        report = (
+            "Across every plant we reviewed, costs remain above the average; "
+            "none fell below it."
+        )
+        self.assertEqual([], _semantic_fidelity_errors(source, report, "en"))
+
+    def test_identical_files_cannot_claim_resolved_rewild_findings(self):
+        clean = (
+            "# Report\n\n## First finding\n\n"
+            + " ".join(f"word{index}" for index in range(4000))
+            + ".\n\n## Second finding\n\n"
+            + " ".join(f"term{index}" for index in range(3500))
+            + ".\n\n## Sources\n\n[Source](https://example.com)"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            source = work / "pre-rewild.md"
+            review = work / "review.json"
+            receipt = work / "receipt.json"
+            report.write_text(clean, encoding="utf-8")
+            source.write_text(clean, encoding="utf-8")
+            write_review(review, report=report, source=source)
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["findings"] = [
+                {
+                    "category": "style",
+                    "finding": "Repeated formulaic contrast was removed.",
+                    "disposition": "resolved",
+                    "reason": "The final report now uses direct affirmative prose.",
+                }
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+            self.assertTrue(
+                any("identical" in error.lower() and "resolved" in error.lower() for error in errors),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
     def test_clean_report_creates_a_receipt_bound_to_the_exact_file(self):
         clean = (
             "# Report\n\n## First finding\n\n"

@@ -45,10 +45,10 @@
         "causality"
       ],
       "properties": {
-        "facts_and_figures": { "const": true },
-        "attribution_and_uncertainty": { "const": true },
-        "direction_and_negation": { "const": true },
-        "causality": { "const": true }
+        "facts_and_figures": { "type": "boolean" },
+        "attribution_and_uncertainty": { "type": "boolean" },
+        "direction_and_negation": { "type": "boolean" },
+        "causality": { "type": "boolean" }
       }
     },
     "findings": {

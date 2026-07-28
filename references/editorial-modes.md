@@ -1,6 +1,8 @@
 # Editorial modes
 
 Choose at most one dominant mode. Use its craft traits; do not imitate a living writer's distinctive voice.
+Record the chosen mode in the evidence ledger brief so the final content
+review can test the report against the mode actually used.
 
 ## Analytical
 

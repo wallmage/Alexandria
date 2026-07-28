@@ -111,34 +111,34 @@
       ],
       "properties": {
         "central_judgment_answers_question": {
-          "const": true
+          "type": "boolean"
         },
         "priority_coverage_resolved": {
-          "const": true
+          "type": "boolean"
         },
         "key_claims_traceable": {
-          "const": true
+          "type": "boolean"
         },
         "source_independence_calibrated": {
-          "const": true
+          "type": "boolean"
         },
         "counterevidence_tested": {
-          "const": true
+          "type": "boolean"
         },
         "uncertainty_visible": {
-          "const": true
+          "type": "boolean"
         },
         "recommendations_or_implications_supported": {
-          "const": true
+          "type": "boolean"
         },
         "forecasts_conditional": {
-          "const": true
+          "type": "boolean"
         },
         "section_value_density_reviewed": {
-          "const": true
+          "type": "boolean"
         },
         "length_is_substantive_not_padded": {
-          "const": true
+          "type": "boolean"
         }
       }
     },
@@ -176,7 +176,7 @@
       "properties": {
         "score": {
           "type": "integer",
-          "minimum": 4,
+          "minimum": 1,
           "maximum": 5
         },
         "rationale": {

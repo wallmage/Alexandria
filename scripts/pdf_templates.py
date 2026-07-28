@@ -1,7 +1,10 @@
 """Visual systems and deterministic template selection for Alexandria PDFs."""
 
+import base64
 import re
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 
 TEMPLATE_CHOICES = ("auto", "executive", "spectrum", "atlas", "horizon")
@@ -130,6 +133,18 @@ def select_template(subject_text, requested="auto"):
     return winners[0] if len(winners) == 1 else "executive"
 
 
+@lru_cache(maxsize=1)
+def bundled_horizon_image_data_uri():
+    """Return the bundled Horizon landscape as a portable embedded image."""
+    image_path = (
+        Path(__file__).resolve().parent.parent
+        / "assets"
+        / "horizon-landscape.jpg"
+    )
+    payload = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{payload}"
+
+
 def cover_art_html(template, cover_image=None):
     """Return decorative, non-text cover elements for one visual system."""
     image = (
@@ -170,14 +185,19 @@ def cover_art_html(template, cover_image=None):
             <span class="atlas-axis axis-y"></span>
         </div>
         """
+    horizon_image = cover_image or bundled_horizon_image_data_uri()
     return f"""
     <div class="cover-art horizon-art" aria-hidden="true">
-        {image}
+        <img class="cover-photo" src="{horizon_image}" alt="">
+        <span class="horizon-tonal-wash"></span>
         <span class="horizon-landscape"></span>
+        <span class="horizon-figure-label">FIG. 01 / FIELD SYSTEMS / 37.8°N</span>
         <span class="horizon-orbit orbit-a"></span>
         <span class="horizon-orbit orbit-b"></span>
+        <span class="horizon-diagonal"></span>
         <span class="horizon-axis"></span>
         <span class="horizon-ticks"></span>
+        <span class="horizon-cover-folio">01 / 03</span>
     </div>
     """
 
@@ -802,12 +822,40 @@ RESPONSIVE_COVER_CSS = """
     height: 123mm;
 }
 .cover.cover-title-long.cover-horizon .horizon-art {
-    top: 163mm;
-    height: 134mm;
+    top: 143mm;
+    height: 154mm;
 }
 .cover.cover-title-very-long.cover-horizon .horizon-art {
-    top: 181mm;
-    height: 116mm;
+    top: 159mm;
+    height: 138mm;
+}
+.cover.cover-title-long.cover-horizon .cover-copy {
+    left: 16mm;
+    top: 30mm;
+    width: 178mm;
+    margin: 0;
+}
+.cover.cover-title-long.cover-horizon h1,
+.cover.cover-title-long.cover-horizon .cover-title-accent {
+    font-size: 34pt !important;
+    line-height: 1.01 !important;
+}
+.cover.cover-title-very-long.cover-horizon .cover-copy {
+    left: 16mm;
+    top: 27mm;
+    width: 178mm;
+    margin: 0;
+}
+.cover.cover-title-very-long.cover-horizon h1,
+.cover.cover-title-very-long.cover-horizon .cover-title-accent {
+    font-size: 28pt !important;
+    line-height: 1.02 !important;
+}
+.cover.cover-title-long.cover-horizon .cover-record {
+    top: 124mm;
+}
+.cover.cover-title-very-long.cover-horizon .cover-record {
+    top: 140mm;
 }
 .cover.cover-meta-long .meta-value {
     font-size: 8.8pt;
@@ -815,20 +863,31 @@ RESPONSIVE_COVER_CSS = """
 }
 .cover.cover-horizon.cover-meta-3 .cover-record,
 .cover.cover-horizon.cover-meta-4 .cover-record {
-    left: 84mm;
-    right: 18mm;
-    bottom: 33mm;
-    flex-direction: row;
-    flex-wrap: wrap;
-    column-gap: 6mm;
-    row-gap: 5mm;
+    left: auto;
+    right: 16mm;
+    top: 106mm;
+    bottom: auto;
+    width: 74mm;
+    height: 78mm;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 2.2mm;
+    padding: 5.5mm 6mm;
 }
 .cover.cover-horizon.cover-meta-3 .cover-record .meta-cell,
 .cover.cover-horizon.cover-meta-4 .cover-record .meta-cell {
-    flex: 1 1 43mm;
+    flex: 0 0 auto;
 }
 .cover.cover-horizon.cover-meta-long .cover-record {
-    left: 82mm;
+    left: auto;
+}
+.cover.cover-title-long.cover-horizon.cover-meta-3 .cover-record,
+.cover.cover-title-long.cover-horizon.cover-meta-4 .cover-record {
+    top: 120mm;
+}
+.cover.cover-title-very-long.cover-horizon.cover-meta-3 .cover-record,
+.cover.cover-title-very-long.cover-horizon.cover-meta-4 .cover-record {
+    top: 136mm;
 }
 """
 
@@ -1133,136 +1192,687 @@ TEMPLATE_CSS = {
 }
 """,
     "horizon": """
+@page toc {
+    margin: 18mm;
+    @top-left {
+        content: "DEEP RESEARCH  /  NAVIGATION";
+        border-bottom: 0;
+        color: #4b5563;
+        font-family: __FONT_MONO__;
+        font-size: 6.5pt;
+        letter-spacing: 1pt;
+    }
+    @top-right {
+        content: "ALEXANDRIA";
+        border-bottom: 0;
+        color: #9ca3af;
+        font-family: __FONT_MONO__;
+        font-size: 6.5pt;
+        letter-spacing: 1pt;
+    }
+}
+
+@page horizonfeature {
+    margin: 18mm 18mm 17mm;
+    @top-left {
+        content: "FIELD NOTE 03  /  DECISION SIGNALS";
+        border-bottom: 0;
+        color: #4b5563;
+        font-family: __FONT_MONO__;
+        font-size: 6.5pt;
+        letter-spacing: 1pt;
+    }
+    @top-right {
+        content: "ALEXANDRIA  /  DEEP RESEARCH";
+        border-bottom: 0;
+        color: #9ca3af;
+        font-family: __FONT_MONO__;
+        font-size: 6.5pt;
+        letter-spacing: 0.8pt;
+    }
+}
+
+.template-horizon .cover {
+    padding: 15mm 16mm 0;
+}
+.template-horizon .cover-topline {
+    height: 8mm;
+    padding: 0;
+    border: 0;
+    font-family: __FONT_MONO__;
+    font-size: 6.7pt;
+    letter-spacing: 1pt;
+}
+.horizon-firm-mark {
+    display: flex;
+    align-items: center;
+    gap: 2.5mm;
+    font-family: __FONT_SANS__;
+    font-size: 9pt;
+    font-weight: 500;
+    letter-spacing: 0.8pt;
+}
+.horizon-firm-mark i {
+    position: relative;
+    display: inline-block;
+    width: 6mm;
+    height: 6mm;
+    border-radius: 0.6mm;
+    background: #101318;
+}
+.horizon-firm-mark i::after {
+    content: "";
+    position: absolute;
+    left: 2.35mm;
+    top: 1.1mm;
+    width: 1.3mm;
+    height: 3.8mm;
+    border-radius: 0.3mm;
+    background: #0062ff;
+}
+.horizon-firm-mark b {
+    color: #101318;
+    font-weight: 500;
+    text-transform: uppercase;
+}
 .template-horizon .cover-copy {
-    width: 74%;
-    margin-top: 27mm;
+    position: absolute;
+    left: 16mm;
+    top: 34mm;
+    width: 168mm;
+    margin: 0;
+}
+.template-horizon .cover-kicker {
+    margin-bottom: 8mm;
+    font-family: __FONT_MONO__;
+    font-size: 7.2pt;
+    font-weight: 600;
+    letter-spacing: 1.35pt;
+    color: #0062ff;
 }
 .template-horizon .cover h1 {
-    font-size: 36pt;
-    line-height: 1.04;
+    max-width: 166mm;
+    font-size: 44pt;
+    line-height: 0.98;
     font-weight: 650;
-    color: #0b0e14;
+    letter-spacing: -1.55pt;
+    color: #101318;
 }
 .template-horizon .cover-title-accent {
     padding: 0;
     background: transparent;
-    color: #0b0e14;
-    font-size: 36pt;
+    color: #101318;
+    font-size: 44pt;
+    line-height: 0.98;
     font-weight: 650;
+    letter-spacing: -1.55pt;
+}
+.template-horizon .cover .subtitle {
+    max-width: 112mm;
+    margin-top: 10mm;
+    color: #4b5563;
+    font-size: 12.5pt;
+    line-height: 1.42;
 }
 .template-horizon .cover-record {
-    left: 116mm;
-    right: 18mm;
-    bottom: 51mm;
+    left: auto;
+    right: 16mm;
+    top: 110mm;
+    bottom: auto;
+    width: 58mm;
+    height: 70mm;
     display: flex;
     flex-direction: column;
-    gap: 5mm;
-    padding: 7mm;
-    background: #0b63f6;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 3mm;
+    box-sizing: border-box;
+    padding: 7mm 6.5mm 6mm;
+    background: #0062ff;
     border: 0;
-    border-radius: 1.5mm;
-    box-shadow: 0 3mm 7mm rgba(11,14,20,0.26);
+    border-radius: 1.6mm;
+    box-shadow: 0 4mm 8mm rgba(16, 19, 24, 0.34);
 }
 .template-horizon .cover-record .meta-cell {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
-    max-width: none;
+    max-width: 100%;
 }
 .template-horizon .cover-record .meta-label {
-    margin-bottom: 1mm;
-    color: #bdd6ff;
+    margin-bottom: 1.2mm;
+    color: rgba(255,255,255,0.72);
+    font-family: __FONT_MONO__;
+    font-size: 5.8pt;
+    letter-spacing: 1pt;
 }
 .template-horizon .cover-record .meta-value {
     color: #fff;
+    font-family: __FONT_SANS__;
+    font-size: 11pt;
+    line-height: 1.12;
+    font-weight: 650;
+}
+.template-horizon .cover-meta-3 .cover-record,
+.template-horizon .cover-meta-4 .cover-record {
+    left: auto;
+    right: 16mm;
+    top: 106mm;
+    bottom: auto;
+    width: 74mm;
+    height: 78mm;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 2.2mm;
+    padding: 5.5mm 6mm;
+}
+.template-horizon .cover-meta-3 .cover-record .meta-cell,
+.template-horizon .cover-meta-4 .cover-record .meta-cell {
+    flex: 0 0 auto;
 }
 .template-horizon .confidential-stamp {
-    border-color: #fff;
+    border-color: rgba(255,255,255,0.8);
     color: #fff;
+    font-size: 6.2pt;
 }
 .template-horizon .cover-confidential-note {
-    color: #fff;
+    left: 16mm;
+    bottom: 10mm;
+    color: rgba(255,255,255,0.85);
+    font-family: __FONT_MONO__;
+    font-size: 5.8pt;
+    z-index: 4;
 }
 .horizon-art {
-    top: 146mm;
-    height: 151mm;
-    background:
-        linear-gradient(180deg, rgba(93,143,191,0.92), rgba(25,45,63,0.62) 54%, rgba(8,17,24,0.96)),
-        linear-gradient(120deg, #9ec6e1, #ebc879 62%, #182d3a);
+    top: 129mm;
+    height: 168mm;
+    background: #182d3a;
 }
 .horizon-art .cover-photo {
-    opacity: 0.78;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    object-fit: cover;
+    opacity: 1;
+}
+.horizon-tonal-wash {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        180deg,
+        rgba(16,19,24,0.02) 0%,
+        rgba(16,19,24,0.06) 42%,
+        rgba(16,19,24,0.64) 100%
+    );
 }
 .horizon-landscape {
     position: absolute;
     inset: 0;
-    background:
-        linear-gradient(166deg, transparent 0 53%, rgba(10,23,31,0.18) 53.5% 58%, rgba(7,16,22,0.76) 58.5%),
-        linear-gradient(13deg, transparent 0 72%, rgba(255,215,120,0.20) 72.5% 74%, transparent 74.5%);
+    background: linear-gradient(
+        164deg,
+        transparent 0 61%,
+        rgba(8,17,24,0.12) 61.3% 66%,
+        rgba(8,17,24,0.34) 66.4%
+    );
+}
+.horizon-figure-label,
+.horizon-cover-folio {
+    position: absolute;
+    color: rgba(255,255,255,0.82);
+    font-family: __FONT_MONO__;
+    font-size: 5.7pt;
+    font-weight: 600;
+    letter-spacing: 0.9pt;
+    text-transform: uppercase;
+}
+.horizon-figure-label {
+    left: 16mm;
+    top: 9mm;
+}
+.horizon-cover-folio {
+    right: 16mm;
+    bottom: 11mm;
 }
 .horizon-orbit {
     position: absolute;
-    left: 20mm;
-    bottom: 26mm;
-    width: 64mm;
-    height: 64mm;
-    border: 0.55pt solid rgba(255,255,255,0.48);
+    left: -8mm;
+    bottom: 6mm;
+    width: 102mm;
+    height: 102mm;
+    border: 0.45pt solid rgba(255,255,255,0.28);
     border-radius: 50%;
 }
 .orbit-b {
-    left: 31mm;
-    bottom: 15mm;
-    width: 93mm;
-    height: 93mm;
+    left: 13mm;
+    bottom: 17mm;
+    width: 76mm;
+    height: 76mm;
+    border-color: rgba(255,255,255,0.20);
+}
+.horizon-diagonal {
+    position: absolute;
+    left: 10mm;
+    bottom: 55mm;
+    width: 96mm;
+    height: 0.45pt;
+    background: rgba(255,255,255,0.25);
+    transform: rotate(-28deg);
+    transform-origin: left center;
 }
 .horizon-axis {
     position: absolute;
-    left: 18mm;
-    right: 18mm;
-    bottom: 17mm;
-    height: 0.5pt;
-    background: rgba(255,255,255,0.6);
+    left: 16mm;
+    right: 16mm;
+    bottom: 7mm;
+    height: 0.45pt;
+    background: rgba(255,255,255,0.38);
 }
 .horizon-ticks {
     position: absolute;
-    left: 18mm;
-    right: 18mm;
-    bottom: 15.5mm;
+    left: 16mm;
+    right: 16mm;
+    bottom: 5.5mm;
     height: 3mm;
     background: repeating-linear-gradient(
         to right,
-        rgba(255,255,255,0.7) 0 0.45pt,
-        transparent 0.45pt 13mm
+        rgba(255,255,255,0.56) 0 0.45pt,
+        transparent 0.45pt 14mm
     );
 }
-.template-horizon .toc-kicker,
-.template-horizon .toc-number::before {
-    color: #0b63f6;
+
+.toc-horizon {
+    position: relative;
+    box-sizing: border-box;
+    height: 261mm;
+    min-height: 261mm;
+    padding: 0 0 61mm;
 }
-.template-horizon .toc-intro {
-    border-bottom: 3pt solid #0b63f6;
+.toc-horizon .toc-kicker {
+    margin-top: 7mm;
+    font-family: __FONT_MONO__;
+    font-size: 7pt;
+    font-weight: 650;
+    letter-spacing: 0.7pt;
+    color: #0062ff;
 }
+.toc-horizon .toc-title {
+    width: 102mm;
+    margin: 4mm 0 12mm;
+    font-size: 44pt;
+    line-height: 0.96;
+    font-weight: 650;
+    letter-spacing: -1.45pt;
+    color: #101318;
+}
+.toc-horizon .toc-intro {
+    position: absolute;
+    right: 0;
+    top: 10mm;
+    width: 60mm;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: #4b5563;
+    font-size: 9pt;
+    line-height: 1.42;
+}
+.toc-horizon .toc-list::before {
+    content: "RESEARCH SEQUENCE";
+    display: block;
+    margin-bottom: 3mm;
+    color: #9ca3af;
+    font-family: __FONT_MONO__;
+    font-size: 5.5pt;
+    font-weight: 650;
+    letter-spacing: 1pt;
+}
+.toc-horizon .toc-entry {
+    display: grid;
+    grid-template-columns: 9mm 1fr 9mm;
+    gap: 4mm;
+    align-items: center;
+    min-height: 14mm;
+    padding: 2.2mm 0;
+    border-bottom: 0.45pt solid #edf0f4;
+}
+.toc-horizon .toc-number::before {
+    color: #9ca3af;
+    font-family: __FONT_MONO__;
+    font-size: 6.3pt;
+}
+.toc-horizon .toc-entry:first-child .toc-number::before {
+    color: #0062ff;
+}
+.toc-horizon .toc-copy {
+    display: grid;
+    grid-template-columns: 55mm 1fr;
+    gap: 5mm;
+    align-items: center;
+}
+.toc-horizon .toc-entry-title {
+    font-size: 10.5pt;
+    line-height: 1.14;
+    font-weight: 650;
+    color: #101318;
+}
+.toc-horizon .toc-summary {
+    margin: 0;
+    max-width: none;
+    color: #4b5563;
+    font-size: 6.5pt;
+    line-height: 1.3;
+}
+.toc-horizon .toc-page-number {
+    font-family: __FONT_MONO__;
+    font-size: 6.7pt;
+    color: #101318;
+}
+.horizon-toc-band {
+    position: absolute;
+    left: -18mm;
+    right: -18mm;
+    bottom: 0;
+    height: 58mm;
+    box-sizing: border-box;
+    padding: 12mm 18mm;
+    overflow: hidden;
+    background: linear-gradient(100deg, #0048c7, #0062ff);
+    color: #fff;
+}
+.horizon-toc-band::before {
+    content: "";
+    position: absolute;
+    left: 8mm;
+    bottom: -20mm;
+    width: 62mm;
+    height: 62mm;
+    border: 0.45pt solid rgba(255,255,255,0.18);
+    border-radius: 50%;
+}
+.horizon-toc-route {
+    display: block;
+    margin-bottom: 5mm;
+    color: rgba(255,255,255,0.72);
+    font-family: __FONT_MONO__;
+    font-size: 5.7pt;
+    font-weight: 650;
+    letter-spacing: 1pt;
+    text-transform: uppercase;
+}
+.horizon-toc-band strong {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 88mm;
+    color: #fff;
+    font-size: 19pt;
+    line-height: 1.08;
+    font-weight: 650;
+    letter-spacing: -0.45pt;
+}
+.horizon-toc-scale {
+    position: absolute;
+    left: 18mm;
+    right: 18mm;
+    bottom: 9mm;
+    height: 3mm;
+    border-top: 0.45pt solid rgba(255,255,255,0.38);
+    background: repeating-linear-gradient(
+        to right,
+        rgba(255,255,255,0.55) 0 0.45pt,
+        transparent 0.45pt 16mm
+    );
+}
+.horizon-reading-card {
+    position: absolute;
+    right: 0;
+    bottom: 28mm;
+    z-index: 2;
+    width: 66mm;
+    min-height: 48mm;
+    box-sizing: border-box;
+    padding: 6mm;
+    border-radius: 1.6mm;
+    background: #fff;
+    box-shadow: 0 4mm 9mm rgba(16,19,24,0.22);
+}
+.horizon-reading-card span,
+.horizon-reading-card small {
+    display: block;
+    color: #9ca3af;
+    font-family: __FONT_MONO__;
+    font-size: 5.5pt;
+    font-weight: 650;
+    letter-spacing: 0.9pt;
+    text-transform: uppercase;
+}
+.horizon-reading-card strong {
+    display: block;
+    margin: 4mm 0 5mm;
+    color: #101318;
+    font-size: 12pt;
+    line-height: 1.22;
+    font-weight: 650;
+}
+.horizon-reading-card small {
+    color: #0062ff;
+}
+.toc-horizon-cont {
+    padding-bottom: 0;
+}
+.toc-horizon-cont .toc-title {
+    margin-bottom: 15mm;
+    font-size: 31pt;
+}
+
+.horizon-feature-page {
+    page: horizonfeature;
+    position: relative;
+    box-sizing: border-box;
+    height: 260mm;
+    page-break-after: always;
+    color: #39424e;
+}
+.horizon-feature-running {
+    display: none;
+}
+.horizon-feature-heading-row {
+    display: grid;
+    grid-template-columns: 1fr 52mm;
+    gap: 15mm;
+    align-items: start;
+    margin-top: 8mm;
+}
+.horizon-feature-heading-row h2 {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 31pt;
+    line-height: 1.02;
+    font-weight: 650;
+    letter-spacing: -0.9pt;
+    color: #101318;
+}
+.horizon-feature-heading-row h2::before {
+    display: none;
+}
+.horizon-feature-heading-row p {
+    margin: 2mm 0 0;
+    color: #4b5563;
+    font-size: 8.3pt;
+    line-height: 1.48;
+}
+.horizon-feature-figure-label {
+    margin-top: 25mm;
+    color: #9ca3af;
+    font-family: __FONT_MONO__;
+    font-size: 5.5pt;
+    font-weight: 650;
+    letter-spacing: 0.9pt;
+    text-transform: uppercase;
+}
+.horizon-feature-photo {
+    position: relative;
+    width: 210mm;
+    height: 92mm;
+    margin: 4mm -18mm 0;
+    overflow: hidden;
+    background: #182d3a;
+}
+.horizon-feature-photo img {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    object-fit: cover;
+    filter: saturate(0.72) brightness(0.78);
+}
+.horizon-feature-photo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        180deg,
+        rgba(16,19,24,0.02),
+        rgba(16,19,24,0.30)
+    );
+}
+.horizon-feature-datum {
+    position: absolute;
+    left: 18mm;
+    top: 0;
+    z-index: 2;
+    width: 2mm;
+    height: 21mm;
+    background: #0062ff;
+}
+.horizon-feature-insight {
+    position: absolute;
+    top: 105mm;
+    right: 0;
+    z-index: 3;
+    width: 78mm;
+    min-height: 49mm;
+    box-sizing: border-box;
+    padding: 6mm;
+    border-radius: 1.6mm;
+    background: #fff;
+    box-shadow: 0 4mm 10mm rgba(16,19,24,0.24);
+}
+.horizon-feature-insight > span {
+    display: block;
+    margin-bottom: 4mm;
+    color: #9ca3af;
+    font-family: __FONT_MONO__;
+    font-size: 5.5pt;
+    font-weight: 650;
+    letter-spacing: 0.9pt;
+    text-transform: uppercase;
+}
+.horizon-feature-insight p {
+    margin: 0;
+    color: #101318;
+    font-size: 13pt;
+    line-height: 1.18;
+    font-weight: 650;
+}
+.horizon-feature-insight-long p {
+    font-size: 10.6pt;
+    line-height: 1.22;
+}
+.horizon-feature-insight strong {
+    color: inherit;
+}
+.horizon-feature-caption {
+    width: 88mm;
+    margin: 4mm 0 0;
+    color: #4b5563;
+    font-family: __FONT_MONO__;
+    font-size: 5.4pt;
+    line-height: 1.45;
+}
+.horizon-feature-lower {
+    display: grid;
+    grid-template-columns: 1fr 52mm;
+    gap: 15mm;
+    margin-top: 15mm;
+}
+.horizon-feature-narrative h3 {
+    margin: 0 0 5mm;
+    color: #101318;
+    font-size: 16pt;
+    font-weight: 650;
+}
+.horizon-feature-narrative p {
+    margin: 0;
+    color: #39424e;
+    font-size: 7.9pt;
+    line-height: 1.5;
+}
+.horizon-feature-path > span {
+    display: block;
+    margin-bottom: 4mm;
+    color: #9ca3af;
+    font-family: __FONT_MONO__;
+    font-size: 5.5pt;
+    font-weight: 650;
+    letter-spacing: 0.9pt;
+    text-transform: uppercase;
+}
+.horizon-feature-path ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.horizon-feature-path li {
+    display: grid;
+    grid-template-columns: 8mm 1fr;
+    gap: 3mm;
+    margin: 0;
+    padding: 3mm 0;
+    border-bottom: 0.45pt solid #d9dee5;
+}
+.horizon-feature-path li span {
+    color: #0062ff;
+    font-family: __FONT_MONO__;
+    font-size: 6pt;
+    font-weight: 650;
+}
+.horizon-feature-path li strong {
+    color: #101318;
+    font-size: 7pt;
+    line-height: 1.25;
+    font-weight: 650;
+}
+
 .template-horizon h1,
-.template-horizon h2 {
+.template-horizon h2,
+.template-horizon h3 {
     font-weight: 650;
 }
 .template-horizon h2::before {
-    width: 2mm;
-    height: 10mm;
+    width: 1.6mm;
+    height: 7mm;
     border: 0;
-    background: #0b63f6;
+    background: #0062ff;
 }
 .template-horizon .metric-card {
-    border: 0.7pt solid #d7dee8;
+    border: 0;
+    border-radius: 1.6mm;
     background: #fff;
-    box-shadow: 0 2mm 5mm rgba(11,14,20,0.12);
+    box-shadow: 0 3mm 7mm rgba(16,19,24,0.14);
 }
 .template-horizon .insight-panel,
 .template-horizon .takeaway-band {
-    background: #0b63f6;
-    box-shadow: 0 2mm 5mm rgba(11,14,20,0.15);
+    border-radius: 1.6mm;
+    background: #0062ff;
+    box-shadow: 0 3mm 7mm rgba(16,19,24,0.16);
 }
 .template-horizon img {
-    border-left: 3pt solid #0b63f6;
+    border-left: 2mm solid #0062ff;
 }
 """,
 }

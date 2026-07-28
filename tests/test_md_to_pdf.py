@@ -188,6 +188,65 @@ class ConverterUnitTests(unittest.TestCase):
         self.assertIn("#173d2a", atlas)
         self.assertIn("#0b63f6", horizon)
 
+    def test_horizon_builds_the_reference_editorial_composition(self):
+        rendered = self.render_html(
+            "# The new geography of resilience\n\n"
+            "## Executive brief\n\n"
+            "A decision-grade view of the forces changing the market.\n\n"
+            "> [!INSIGHT]\n"
+            "> Evidence becomes useful when its route to judgment is visible.\n\n"
+            "## Market structure\n\n"
+            "How economics and competitive pressure are changing.",
+            template="horizon",
+            report_date="14 October 2025",
+        )
+
+        self.assertIn('class="horizon-firm-mark"', rendered)
+        self.assertIn('class="horizon-figure-label"', rendered)
+        self.assertIn('class="horizon-cover-folio"', rendered)
+        self.assertIn('class="horizon-toc-band"', rendered)
+        self.assertIn('class="horizon-reading-card"', rendered)
+        self.assertIn('class="horizon-feature-page"', rendered)
+        self.assertIn('class="horizon-feature-photo"', rendered)
+        self.assertIn("data:image/jpeg;base64,", rendered)
+        self.assertEqual(rendered.count(">Executive brief<"), 2)
+        self.assertEqual(
+            rendered.count(
+                "Evidence becomes useful when its route to judgment is visible."
+            ),
+            1,
+        )
+
+    def test_horizon_feature_composition_does_not_leak_into_other_templates(self):
+        rendered = self.render_html(
+            "# Research title\n\n"
+            "## Executive brief\n\n"
+            "Evidence and implications.",
+            template="executive",
+        )
+
+        self.assertNotIn("horizon-toc-band", rendered)
+        self.assertNotIn("horizon-feature-page", rendered)
+        self.assertNotIn("horizon-feature-photo", rendered)
+
+    def test_horizon_scales_long_feature_insights(self):
+        rendered = self.render_html(
+            "# Research title\n\n"
+            "## Executive brief\n\n"
+            "Evidence and implications.\n\n"
+            "> [!INSIGHT]\n"
+            "> The decision depends less on a single benchmark than on where "
+            "the work runs, how much autonomy the team can permit, which "
+            "controls the organization requires, and how much of the delivery "
+            "system should be encoded around the agent over time.",
+            template="horizon",
+        )
+
+        self.assertIn(
+            'class="horizon-feature-insight horizon-feature-insight-long"',
+            rendered,
+        )
+
     def test_cover_metadata_omits_empty_client_and_non_confidential_labels(self):
         rendered = self.render_html(
             "# Research title\n\n## Finding\n\nBody.",

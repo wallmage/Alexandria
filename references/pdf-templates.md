@@ -61,4 +61,4 @@ The renderer turns them into a metric card, a dark contrast panel, and a full-wi
 
 Atlas and Horizon benefit most from a subject-relevant cover image. When image generation or image search is available, create or obtain one useful editorial raster image, verify its relevance and usage rights, save it beside the report Markdown, and pass `--cover-image`. The renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files.
 
-Do not delay delivery merely to obtain an image. Atlas includes a composed cartographic fallback and Horizon includes a layered landscape fallback; Executive and Spectrum are designed to work without imagery.
+Do not delay delivery merely to obtain an image. Atlas includes a composed cartographic fallback, while Horizon ships with a bundled panoramic photograph so its cover and opening feature page never collapse into a flat gradient. Executive and Spectrum are designed to work without imagery.

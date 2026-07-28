@@ -28,6 +28,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from pdf_templates import (  # noqa: E402
     TEMPLATE_CHOICES,
     TEMPLATES,
+    bundled_horizon_image_data_uri,
     build_css,
     cover_art_html,
     select_template,
@@ -201,7 +202,7 @@ def trim_summary(value, limit=145):
     return f"{shortened}…"
 
 
-def build_toc_html(html_body, lang="en"):
+def build_toc_html(html_body, lang="en", template="executive"):
     """Build a clean contents page with section titles and short descriptions."""
     sections = list(
         re.finditer(
@@ -282,6 +283,73 @@ def build_toc_html(html_body, lang="en"):
             f"{page_html}</div>"
         )
 
+    if template == "horizon":
+        horizon_labels = {
+            "en": {
+                "continued": "Contents / continued",
+                "route": "Field route / research sequence",
+                "statement": (
+                    "Evidence becomes useful when the route to judgment is visible."
+                ),
+                "protocol": "Reading protocol",
+                "protocol_title": (
+                    "Begin with the brief. Use each conclusion as a decision gate."
+                ),
+                "reading_time": "Decision path / source to action",
+            },
+            "zh-CN": {
+                "continued": "目录 / 续",
+                "route": "研究路径 / 章节顺序",
+                "statement": "证据的价值，来自清晰可见的判断路径。",
+                "protocol": "阅读方式",
+                "protocol_title": "先读摘要，再把每项结论当成一个决策关口。",
+                "reading_time": "决策路径 / 从证据到行动",
+            },
+            "zh-HK": {
+                "continued": "目錄 / 續",
+                "route": "研究路徑 / 章節次序",
+                "statement": "證據的價值，來自清晰可見的判斷路徑。",
+                "protocol": "閱讀方式",
+                "protocol_title": "先讀摘要，再把每項結論視為一個決策關口。",
+                "reading_time": "決策路徑 / 由證據到行動",
+            },
+        }[lang]
+        pages = []
+        chunks = [items[index : index + 8] for index in range(0, len(items), 8)]
+        for page_index, chunk in enumerate(chunks):
+            is_first = page_index == 0
+            title_text = toc_title if is_first else horizon_labels["continued"]
+            chrome = ""
+            if is_first:
+                chrome = (
+                    '<div class="horizon-toc-band">'
+                    f'<span class="horizon-toc-route">{html.escape(horizon_labels["route"])}</span>'
+                    f'<strong>{html.escape(horizon_labels["statement"])}</strong>'
+                    '<span class="horizon-toc-scale"></span>'
+                    "</div>"
+                    '<div class="horizon-reading-card">'
+                    f'<span>{html.escape(horizon_labels["protocol"])}</span>'
+                    f'<strong>{html.escape(horizon_labels["protocol_title"])}</strong>'
+                    f'<small>{html.escape(horizon_labels["reading_time"])}</small>'
+                    "</div>"
+                )
+            pages.append(
+                '<section class="toc-page toc-horizon'
+                + ("" if is_first else " toc-horizon-cont")
+                + '">'
+                f'<div class="toc-kicker">02{f".{page_index + 1}" if page_index else ""}</div>'
+                f'<h2 class="toc-title">{html.escape(title_text)}</h2>'
+                + (
+                    f'<p class="toc-intro">{html.escape(toc_intro)}</p>'
+                    if is_first
+                    else ""
+                )
+                + f'<div class="toc-list">{"".join(chunk)}</div>'
+                + chrome
+                + "</section>"
+            )
+        return "".join(pages)
+
     return (
         '<section class="toc-page">'
         f'<div class="toc-kicker">{html.escape(kicker)}</div>'
@@ -290,6 +358,138 @@ def build_toc_html(html_body, lang="en"):
         f'<div class="toc-list">{"".join(items)}</div>'
         "</section>"
     )
+
+
+def build_horizon_feature_html(html_body, lang, image_src):
+    """Move the opening section into Horizon's photographic feature page."""
+    heading = re.search(
+        r'<h2\s+id="([^"]+)"[^>]*>(.*?)</h2>',
+        html_body,
+        re.DOTALL,
+    )
+    if not heading:
+        return "", html_body
+
+    next_heading = re.search(r"<h2\b", html_body[heading.end() :])
+    section_end = (
+        heading.end() + next_heading.start()
+        if next_heading
+        else len(html_body)
+    )
+    section = html_body[heading.end() : section_end]
+
+    insight = re.search(
+        r'<aside class="insight-panel">(.*?)</aside>',
+        section,
+        re.DOTALL,
+    )
+    card_html = insight.group(1) if insight else ""
+    section_without_insight = (
+        section[: insight.start()] + section[insight.end() :]
+        if insight
+        else section
+    )
+    narrative = re.search(r"<p>(.*?)</p>", section_without_insight, re.DOTALL)
+    narrative_html = narrative.group(0) if narrative else ""
+    remaining_section = (
+        section_without_insight[: narrative.start()]
+        + section_without_insight[narrative.end() :]
+        if narrative
+        else section_without_insight
+    )
+    if not card_html:
+        card_html = narrative_html
+        narrative_html = ""
+    insight_class = (
+        "horizon-feature-insight horizon-feature-insight-long"
+        if len(plain_text(card_html)) > 180
+        else "horizon-feature-insight"
+    )
+
+    labels = {
+        "en": {
+            "running": "Field note 03 / decision signals",
+            "descriptor": "A field view of the evidence shaping this report.",
+            "figure": "Fig. 03A / decision horizon",
+            "observation": "Primary observation",
+            "caption": (
+                "The horizon is used as a field metaphor: verified evidence "
+                "meets unresolved uncertainty."
+            ),
+            "terrain": "Reading the terrain",
+            "path": "Report path",
+        },
+        "zh-CN": {
+            "running": "研究记录 03 / 决策信号",
+            "descriptor": "从证据出发，观察这份报告所讨论的变化。",
+            "figure": "图 03A / 决策边界",
+            "observation": "核心观察",
+            "caption": "以地平线作比喻：已核实的证据，在这里遇上尚未解决的不确定性。",
+            "terrain": "阅读现场",
+            "path": "报告路径",
+        },
+        "zh-HK": {
+            "running": "研究記錄 03 / 決策訊號",
+            "descriptor": "由證據出發，觀察這份報告所討論的變化。",
+            "figure": "圖 03A / 決策邊界",
+            "observation": "核心觀察",
+            "caption": "以地平線作比喻：已核實的證據，在這裏遇上尚未解決的不確定性。",
+            "terrain": "閱讀現場",
+            "path": "報告路徑",
+        },
+    }[lang]
+
+    later_headings = [
+        plain_text(item)
+        for item in re.findall(
+            r'<h2\s+id="[^"]+"[^>]*>(.*?)</h2>',
+            html_body[heading.end() :],
+            re.DOTALL,
+        )[:3]
+    ]
+    path_items = "".join(
+        '<li><span>'
+        f"{index:02d}"
+        "</span><strong>"
+        f"{html.escape(title)}"
+        "</strong></li>"
+        for index, title in enumerate(later_headings, 1)
+    )
+
+    safe_image = html.escape(image_src, quote=True)
+    feature_html = (
+        '<section class="horizon-feature-page">'
+        f'<div class="horizon-feature-running">{html.escape(labels["running"])}</div>'
+        '<div class="horizon-feature-heading-row">'
+        f'<h2 id="{html.escape(heading.group(1), quote=True)}">'
+        f"{heading.group(2)}</h2>"
+        f'<p>{html.escape(labels["descriptor"])}</p>'
+        "</div>"
+        f'<div class="horizon-feature-figure-label">{html.escape(labels["figure"])}</div>'
+        '<div class="horizon-feature-photo">'
+        f'<img src="{safe_image}" alt="">'
+        '<span class="horizon-feature-datum"></span>'
+        "</div>"
+        f'<aside class="{insight_class}">'
+        f'<span>{html.escape(labels["observation"])}</span>'
+        f"{card_html}</aside>"
+        f'<p class="horizon-feature-caption">{html.escape(labels["caption"])}</p>'
+        '<div class="horizon-feature-lower">'
+        '<div class="horizon-feature-narrative">'
+        f'<h3>{html.escape(labels["terrain"])}</h3>'
+        f"{narrative_html}</div>"
+        '<div class="horizon-feature-path">'
+        f'<span>{html.escape(labels["path"])}</span>'
+        f"<ol>{path_items}</ol>"
+        "</div></div>"
+        "</section>"
+    )
+    remaining_html = (
+        html_body[: heading.start()]
+        + remaining_section
+        + html_body[section_end:]
+    )
+    return feature_html, remaining_html
 
 
 def transform_callouts(html_body):
@@ -554,7 +754,7 @@ def md_to_html(
         html_body = meta_bq_pattern.sub("", html_body, count=1)
 
     html_body = transform_callouts(html_body)
-    toc_html = build_toc_html(html_body, lang)
+    toc_html = build_toc_html(html_body, lang, selected_template)
 
     safe_title_css = escape_css_content(title)
     header_text = f"{safe_title_css}  /  {TEMPLATES[selected_template].display_name}"
@@ -579,6 +779,14 @@ def md_to_html(
     cover_lead, cover_accent, cover_subtitle = split_cover_title(title, subtitle)
     safe_cover_image = html.escape(cover_image, quote=True) if cover_image else None
     art = cover_art_html(selected_template, safe_cover_image)
+    feature_html = ""
+    if selected_template == "horizon":
+        horizon_image = safe_cover_image or bundled_horizon_image_data_uri()
+        feature_html, html_body = build_horizon_feature_html(
+            html_body,
+            lang,
+            horizon_image,
+        )
 
     metadata = []
     if client:
@@ -616,12 +824,23 @@ def md_to_html(
     ) >= 32:
         cover_classes.append("cover-meta-long")
 
+    if selected_template == "horizon":
+        cover_brand = (
+            '<span class="horizon-firm-mark"><i></i>'
+            "<b>Alexandria</b></span>"
+        )
+        cover_series = "<span>Deep Research / 02</span>"
+    else:
+        cover_brand = "<span>Alexandria / Advisory</span>"
+        cover_series = (
+            f'<span>{html.escape(TEMPLATES[selected_template].display_name)} / '
+            f"{html.escape(report_date)}</span>"
+        )
+
     cover_html = (
         f'<section class="{" ".join(cover_classes)}">'
         f"{art}"
-        '<div class="cover-topline"><span>Alexandria / Advisory</span>'
-        f'<span>{html.escape(TEMPLATES[selected_template].display_name)} / '
-        f'{html.escape(report_date)}</span></div>'
+        f'<div class="cover-topline">{cover_brand}{cover_series}</div>'
         '<div class="cover-copy">'
         f'<div class="cover-kicker">{html.escape(localized["deep_research"])}</div>'
         f"<h1>{html.escape(cover_lead)}</h1>"
@@ -651,7 +870,7 @@ def md_to_html(
         f"<style>{css}</style></head><body>"
         f'<div class="report template-{selected_template}" '
         f'data-template="{selected_template}">'
-        f"{cover_html}{toc_html}"
+        f"{cover_html}{toc_html}{feature_html}"
         f'<main class="report-body">{html_body}</main>'
         "</div></body></html>"
     )

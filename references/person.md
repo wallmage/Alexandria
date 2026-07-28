@@ -63,6 +63,41 @@ Where is this person right now? What are they currently doing, building, saying,
 - Public perception — how are they viewed right now? Has it shifted recently?
 - Active controversies or ongoing situations
 
+### Allegations, Harm, and Privacy
+
+This dimension is mandatory whenever the subject is living, recently deceased, or the report will touch wrongdoing, controversy, or reputational damage. A person report is the archetype most capable of harming a real human being, and getting this wrong is not a style defect.
+
+**Never collapse the legal ladder.** Each rung is a different factual claim and must be labelled as what it is:
+
+- *reported*, *alleged*, or *accused* — someone asserted it;
+- *investigated* — an authority opened a proceeding, which establishes nothing about the outcome;
+- *charged* or *indicted* — a prosecutor filed, which is still an accusation;
+- *settled* — resolved without an admission, unless the settlement records one;
+- *found liable* — a civil standard of proof;
+- *convicted* — a criminal standard;
+- *overturned*, *acquitted*, *expunged*, or *retracted* — and this rung must travel with the original claim every time it is mentioned, not once in a footnote.
+
+Write the rung the evidence supports and no higher. "Faced allegations of X" and "did X" are different reports.
+
+**Sourcing floor for living subjects.** Any claim of wrongdoing, misconduct, or personal failing about a living person requires at least two genuinely independent source families, one of which is an accountable record: a court filing, a regulatory action, a named-source investigation by an independent outlet, or the subject's own admission. A single anonymous or single-outlet allegation may appear only as an attributed allegation, with its sourcing weakness stated in the sentence that carries it, and it may never support a key judgment. Aggregation is not corroboration: twenty articles tracing to one original report are one source.
+
+**Right of reply.** Find and include the subject's strongest documented response, not a token denial. If they have not responded publicly, say so and say where you looked. If a documented response contradicts the allegation, that contradiction is evidence and belongs in the ledger.
+
+**Classify before checking.** Every claim that names a registered person must
+link that `person_id` and declare `person_claim_role`. This classification,
+plus a substantive `person_claim_assessment`, not a finite list of alarming
+words, activates the harm and privacy review.
+A response claim must use `responds_to_claim_ids`, cite subject-origin
+evidence, and travel with the harmful claim in the report. A resolution claim
+must use `resolves_claim_ids`; an unrelated fact about the same person is
+neither a response nor a resolution.
+
+**Privacy boundary.** Default to excluding health conditions, sexuality, religion, family members, minor children, romantic history, addiction, home address, and non-public financial detail. Include an item only when the subject has made it public themselves, or a court or regulator has made it a matter of record, **and** it materially changes the answer to the report's governing question. "Interesting" and "widely discussed" are not qualifying reasons. Private individuals adjacent to the subject — relatives, former partners, staff, victims — get more protection than the subject, not the same amount, and are usually described by role rather than named.
+
+**Proportionality and staleness.** Weight material by its bearing on the governing question and by how much the subject's public role justifies scrutiny. A sitting official's decades-old conduct in office is fair; a private figure's youthful incident usually is not. Date every allegation and say whether anything has resolved it since. Do not assemble scattered public fragments into a portrait no single source supports, and do not use the report's neutral register to launder an accusation into an established fact.
+
+For historical subjects, the legal-ladder and proportionality rules still hold; the sourcing floor becomes a question of contemporaneous versus later record, and the privacy boundary loosens as living interests recede.
+
 ### Context
 
 Reference points — but only where they sharpen understanding.
@@ -82,6 +117,23 @@ The analytical payoff. This is where you earn the reader's time.
 - **The contradiction**: Most interesting people have a core tension or contradiction. Name it.
 - **Trajectory**: Where are they heading? What are the plausible scenarios for what comes next?
 - **The takeaway**: After reading this entire report, what should the reader walk away understanding about this person that they didn't before?
+
+## Evidence scaffold
+
+One row per dimension, matching the coverage-map pattern in `research-protocol.md`. **Best evidence** names the record that would actually settle the question. **Source role** uses the ledger's role vocabulary. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
+
+Adapt rows to the subject. Where a row names an independent role, the subject's own account, an authorized biography, or a company bio cannot satisfy it.
+
+| Dimension | Best evidence | Source role | Disconfirming query |
+|---|---|---|---|
+| One-Line Definition | Independent profile or reference entry written without the subject's approval | `independent_analysis` | Who describes this person's significance as overstated, and on what basis? |
+| Origin Story | Contemporaneous records: registries, school and employment records, period reporting, archived early work | `historical_record` | Which parts of the origin narrative appear only in the subject's own retellings? |
+| Arc of Decisions | Primary artifacts of the decision — filings, memos, interviews given at the time, minutes, the products or papers themselves | `historical_record`, `subject_official` | Who else claims credit for this decision, or says the subject opposed it at the time? |
+| How They Operate | Accounts from people who worked directly with the subject, plus observable decision patterns across cases | `affected_stakeholder`, `expert_interpretation` | Where did this signature method fail, and who documented that failure? |
+| State of Play | Dated primary records from the last 6–12 months: filings, appointments, published work, direct statements | `subject_official`, `independent_analysis` | What has changed or been retracted since the most recent source I have? |
+| Allegations, Harm, and Privacy | Court filings, regulatory actions, named-source investigations, the subject's own documented response | `historical_record`, `independent_analysis`, `subject_official` | Was this allegation resolved, withdrawn, settled, or overturned, and do all my sources trace to one original report? |
+| Context | Comparable figures' records on the same measure, evaluated on the same basis | `counterparty_official`, `independent_analysis` | Does the comparison survive if I use the peer's strongest case rather than their weakest? |
+| Verdict | Documented outcomes attributable to the subject, including the ones that went badly | `empirical_data`, `independent_analysis` | What is the strongest case that this person's net impact is the opposite of my conclusion? |
 
 ## Coverage priority
 

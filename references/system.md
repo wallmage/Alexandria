@@ -88,6 +88,22 @@ Analytical synthesis of the system.
 - **Intervention points**: If someone wanted to change this system, where would they push? What are the realistic levers?
 - **The bottom line**: What should the reader understand about this system that isn't obvious from the headlines?
 
+## Evidence scaffold
+
+One row per dimension, matching the coverage-map pattern in `research-protocol.md`. **Best evidence** names the record that would actually settle the question. **Source role** uses the ledger's role vocabulary. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
+
+Systems have a characteristic evidence problem: the participants who publish most are the ones the system rewards, so an industry-association dataset and a trade-press consensus can look like independent triangulation while sharing a single interested origin. Check who funded the number before using it, and go looking for the participants who do not publish.
+
+| Dimension | Best evidence | Source role | Disconfirming query |
+|---|---|---|---|
+| One-Line Definition | An official statistical classification or an independent definition of the system's boundary | `independent_analysis`, `empirical_data` | Who sits inside this boundary on someone else's definition, and does including them change the picture? |
+| How It Works | Regulations and rulebooks, transaction or flow data, standards documents, direct observation | `empirical_data`, `expert_interpretation` | Which informal practice routinely overrides the formal rule, and who has documented it? |
+| Key Players | Ownership and market-share records, lobbying and campaign filings, procurement and contract data | `empirical_data`, `counterparty_official` | Who holds real leverage without appearing in the standard list of players? |
+| Origin and Evolution | Historical series, founding legislation, archival accounts of the system's formation | `historical_record`, `empirical_data` | Which feature everyone calls structural was actually a recent and reversible policy choice? |
+| State of Play | Current official statistics, price and volume series, regulator reporting, participant surveys | `empirical_data`, `affected_stakeholder` | Which vital sign is measured by an interested party, and what does an independent series show? |
+| Forces and Trends | Long-run datasets, independent forecasts with published methods, records of comparable systems | `empirical_data`, `expert_interpretation` | Which confidently forecast trend in this system has already failed to arrive on schedule? |
+| Verdict | Distributional data on who gains and who bears the cost, plus documented experience of the least powerful participants | `empirical_data`, `affected_stakeholder` | Who is worse off under this system, and would they recognize my description of it? |
+
 ## Coverage priority
 
 Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

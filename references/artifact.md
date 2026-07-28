@@ -81,6 +81,24 @@ Analytical synthesis.
 - **Future outlook**: Where is this heading? What are the key risks and opportunities? What would change the game?
 - **The bottom line**: The reader's key takeaway — the thing they should understand about this artifact that isn't obvious from the marketing page.
 
+## Evidence scaffold
+
+One row per dimension, matching the coverage-map pattern in `research-protocol.md`. **Best evidence** names the record that would actually settle the question. **Source role** uses the ledger's role vocabulary. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
+
+This archetype fails in one predictable way: the vendor's documentation is well written, complete, and free, so the report quietly becomes a summary of it. Documentation establishes what the maker claims and intends. It cannot establish that the thing works, that it works at the stated scale, that users like it, or that it beats an alternative. Any row below naming an independent, empirical, or stakeholder role needs a source the maker did not write. A comparison table built from every vendor's own feature list is not a comparison; it is eleven marketing pages in a grid, and it is worse than no table because it looks like evidence.
+
+| Dimension | Best evidence | Source role | Disconfirming query |
+|---|---|---|---|
+| One-Line Definition | Independent technical writing or a standards body's description of the category | `independent_analysis` | What does this thing not do that its name and positioning imply it does? |
+| How It Works | Source code, specification, protocol document, patent, teardown, or reproducible technical analysis | `empirical_data`, `expert_interpretation` | Which documented capability has no independent demonstration behind it? |
+| Origin Story | First release notes, initial commits, launch coverage, the original paper or announcement | `historical_record` | How did informed observers actually react at launch, as opposed to how the origin story is told now? |
+| Evolution | Changelogs, version archives, deprecation notices, adoption data over time | `historical_record`, `empirical_data` | Which capability was quietly removed, deprecated, or repriced, and who complained? |
+| Competitive Landscape | Independent benchmarks run on the same workload, plus migration write-ups from teams that switched in either direction | `empirical_data`, `counterparty_official`, `affected_stakeholder` | Who evaluated this and chose a rival, and what was their stated reason? |
+| State of Play | Current version records, dated pricing, incident and status history, issue trackers, adoption metrics | `subject_official`, `empirical_data` | What are the most-upvoted unresolved complaints, outages, or open issues right now? |
+| Verdict | Documented outcomes from real deployments, including abandonments and post-mortems | `affected_stakeholder`, `empirical_data` | Which specific reader profile would be actively worse off choosing this, and what evidence shows it? |
+
+Pricing, limits, model versions, and availability are time-sensitive. Date them, cite the page you read, and mark the claims `time_sensitive` in the ledger.
+
 ## Coverage priority
 
 Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

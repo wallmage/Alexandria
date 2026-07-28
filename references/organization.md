@@ -85,6 +85,22 @@ Analytical synthesis and forward look.
 - **Future scenarios**: Develop only distinct, evidence-based paths. Name their assumptions, warning signs, and what would make each more or less likely.
 - **The bottom line**: What should the reader understand about this organization that isn't obvious from the surface?
 
+## Evidence scaffold
+
+One row per dimension, matching the coverage-map pattern in `research-protocol.md`. **Best evidence** names the record that would actually settle the question. **Source role** uses the ledger's role vocabulary. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
+
+Adapt rows to the subject. Where a row names an independent role, the organization's own site, press releases, investor deck, or annual report cannot satisfy it. Those establish what the organization says, which is a different claim from what is true.
+
+| Dimension | Best evidence | Source role | Disconfirming query |
+|---|---|---|---|
+| One-Line Definition | Independent sector analysis or a regulatory classification of what the entity actually does | `independent_analysis` | Which parts of the self-description does no outside source repeat? |
+| Origin Story | Incorporation records, early filings, contemporaneous reporting, founders' interviews given at the time | `historical_record` | Which founding-myth elements first appear only in later retellings, and who disputes the founding account? |
+| Evolution | Filings, funding records, product archives, and reporting from each phase as it happened | `historical_record`, `subject_official` | Which phase transition looks planned in hindsight but was actually forced, and by whom? |
+| How It Works | Audited financials, regulatory filings, unit economics, plus accounts from current and former staff | `empirical_data`, `affected_stakeholder` | Where does the stated business model diverge from where the revenue and costs actually sit? |
+| Competitive Landscape | Comparable data measured the same way for every player, plus documented customer and stakeholder experience | `counterparty_official`, `affected_stakeholder`, `empirical_data` | On which criteria does a rival genuinely win, and what would the subject's toughest competitor say about this positioning? |
+| State of Play | Dated filings, headcount and financial records, leadership announcements from the last 6–12 months | `subject_official`, `independent_analysis` | What negative development in this period is absent from my sources because only the organization publicizes its own news? |
+| Verdict | Measured outcomes over time: retention, share, margin, mission results, or the sector's own metrics | `empirical_data`, `independent_analysis` | What is the strongest evidenced case that the durable advantage I identified is temporary or borrowed? |
+
 ## Coverage priority
 
 Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

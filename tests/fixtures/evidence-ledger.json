@@ -1,10 +1,11 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "subject": "Alexandria render pipeline",
   "research_question": "Does the sample pipeline satisfy its basic output contract?",
   "brief": {
     "intended_reader": "Alexandria maintainers",
     "decision_or_use": "Confirm that the test fixture exercises the required render path.",
+    "archetype": "artifact",
     "report_language": "en",
     "editorial_mode": "analytical",
     "scope": {
@@ -20,6 +21,7 @@
       ]
     }
   },
+  "people": [],
   "report_date": "2026-07-28",
   "coverage": [
     {
@@ -48,10 +50,11 @@
       "accessed": "2026-07-28",
       "provenance": "primary_independent",
       "evidence_type": "official_documentation",
-      "source_family": "alexandria-fixture",
+      "source_family": "example.com",
       "roles": [
         "empirical_data"
       ],
+      "accountability_basis": "none",
       "limitations": "Fixture data only"
     }
   ],
@@ -65,6 +68,12 @@
         "S1"
       ],
       "extract_or_location": "Fixture",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "Fixture"
+        }
+      ],
       "as_of": "2026-07-28",
       "confidence": "low",
       "status": "supported",
@@ -74,6 +83,8 @@
       ],
       "supports": [],
       "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The PDF pipeline must preserve source access.",
       "what_would_change": "A rendered fixture without an external clickable link.",

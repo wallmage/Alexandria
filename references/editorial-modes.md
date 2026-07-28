@@ -4,6 +4,12 @@ Choose at most one dominant mode. Use its craft traits; do not imitate a living 
 Record the chosen mode in the evidence ledger brief so the final content
 review can test the report against the mode actually used.
 
+A mode is a document-level register and applies to the whole report. It is not
+the same choice as the section shapes in §9 of `content-quality.md`, which vary
+from section to section. One mode, many shapes: an analytical report may still
+open a section with a case, take a mechanism apart in the next, and let a table
+carry a third.
+
 ## Analytical
 
 Best for companies, technologies, markets, and policy. State the judgment early, compare alternatives on reader-relevant criteria, quantify when evidence permits, make assumptions visible, and end with a usable decision rule.

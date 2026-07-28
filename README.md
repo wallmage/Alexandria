@@ -2,7 +2,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文（香港）](README.zh-HK.md)
 
-Alexandria is named after the Library of Alexandria (the great library of the ancient world that sought to gather written knowledge from across many lands). Its ambition was to bring the world's knowledge under one roof. I built the Alexandria skill in the same spirit: a research assistant you can ask about anything. It works out what needs investigating, finds current sources, weighs the evidence, and turns the results into a complete report in the language you used.
+Alexandria is named after the Library of Alexandria, whose ambition was to bring the world's knowledge under one roof. I built the Alexandria skill in the same spirit: a research assistant you can ask about anything. It works out what needs investigating, finds current sources, weighs the evidence, and turns the results into a complete report in the language you used.
 
 ## How it works
 
@@ -24,21 +24,23 @@ It is designed for questions that deserve more than a quick summary: How did thi
 
 You receive a professionally produced PDF—not a rough text export. It has a considered cover, table of contents, topic-specific chapters, clear judgments, careful typography, and citations beside the claims they support.
 
-There are eleven complete visual systems:
+Eleven templates share one production system. The type scale, the table and citation styling, and the structure of the body pages stay the same across all of them, because those are what decide whether forty pages remain readable. What changes is the cover treatment, the palette, and the typeface—which is most of what a reader actually registers. A private-equity memo and a river-basin conservation study should not arrive looking alike, and they do not.
 
-- **A — Executive (Default):** ivory, navy, and teal with a restrained consulting-firm feel. Best for business, strategy, finance, policy, and organizations.
-- **B — Spectrum:** white, cobalt, violet, electric lime, and black with bold, contemporary signal panels. Best for digital products, media, consumer technology, startups, and future-facing subjects.
-- **C — Atlas:** white, forest green, sage, and editorial imagery with a field-journal character. Best for people, history, culture, art, society, natural science, and geography.
-- **D — Horizon:** black, white, and cobalt blue with panoramic photography and floating observation cards. Best for infrastructure, climate and energy, geopolitics, supply chains, resilience, cities, and place-based market signals.
-- **E — Maison:** warm ivory, monumental serif typography, refined photography, and generous editorial space with a premium magazine feel. Best for luxury, hospitality, retail, travel, real estate, food, and consumer brands.
-- **F — Blueprint:** black, white, and technical cyan with grids, datums, nodes, and process maps. Best for operating models, organization design, engineering, governance, implementation, and transformation.
-- **G — Terrain:** forest green, cream, aerial imagery, contour lines, and cartographic notation with a place-based field-atlas feel. Best for ecology, conservation, agriculture, water, land use, and natural resources.
-- **H — Orbit:** electric cobalt, black, white, orbital geometry, and scientific imagery with a precise research-lab feel. Best for AI, semiconductors, robotics, advanced science, and deep technology.
-- **I — Sunbeam:** ink black, tangerine, sunflower yellow, oversized serif type, and playful circular signals with an upbeat editorial feel. Best for entrepreneurship, education, youth, civic participation, social impact, and community initiatives.
-- **J — Current:** warm white, flowing orange ribbons, friendly sans-serif type, and route-like diagrams with an optimistic sense of motion. Best for mobility, customer journeys, innovation programs, service operations, the future of work, and organizational change.
-- **K — Apricot:** warm ivory, apricot accents, human-scale photography, and generous serif layouts with a calm, welcoming feel. Best for workplace culture, care, public health, learning, people strategy, and community wellbeing.
+| | Template | Look | Best for |
+|---|---|---|---|
+| A | **Executive** (default) | Ivory, navy, teal; restrained consulting register | Business, strategy, finance, policy, organizations |
+| B | **Spectrum** | White, cobalt, violet, electric lime; bold signal panels | Digital products, media, consumer tech, startups |
+| C | **Atlas** | White, forest green, sage; editorial imagery, field-journal character | People, history, culture, art, society, natural science |
+| D | **Horizon** | Black, white, cobalt; panoramic photography, floating observation cards | Infrastructure, climate and energy, geopolitics, supply chains, cities |
+| E | **Maison** | Warm ivory, monumental serif, generous space; premium magazine feel | Luxury, hospitality, retail, travel, real estate, consumer brands |
+| F | **Blueprint** | Black, white, technical cyan; grids, datums, process maps | Operating models, org design, engineering, governance, transformation |
+| G | **Terrain** | Forest green, cream; aerial imagery, contour lines, cartographic notation | Ecology, conservation, agriculture, water, land use |
+| H | **Orbit** | Electric cobalt, black, white; orbital geometry, research-lab precision | AI, semiconductors, robotics, advanced science, deep tech |
+| I | **Sunbeam** | Ink black, tangerine, sunflower yellow; oversized serif, circular signals | Entrepreneurship, education, youth, civic participation, social impact |
+| J | **Current** | Warm white, flowing orange ribbons, friendly sans; route-like diagrams | Mobility, customer journeys, innovation programs, service operations |
+| K | **Apricot** | Warm ivory, apricot accents; human-scale photography, calm serif layouts | Workplace culture, care, public health, learning, people strategy |
 
-Choose one and Alexandria produces that version. If you do not choose, it produces Executive plus a deterministic topic-adaptive version from the other ten designs; the second PDF reuses the same finished report, sources, and citations, so it adds no research or writing tokens and only one local rendering pass. “Prepared by” defaults to Alexandria, the client field stays hidden unless supplied, and confidentiality is Off unless requested. Turning it On adds a “Strictly Confidential” stamp and a “Controlled copy · Not for external distribution” footer.
+Choose one and Alexandria produces that version. If you do not choose, it produces Executive plus a deterministic topic-adaptive version from the other ten designs—the same topic always selects the same template; the second PDF reuses the same finished report, sources, and citations, so it adds no research or writing tokens and only one local rendering pass. “Prepared by” defaults to Alexandria, the client field stays hidden unless supplied, and confidentiality is Off unless requested. Turning it On adds a “Strictly Confidential” stamp and a “Controlled copy · Not for external distribution” footer.
 
 Length is deliberately substantial: every English report must stay between 7,500 and 15,000 words; every Chinese report must stay between 5,000 and 10,000 non-whitespace characters. The subject determines where it lands inside that range, with roughly ten or more finished PDF pages as the production target.
 

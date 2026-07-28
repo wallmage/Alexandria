@@ -1,10 +1,14 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from scripts.md_to_pdf import validate_rewild_for_render
 from scripts.rewild_gate import (
+    MAX_FIDELITY_NOTES,
+    MAX_HEURISTIC_EXEMPTIONS,
     _carrier_predicate_tokens,
     _checker_prose,
     _direction_terms,
@@ -790,3 +794,385 @@ class RewildReceiptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReceiptAuditTrailTests(unittest.TestCase):
+    def test_tampered_exemption_trail_fails_validation(self):
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from build_gated_fixtures import CASES, build_case
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            case = next(c for c in CASES if c["lang"] == "en")
+            build_case(case, work)
+            case_root = work / case["name"]
+            report = case_root / "report.md"
+            receipt = case_root / "receipt.json"
+            data = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [], validate_rewild_receipt(report, data, expected_lang="en")
+            )
+            data["heuristic_exemptions"] = data.get(
+                "heuristic_exemptions", []
+            ) + ["Association excused as split remnant subset: 'x' → 'y'."]
+            errors = validate_rewild_receipt(report, data, expected_lang="en")
+            self.assertTrue(
+                any("audit trail" in error for error in errors), errors
+            )
+
+    def test_receipt_notes_without_bound_file_fail_validation(self):
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from build_gated_fixtures import CASES, build_case
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            case = next(c for c in CASES if c["lang"] == "en")
+            build_case(case, work)
+            case_root = work / case["name"]
+            report = case_root / "report.md"
+            receipt = case_root / "receipt.json"
+            data = json.loads(receipt.read_text(encoding="utf-8"))
+
+            tampered = dict(data)
+            tampered["fidelity_notes"] = [
+                {
+                    "finding": "Semantic negation changed in aligned claim: 'a claim' → 'another claim'.",
+                    "source_fragment": "a fabricated fragment",
+                    "report_fragment": "another fabricated fragment",
+                    "reason": "Injected directly into the receipt without any bound notes file.",
+                }
+            ]
+            errors = validate_rewild_receipt(report, tampered, expected_lang="en")
+            self.assertTrue(
+                any("no bound fidelity-notes file" in error for error in errors),
+                errors,
+            )
+
+            wrong_hash = dict(tampered)
+            notes_file = case_root / "notes.json"
+            notes_file.write_text('{"fidelity_notes": []}', encoding="utf-8")
+            wrong_hash["fidelity_notes_path"] = str(notes_file)
+            wrong_hash["fidelity_notes_sha256"] = "0" * 64
+            errors = validate_rewild_receipt(report, wrong_hash, expected_lang="en")
+            self.assertTrue(
+                any("does not match the hash" in error for error in errors),
+                errors,
+            )
+
+
+FILLER_ONE = " ".join(f"word{index}" for index in range(4000))
+FILLER_TWO = " ".join(f"term{index}" for index in range(3500))
+EDITED_SOURCE_CLAUSE = "The migration path is not safe for production workloads."
+EDITED_REPORT_CLAUSE = (
+    "The migration path is safe for production workloads once the vendor "
+    "patch lands."
+)
+SOURCE_FRAGMENT = "the migration path is not safe"
+REPORT_FRAGMENT = "safe for production workloads once the vendor patch lands"
+NOTE_REASON = (
+    "The resolved fidelity finding required stating the condition the "
+    "pre-Rewild source actually records."
+)
+
+
+def write_notes(path, notes):
+    path.write_text(
+        json.dumps({"fidelity_notes": notes}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def add_resolved_fidelity_finding(review):
+    note = json.loads(review.read_text(encoding="utf-8"))
+    note["findings"] = [
+        {
+            "category": "fidelity",
+            "finding": "The draft overstated the migration risk.",
+            "disposition": "resolved",
+            "reason": "The source only supports a conditional risk statement.",
+        }
+    ]
+    review.write_text(json.dumps(note, ensure_ascii=False), encoding="utf-8")
+
+
+class FidelityNotesGateTests(unittest.TestCase):
+    """run_gate's fidelity-note path, from the happy case to each rejection."""
+
+    def build(self, work, *, edited=True):
+        source_text = (
+            "# Report\n\n## First finding\n\n"
+            f"{EDITED_SOURCE_CLAUSE} {FILLER_ONE}.\n\n"
+            f"## Second finding\n\n{FILLER_TWO}.\n\n"
+            "## Sources\n\n[Source](https://example.com)"
+        )
+        report_text = (
+            source_text.replace(EDITED_SOURCE_CLAUSE, EDITED_REPORT_CLAUSE)
+            if edited
+            else source_text
+        )
+        report = work / "report.md"
+        source = work / "pre-rewild.md"
+        review = work / "review.json"
+        source.write_text(source_text, encoding="utf-8")
+        report.write_text(report_text, encoding="utf-8")
+        write_review(review, report=report, source=source)
+        add_resolved_fidelity_finding(review)
+        return report, source, review, work / "receipt.json"
+
+    def valid_note(self):
+        return {
+            "source_fragment": SOURCE_FRAGMENT,
+            "report_fragment": REPORT_FRAGMENT,
+            "reason": NOTE_REASON,
+        }
+
+    def run_with_notes(self, work, notes, *, review_findings=True):
+        report, source, review, receipt = self.build(work)
+        if not review_findings:
+            write_review(review, report=report, source=source)
+        notes_path = work / "notes.json"
+        write_notes(notes_path, notes)
+        errors = run_gate(
+            report,
+            source,
+            report_lang="en",
+            review_note_path=review,
+            receipt_path=receipt,
+            fidelity_notes_path=notes_path,
+        )
+        return errors, receipt, notes_path
+
+    def test_valid_notes_pass_and_are_recorded_in_the_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            errors, receipt, notes_path = self.run_with_notes(
+                work, [self.valid_note()]
+            )
+            self.assertEqual([], errors)
+            self.assertTrue(receipt.is_file())
+            data = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(
+                str(notes_path.resolve()), data["fidelity_notes_path"]
+            )
+            self.assertEqual(
+                file_sha256(notes_path), data["fidelity_notes_sha256"]
+            )
+            self.assertEqual(1, len(data["fidelity_notes"]))
+            acknowledged = data["fidelity_notes"][0]
+            self.assertEqual(SOURCE_FRAGMENT, acknowledged["source_fragment"])
+            self.assertEqual(REPORT_FRAGMENT, acknowledged["report_fragment"])
+            self.assertIn("negation", acknowledged["finding"].lower())
+            self.assertEqual([], data["heuristic_exemptions"])
+            self.assertEqual(
+                [],
+                validate_rewild_receipt(
+                    work / "report.md", data, expected_lang="en"
+                ),
+            )
+
+    def test_notes_need_a_resolved_fidelity_finding_in_the_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            errors, receipt, _ = self.run_with_notes(
+                work, [self.valid_note()], review_findings=False
+            )
+            self.assertTrue(
+                any(
+                    "resolved fidelity finding" in error for error in errors
+                ),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_fragment_absent_from_the_source_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            note = self.valid_note()
+            note["source_fragment"] = "a fragment that is nowhere in the source"
+            errors, receipt, _ = self.run_with_notes(work, [note])
+            self.assertTrue(
+                any(
+                    "source fragment is not in the pre-Rewild source" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_fragment_absent_from_the_report_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            note = self.valid_note()
+            note["report_fragment"] = "a fragment that is nowhere in the report"
+            errors, receipt, _ = self.run_with_notes(work, [note])
+            self.assertTrue(
+                any(
+                    "report fragment is not in the report" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_note_budget_is_enforced_in_run_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            notes = [self.valid_note()]
+            for index in range(MAX_FIDELITY_NOTES):
+                extra = self.valid_note()
+                extra["reason"] = f"{NOTE_REASON} Padding entry {index}."
+                notes.append(extra)
+            self.assertEqual(MAX_FIDELITY_NOTES + 1, len(notes))
+            errors, receipt, _ = self.run_with_notes(work, notes)
+            self.assertTrue(
+                any(
+                    f"exceed the limit of {MAX_FIDELITY_NOTES}" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_unused_note_still_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source, review, receipt = self.build(work, edited=False)
+            notes_path = work / "notes.json"
+            write_notes(notes_path, [self.valid_note()])
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+                fidelity_notes_path=notes_path,
+            )
+            self.assertTrue(errors)
+            self.assertFalse(receipt.exists())
+
+
+class GateFailClosedTests(unittest.TestCase):
+    def build_clean(self, work):
+        clean = (
+            "# Report\n\n## First finding\n\n"
+            + FILLER_ONE
+            + ".\n\n## Second finding\n\n"
+            + FILLER_TWO
+            + ".\n\n## Sources\n\n[Source](https://example.com)"
+        )
+        report = work / "report.md"
+        source = work / "pre-rewild.md"
+        review = work / "review.json"
+        report.write_text(clean, encoding="utf-8")
+        source.write_text(clean, encoding="utf-8")
+        write_review(review, report=report, source=source)
+        return report, source, review, work / "receipt.json"
+
+    def test_checker_exit_status_is_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source, review, receipt = self.build_clean(work)
+            completed = subprocess.CompletedProcess(
+                args=["naturalness-check.py"],
+                returncode=3,
+                stdout='{"warnings": [], "sections": []}',
+                stderr="Traceback: the checker died halfway through.",
+            )
+            with mock.patch(
+                "scripts.rewild_gate.subprocess.run", return_value=completed
+            ):
+                errors = run_gate(
+                    report,
+                    source,
+                    report_lang="en",
+                    review_note_path=review,
+                    receipt_path=receipt,
+                )
+            self.assertTrue(
+                any(
+                    "exited with status 3" in error
+                    and "incomplete" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_heuristic_exemption_budget_is_enforced(self):
+        names = (
+            "alpha",
+            "bravo",
+            "charlie",
+            "delta",
+            "echo",
+            "foxtrot",
+            "golf",
+            "hotel",
+            "india",
+        )
+        self.assertGreater(len(names), MAX_HEURISTIC_EXEMPTIONS)
+        splits_source = " ".join(
+            f"The {name} rollout was blocked not by the vendor." for name in names
+        )
+        splits_report = " ".join(
+            f"The {name} rollout was blocked, not by the vendor."
+            for name in names
+        )
+        source_text = (
+            "# Report\n\n## Finding\n\n"
+            f"{splits_source} {FILLER_ONE}.\n\n"
+            "## Sources\n\n[Source](https://example.com)"
+        )
+        report_text = source_text.replace(splits_source, splits_report)
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            source = work / "pre-rewild.md"
+            review = work / "review.json"
+            receipt = work / "receipt.json"
+            source.write_text(source_text, encoding="utf-8")
+            report.write_text(report_text, encoding="utf-8")
+            write_review(review, report=report, source=source)
+
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+            self.assertTrue(
+                any(
+                    f"exceed the limit of {MAX_HEURISTIC_EXEMPTIONS}" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_non_utf8_input_fails_cleanly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source, review, receipt = self.build_clean(work)
+            report.write_bytes(
+                "# Report\n\n## Finding\n\nCaf\xe9 latte.\n".encode("latin-1")
+            )
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+            self.assertTrue(
+                any(
+                    "report file must be UTF-8 text" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            self.assertFalse(receipt.exists())

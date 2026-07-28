@@ -53,11 +53,13 @@ jobs:
             --lang en \
             --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
             --ledger /tmp/alexandria-fixtures/en/ledger.json \
+            --source-fidelity-receipt /tmp/alexandria-fixtures/en/source-fidelity-receipt.json \
             --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json
           python scripts/validate_report.py \
             /tmp/alexandria-fixtures/en/report.md \
             --ledger /tmp/alexandria-fixtures/en/ledger.json \
             --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
+            --source-fidelity-receipt /tmp/alexandria-fixtures/en/source-fidelity-receipt.json \
             --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json \
             --pdf /tmp/alexandria-sample.pdf \
             --expected-lang en \
@@ -69,33 +71,40 @@ jobs:
             --min-text-chars 300 \
             --min-links 1
 
-      - name: Render and validate all eleven templates
+      - name: Render and validate all templates in every supported language
         if: matrix.python-version == '3.12'
         run: |
-          for template in executive spectrum atlas horizon maison blueprint terrain orbit sunbeam current apricot; do
-            output="/tmp/alexandria-${template}.pdf"
-            python scripts/md_to_pdf.py \
-              /tmp/alexandria-fixtures/en/report.md \
-              "$output" \
-              --lang en \
-              --template "$template" \
-              --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
-              --ledger /tmp/alexandria-fixtures/en/ledger.json \
-              --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json
-            python scripts/validate_report.py \
-              /tmp/alexandria-fixtures/en/report.md \
-              --ledger /tmp/alexandria-fixtures/en/ledger.json \
-              --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
-              --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json \
-              --pdf "$output" \
-              --expected-lang en \
-              --min-words 7500 \
-              --max-words 15000 \
-              --min-sources 1 \
-              --min-sections 4 \
-              --min-pages 3 \
-              --min-text-chars 300 \
-              --min-links 1
+          for lang in en zh-CN zh-HK; do
+            if [ "$lang" = "en" ]; then
+              limits=(--min-words 7500 --max-words 15000 --min-text-chars 300)
+            else
+              limits=(--min-chars 5000 --max-chars 10000 --min-text-chars 100)
+            fi
+            for template in executive spectrum atlas horizon maison blueprint terrain orbit sunbeam current apricot; do
+              output="/tmp/alexandria-${lang}-${template}.pdf"
+              python scripts/md_to_pdf.py \
+                "/tmp/alexandria-fixtures/${lang}/report.md" \
+                "$output" \
+                --lang "$lang" \
+                --template "$template" \
+                --rewild-receipt "/tmp/alexandria-fixtures/${lang}/receipt.json" \
+                --ledger "/tmp/alexandria-fixtures/${lang}/ledger.json" \
+                --source-fidelity-receipt "/tmp/alexandria-fixtures/${lang}/source-fidelity-receipt.json" \
+                --content-receipt "/tmp/alexandria-fixtures/${lang}/content-receipt.json"
+              python scripts/validate_report.py \
+                "/tmp/alexandria-fixtures/${lang}/report.md" \
+                --ledger "/tmp/alexandria-fixtures/${lang}/ledger.json" \
+                --rewild-receipt "/tmp/alexandria-fixtures/${lang}/receipt.json" \
+                --source-fidelity-receipt "/tmp/alexandria-fixtures/${lang}/source-fidelity-receipt.json" \
+                --content-receipt "/tmp/alexandria-fixtures/${lang}/content-receipt.json" \
+                --pdf "$output" \
+                --expected-lang "$lang" \
+                "${limits[@]}" \
+                --min-sources 1 \
+                --min-sections 4 \
+                --min-pages 3 \
+                --min-links 1
+            done
           done
 
       - name: Render and validate Hong Kong PDF
@@ -106,11 +115,13 @@ jobs:
             --lang zh-HK \
             --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json \
             --ledger /tmp/alexandria-fixtures/zh-HK/ledger.json \
+            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-HK/source-fidelity-receipt.json \
             --content-receipt /tmp/alexandria-fixtures/zh-HK/content-receipt.json
           python scripts/validate_report.py \
             /tmp/alexandria-fixtures/zh-HK/report.md \
             --ledger /tmp/alexandria-fixtures/zh-HK/ledger.json \
             --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json \
+            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-HK/source-fidelity-receipt.json \
             --content-receipt /tmp/alexandria-fixtures/zh-HK/content-receipt.json \
             --pdf /tmp/alexandria-sample.zh-HK.pdf \
             --expected-lang zh-HK \
@@ -130,11 +141,13 @@ jobs:
             --lang zh-CN \
             --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json \
             --ledger /tmp/alexandria-fixtures/zh-CN/ledger.json \
+            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-CN/source-fidelity-receipt.json \
             --content-receipt /tmp/alexandria-fixtures/zh-CN/content-receipt.json
           python scripts/validate_report.py \
             /tmp/alexandria-fixtures/zh-CN/report.md \
             --ledger /tmp/alexandria-fixtures/zh-CN/ledger.json \
             --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json \
+            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-CN/source-fidelity-receipt.json \
             --content-receipt /tmp/alexandria-fixtures/zh-CN/content-receipt.json \
             --pdf /tmp/alexandria-sample.zh-CN.pdf \
             --expected-lang zh-CN \

@@ -5,6 +5,7 @@ Alexandria Report: Markdown -> consulting-grade PDF (WeasyPrint)
 Usage:
     python3 md_to_pdf.py input.md output.pdf --template executive \
         --rewild-receipt receipt.json --ledger ledger.json \
+        --source-fidelity-receipt source-fidelity-receipt.json \
         --content-receipt content-receipt.json
 
 Dependencies: install from requirements.txt
@@ -30,6 +31,7 @@ if str(SCRIPT_DIR) not in sys.path:
 try:
     from .content_gate import validate_content_receipt
     from .pdf_templates import (
+        BUNDLED_TEMPLATE_IMAGES,
         TEMPLATE_CHOICES,
         TEMPLATES,
         build_css,
@@ -45,6 +47,7 @@ try:
 except ImportError:
     from content_gate import validate_content_receipt
     from pdf_templates import (
+        BUNDLED_TEMPLATE_IMAGES,
         TEMPLATE_CHOICES,
         TEMPLATES,
         build_css,
@@ -87,29 +90,54 @@ SAFE_IMAGE_DATA_TYPES = (
     "data:image/gif",
     "data:image/webp",
 )
+# 2026-01-01T00:00:00Z. Used only when the caller has not pinned its own
+# SOURCE_DATE_EPOCH; see deterministic_struct_ids().
+REPRODUCIBLE_EPOCH = 1767225600
 MAX_ASSET_BYTES = 25_000_000
 MIN_COVER_SHORT_EDGE = 600
 MIN_COVER_LONG_EDGE = 1000
 
 FONT_SANS_EN = '"Alexandria Sans", "Avenir Next", "Helvetica Neue", Arial, sans-serif'
+# Every zh stack is script-pure: only Simplified faces for zh-CN and only
+# Traditional faces for zh-HK, with no Japanese or Droid Sans Fallback entries
+# to drift into. The previous zh-HK stack mixed PingFang HK (TC), Songti TC and
+# Songti SC-Bold in one document. "Alexandria CJK SC/TC" resolve only when the
+# optional bundled faces are present in assets/fonts/; see pdf_templates.
+# scripts/pdf_quality.check_cjk_fonts() fails the build if a render still
+# embeds both Simplified and Traditional faces.
 FONT_SANS_CN = (
-    '"Alexandria Sans", "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB", '
-    '"Microsoft YaHei", "Droid Sans Fallback", Arial, sans-serif'
+    '"Alexandria CJK SC", "Alexandria Sans", "Noto Sans CJK SC", '
+    '"Source Han Sans SC", "PingFang SC", "Microsoft YaHei"'
 )
 FONT_SANS_HK = (
-    '"Alexandria Sans", "Noto Sans CJK HK", "PingFang HK", "Hiragino Sans", '
-    '"Microsoft JhengHei", "Droid Sans Fallback", Arial, sans-serif'
+    '"Alexandria CJK TC", "Alexandria Sans", "Noto Sans CJK HK", '
+    '"Noto Sans CJK TC", "Source Han Sans HK", "PingFang HK", '
+    '"Microsoft JhengHei"'
 )
 FONT_SERIF_EN = (
     '"Alexandria Serif", "Iowan Old Style", Baskerville, Georgia, serif'
 )
 FONT_SERIF_CN = (
-    '"Alexandria Serif", "Noto Serif CJK SC", "Songti SC", STSong, SimSun, serif'
+    '"Alexandria CJK SC", "Alexandria Serif", "Noto Serif CJK SC", '
+    '"Source Han Serif SC", "PingFang SC"'
 )
 FONT_SERIF_HK = (
-    '"Alexandria Serif", "Noto Serif CJK HK", "Songti TC", STSong, PMingLiU, serif'
+    '"Alexandria CJK TC", "Alexandria Serif", "Noto Serif CJK HK", '
+    '"Noto Serif CJK TC", "Source Han Serif HK", "PingFang HK"'
 )
 FONT_MONO = '"Alexandria Mono", Menlo, Consolas, "Courier New", monospace'
+# CJK glyphs inside a mono label used to fall through the Latin monospace
+# stack to the generic `monospace`, which fontconfig answered with Songti --
+# in the wrong script half the time. Each locale's mono stack now ends in its
+# own CJK family instead of a generic.
+FONT_MONO_CN = (
+    '"Alexandria Mono", Menlo, Consolas, "Courier New", '
+    '"Alexandria CJK SC", "Noto Sans Mono CJK SC", "PingFang SC"'
+)
+FONT_MONO_HK = (
+    '"Alexandria Mono", Menlo, Consolas, "Courier New", '
+    '"Alexandria CJK TC", "Noto Sans Mono CJK HK", "PingFang HK"'
+)
 
 
 class SafeHTMLParser(HTMLParser):
@@ -259,6 +287,23 @@ def trim_summary(value, limit=145):
     return f"{shortened}…"
 
 
+def balanced_toc_chunks(items, max_per_page):
+    """Split TOC entries into evenly filled pages.
+
+    Fixed-size chunking produced a final page holding two or three entries
+    above 135mm of blank paper; balancing spreads the same entries evenly.
+    """
+    page_count = max(1, -(-len(items) // max_per_page))
+    base, extra = divmod(len(items), page_count)
+    chunks = []
+    start = 0
+    for index in range(page_count):
+        size = base + (1 if index < extra else 0)
+        chunks.append(items[start : start + size])
+        start += size
+    return chunks
+
+
 def build_toc_html(html_body, lang="en", template="executive"):
     """Build a clean contents page with section titles and short descriptions."""
     sections = list(
@@ -303,26 +348,16 @@ def build_toc_html(html_body, lang="en", template="executive"):
             "本章的分析、證據與啟示。",
         ),
     }[lang]
-    kicker, toc_title, toc_intro, fallback_summary = labels
+    kicker, toc_title, toc_intro, _fallback_summary = labels
 
     items = []
     for item_index, match in enumerate(sections, 1):
         if has_ids:
-            hid, heading, content = match.groups()
+            hid, heading, _content = match.groups()
         else:
-            heading, content = match.groups()
+            heading, _content = match.groups()
             hid = ""
         title = html.escape(plain_text(heading))
-        paragraph = re.search(r"<p>(.*?)</p>", content, re.DOTALL)
-        if paragraph:
-            summary = trim_summary(plain_text(paragraph.group(1)))
-        else:
-            subheads = [
-                plain_text(item)
-                for item in re.findall(r"<h3[^>]*>(.*?)</h3>", content, re.DOTALL)
-            ]
-            summary = " · ".join(subheads[:3]) or fallback_summary
-        safe_summary = html.escape(summary)
         if hid:
             safe_id = html.escape(hid, quote=True)
             title_html = (
@@ -335,8 +370,7 @@ def build_toc_html(html_body, lang="en", template="executive"):
         items.append(
             '<div class="toc-entry">'
             f'<span class="toc-number" data-toc-index="{item_index:02d}"></span>'
-            f'<div class="toc-copy">{title_html}'
-            f'<span class="toc-summary">{safe_summary}</span></div>'
+            f'<div class="toc-copy">{title_html}</div>'
             f"{page_html}</div>"
         )
 
@@ -456,19 +490,10 @@ def build_toc_html(html_body, lang="en", template="executive"):
             },
         }[template]
         pages = []
-        chunk_size = {
-            "maison": 6,
-            "blueprint": 8,
-            "terrain": 6,
-            "orbit": 8,
-            "sunbeam": 6,
-            "current": 6,
-            "apricot": 6,
-        }[template]
-        chunks = [
-            items[index : index + chunk_size]
-            for index in range(0, len(items), chunk_size)
-        ]
+        # Teasers are gone, so an entry is one line: a decorated contents page
+        # comfortably carries twelve, and the pages are then balanced.
+        chunk_size = 12
+        chunks = balanced_toc_chunks(items, chunk_size)
         for page_index, chunk in enumerate(chunks):
             is_first = page_index == 0
             pages.append(
@@ -521,7 +546,7 @@ def build_toc_html(html_body, lang="en", template="executive"):
             },
         }[lang]
         pages = []
-        chunks = [items[index : index + 8] for index in range(0, len(items), 8)]
+        chunks = balanced_toc_chunks(items, 12)
         for page_index, chunk in enumerate(chunks):
             is_first = page_index == 0
             title_text = toc_title if is_first else horizon_labels["continued"]
@@ -566,6 +591,22 @@ def build_toc_html(html_body, lang="en", template="executive"):
     )
 
 
+# Longest card the opener's overlapping dark panel can carry without pushing
+# the lower grid onto a second, near-empty sheet. Units are visual, so CJK
+# glyphs count double (see visual_text_units).
+FEATURE_CARD_MAX_UNITS = 420
+# The lower-left narrative column is wider and set smaller, so it carries more,
+# and more again when no dark card is competing for the same page.
+FEATURE_NARRATIVE_MAX_UNITS = 760
+FEATURE_NARRATIVE_SOLO_UNITS = 1000
+
+
+def _fits(fragment, limit):
+    """True when a fragment's visual width fits inside an opener slot."""
+    units = visual_text_units(plain_text(fragment))
+    return 0 < units <= limit
+
+
 def build_horizon_feature_html(
     html_body,
     lang,
@@ -596,34 +637,56 @@ def build_horizon_feature_html(
         section,
         re.DOTALL,
     )
-    card_html = insight.group(1) if insight else ""
-    section_without_insight = (
-        section[: insight.start()] + section[insight.end() :]
-        if insight
-        else section
+    # A card longer than FEATURE_CARD_MAX_UNITS cannot fit the opener's
+    # overlapping dark panel; promoting one anyway spilled the whole lower grid
+    # onto a near-blank second sheet. Anything too long simply stays in the
+    # body, where it reads perfectly well.
+    card_html = ""
+    if insight and _fits(insight.group(1), FEATURE_CARD_MAX_UNITS):
+        card_html = insight.group(1)
+        section = section[: insight.start()] + section[insight.end() :]
+
+    # Fill the lower-left column with as much of the opening narrative as it
+    # will hold. With no dark card promoted there is room for more of it, and
+    # an opener that stops a third of the way down the page reads as a mistake.
+    budget = (
+        FEATURE_NARRATIVE_MAX_UNITS
+        if card_html
+        else FEATURE_NARRATIVE_SOLO_UNITS
     )
-    narrative = re.search(r"<p>(.*?)</p>", section_without_insight, re.DOTALL)
-    narrative_html = narrative.group(0) if narrative else ""
-    remaining_section = (
-        section_without_insight[: narrative.start()]
-        + section_without_insight[narrative.end() :]
-        if narrative
-        else section_without_insight
-    )
-    if not card_html:
-        card_html = narrative_html
-        narrative_html = ""
-    insight_class = (
-        "horizon-feature-insight horizon-feature-insight-long"
-        if len(plain_text(card_html)) > 180
-        else "horizon-feature-insight"
-    )
+    chosen = []
+    used = 0
+    for match in re.finditer(r"<p>(.*?)</p>", section, re.DOTALL):
+        width = visual_text_units(plain_text(match.group(0)))
+        if not width:
+            continue
+        if not card_html and not chosen and width <= FEATURE_CARD_MAX_UNITS:
+            card_html = match.group(0)
+            chosen.append(match)
+            continue
+        if used + width > budget:
+            break
+        chosen.append(match)
+        used += width
+    narrative_parts = [
+        match.group(0) for match in chosen if match.group(0) != card_html
+    ]
+    narrative_html = "".join(narrative_parts)
+    for match in reversed(chosen):
+        section = section[: match.start()] + section[match.end() :]
+    remaining_section = section
+
+    card_units = visual_text_units(plain_text(card_html))
+    if card_units > 180:
+        insight_class = "horizon-feature-insight horizon-feature-insight-long"
+    else:
+        insight_class = "horizon-feature-insight"
 
     labels = {
         "en": {
-            "running": "Field note 03 / decision signals",
+            "running": "Field note {sec} / decision signals",
             "descriptor": "A field view of the evidence shaping this report.",
-            "figure": "Fig. 03A / decision horizon",
+            "figure": "Fig. {sec}A / decision horizon",
             "observation": "Primary observation",
             "caption": (
                 "The horizon is used as a field metaphor: verified evidence "
@@ -633,18 +696,18 @@ def build_horizon_feature_html(
             "path": "Report path",
         },
         "zh-CN": {
-            "running": "研究记录 03 / 决策信号",
+            "running": "研究记录 {sec} / 决策信号",
             "descriptor": "从证据出发，观察这份报告所讨论的变化。",
-            "figure": "图 03A / 决策边界",
+            "figure": "图 {sec}A / 决策边界",
             "observation": "核心观察",
             "caption": "以地平线作比喻：已核实的证据，在这里遇上尚未解决的不确定性。",
             "terrain": "阅读现场",
             "path": "报告路径",
         },
         "zh-HK": {
-            "running": "研究記錄 03 / 決策訊號",
+            "running": "研究記錄 {sec} / 決策訊號",
             "descriptor": "由證據出發，觀察這份報告所討論的變化。",
-            "figure": "圖 03A / 決策邊界",
+            "figure": "圖 {sec}A / 決策邊界",
             "observation": "核心觀察",
             "caption": "以地平線作比喻：已核實的證據，在這裏遇上尚未解決的不確定性。",
             "terrain": "閱讀現場",
@@ -653,6 +716,17 @@ def build_horizon_feature_html(
     }[lang]
     if label_overrides:
         labels.update(label_overrides)
+
+    # The apparatus numbering is derived from the section this opener actually
+    # covers, not decorated with a fixed "03". The opener always takes the
+    # first h2, so the note and the plate carry that section's real index.
+    section_number = 1 + len(
+        re.findall(r"<h2\b", html_body[: heading.start()])
+    )
+    labels = {
+        key: value.format(sec=f"{section_number:02d}") if "{sec}" in value else value
+        for key, value in labels.items()
+    }
 
     later_headings = [
         plain_text(item)
@@ -671,7 +745,31 @@ def build_horizon_feature_html(
         for index, title in enumerate(later_headings, 1)
     )
 
-    safe_image = html.escape(image_src, quote=True)
+    # Templates with no licensed photograph of their own get a generated,
+    # template-native plate instead of a borrowed one from a sibling template.
+    if image_src:
+        plate_html = (
+            '<div class="horizon-feature-photo">'
+            f'<img src="{html.escape(image_src, quote=True)}" alt="">'
+            '<span class="horizon-feature-datum"></span>'
+            "</div>"
+        )
+    else:
+        plate_html = (
+            '<div class="horizon-feature-photo">'
+            '<span class="feature-plate">'
+            "<i></i><i></i><i></i><i></i>"
+            "</span>"
+            '<span class="horizon-feature-datum"></span>'
+            "</div>"
+        )
+    card_block = (
+        f'<aside class="{insight_class}">'
+        f'<span>{html.escape(labels["observation"])}</span>'
+        f"{card_html}</aside>"
+        if card_html
+        else ""
+    )
     figure_label_html = (
         ""
         if decorative_image
@@ -682,6 +780,16 @@ def build_horizon_feature_html(
         if decorative_image
         else f'<p class="horizon-feature-caption">{html.escape(labels["caption"])}</p>'
     )
+    # Never emit the narrative heading without its paragraph. When the opening
+    # section has no usable narrative the heading used to ship alone above an
+    # empty half-page, which reads as a rendering fault rather than a design.
+    narrative_block = (
+        '<div class="horizon-feature-narrative">'
+        f'<h3>{html.escape(labels["terrain"])}</h3>'
+        f"{narrative_html}</div>"
+        if narrative_html.strip()
+        else ""
+    )
     feature_html = (
         '<section class="horizon-feature-page">'
         f'<div class="horizon-feature-running">{html.escape(labels["running"])}</div>'
@@ -691,18 +799,11 @@ def build_horizon_feature_html(
         f'<p>{html.escape(labels["descriptor"])}</p>'
         "</div>"
         f"{figure_label_html}"
-        '<div class="horizon-feature-photo">'
-        f'<img src="{safe_image}" alt="">'
-        '<span class="horizon-feature-datum"></span>'
-        "</div>"
-        f'<aside class="{insight_class}">'
-        f'<span>{html.escape(labels["observation"])}</span>'
-        f"{card_html}</aside>"
+        f"{plate_html}"
+        f"{card_block}"
         f"{caption_html}"
         '<div class="horizon-feature-lower">'
-        '<div class="horizon-feature-narrative">'
-        f'<h3>{html.escape(labels["terrain"])}</h3>'
-        f"{narrative_html}</div>"
+        f"{narrative_block}"
         '<div class="horizon-feature-path">'
         f'<span>{html.escape(labels["path"])}</span>'
         f"<ol>{path_items}</ol>"
@@ -729,25 +830,25 @@ def build_reference_feature_html(
     overrides = {
         "maison": {
             "en": {
-                "running": "Editorial note 03 / market character",
+                "running": "Editorial note {sec} / market character",
                 "descriptor": "An editorial synthesis of context, evidence, and choice.",
-                "figure": "Plate 03A / category landscape",
+                "figure": "Plate {sec}A / category landscape",
                 "caption": "The image establishes the lived setting in which the evidence must work.",
                 "terrain": "Reading the character",
                 "path": "Decision agenda",
             },
             "zh-CN": {
-                "running": "编辑观察 03 / 市场特征",
+                "running": "编辑观察 {sec} / 市场特征",
                 "descriptor": "把背景、证据与选择放在同一个编辑视角下。",
-                "figure": "图版 03A / 品类现场",
+                "figure": "图版 {sec}A / 品类现场",
                 "caption": "图像呈现证据真正发挥作用的现实场景。",
                 "terrain": "理解市场特征",
                 "path": "决策议程",
             },
             "zh-HK": {
-                "running": "編輯觀察 03 / 市場特徵",
+                "running": "編輯觀察 {sec} / 市場特徵",
                 "descriptor": "把背景、證據與選擇放在同一個編輯視角下。",
-                "figure": "圖版 03A / 品類現場",
+                "figure": "圖版 {sec}A / 品類現場",
                 "caption": "圖像呈現證據真正發揮作用的現實場景。",
                 "terrain": "理解市場特徵",
                 "path": "決策議程",
@@ -755,25 +856,25 @@ def build_reference_feature_html(
         },
         "blueprint": {
             "en": {
-                "running": "System note 03 / decision architecture",
+                "running": "System note {sec} / decision architecture",
                 "descriptor": "A structural view of inputs, mechanisms, and decisions.",
-                "figure": "Datum 03A / operating system",
+                "figure": "Datum {sec}A / operating system",
                 "caption": "The blueprint makes the route from evidence to action inspectable.",
                 "terrain": "How the system works",
                 "path": "Control points",
             },
             "zh-CN": {
-                "running": "系统记录 03 / 决策架构",
+                "running": "系统记录 {sec} / 决策架构",
                 "descriptor": "拆开来看输入、机制与决策如何相互作用。",
-                "figure": "基准 03A / 运营系统",
+                "figure": "基准 {sec}A / 运营系统",
                 "caption": "蓝图让证据如何走向行动变得清晰可查。",
                 "terrain": "系统如何运作",
                 "path": "关键控制点",
             },
             "zh-HK": {
-                "running": "系統記錄 03 / 決策架構",
+                "running": "系統記錄 {sec} / 決策架構",
                 "descriptor": "拆開來看輸入、機制與決策如何互相作用。",
-                "figure": "基準 03A / 營運系統",
+                "figure": "基準 {sec}A / 營運系統",
                 "caption": "藍圖讓證據如何走向行動變得清晰可查。",
                 "terrain": "系統如何運作",
                 "path": "關鍵控制點",
@@ -781,25 +882,25 @@ def build_reference_feature_html(
         },
         "terrain": {
             "en": {
-                "running": "Field note 03 / evidence terrain",
+                "running": "Field note {sec} / evidence terrain",
                 "descriptor": "A place-based synthesis of the evidence shaping the report.",
-                "figure": "Plate 03A / surveyed terrain",
+                "figure": "Plate {sec}A / surveyed terrain",
                 "caption": "The field view connects verified evidence to the place it describes.",
                 "terrain": "Reading the terrain",
                 "path": "Field bearings",
             },
             "zh-CN": {
-                "running": "田野记录 03 / 证据地形",
+                "running": "田野记录 {sec} / 证据地形",
                 "descriptor": "从具体地点出发，整理影响本报告的证据。",
-                "figure": "图版 03A / 调研地形",
+                "figure": "图版 {sec}A / 调研地形",
                 "caption": "现场视角把核实过的证据与它所描述的地方连在一起。",
                 "terrain": "读懂地形",
                 "path": "研究方位",
             },
             "zh-HK": {
-                "running": "田野記錄 03 / 證據地形",
+                "running": "田野記錄 {sec} / 證據地形",
                 "descriptor": "由具體地點出發，整理影響本報告的證據。",
-                "figure": "圖版 03A / 調研地形",
+                "figure": "圖版 {sec}A / 調研地形",
                 "caption": "現場視角把核實過的證據與它所描述的地方連在一起。",
                 "terrain": "讀懂地形",
                 "path": "研究方位",
@@ -807,25 +908,25 @@ def build_reference_feature_html(
         },
         "orbit": {
             "en": {
-                "running": "Synthesis 03 / system signals",
+                "running": "Synthesis {sec} / system signals",
                 "descriptor": "A scientific view of interacting signals and decision effects.",
-                "figure": "Figure 03A / signal field",
+                "figure": "Figure {sec}A / signal field",
                 "caption": "The field model shows how evidence, incentives, and authority interact.",
                 "terrain": "Reading the system",
                 "path": "Action sequence",
             },
             "zh-CN": {
-                "running": "综合分析 03 / 系统信号",
+                "running": "综合分析 {sec} / 系统信号",
                 "descriptor": "从科学视角观察信号如何互动并影响决策。",
-                "figure": "图 03A / 信号场",
+                "figure": "图 {sec}A / 信号场",
                 "caption": "场模型展示证据、激励与权限如何相互作用。",
                 "terrain": "读懂系统",
                 "path": "行动顺序",
             },
             "zh-HK": {
-                "running": "綜合分析 03 / 系統訊號",
+                "running": "綜合分析 {sec} / 系統訊號",
                 "descriptor": "從科學視角觀察訊號如何互動並影響決策。",
-                "figure": "圖 03A / 訊號場",
+                "figure": "圖 {sec}A / 訊號場",
                 "caption": "場模型展示證據、誘因與權限如何互相作用。",
                 "terrain": "讀懂系統",
                 "path": "行動次序",
@@ -833,25 +934,25 @@ def build_reference_feature_html(
         },
         "sunbeam": {
             "en": {
-                "running": "Bright note 03 / shared understanding",
+                "running": "Bright note {sec} / shared understanding",
                 "descriptor": "A clear, energetic view of the evidence and the choices it opens.",
-                "figure": "Signal 03A / evidence in motion",
+                "figure": "Signal {sec}A / evidence in motion",
                 "caption": "The visual field turns complex evidence into a shared point of reference.",
                 "terrain": "What changes now",
                 "path": "Practical moves",
             },
             "zh-CN": {
-                "running": "明亮观察 03 / 共同理解",
+                "running": "明亮观察 {sec} / 共同理解",
                 "descriptor": "用清晰、有活力的方式呈现证据及其带来的选择。",
-                "figure": "信号 03A / 流动中的证据",
+                "figure": "信号 {sec}A / 流动中的证据",
                 "caption": "视觉场把复杂证据变成大家都能理解的共同参照。",
                 "terrain": "现在发生了什么变化",
                 "path": "可行的下一步",
             },
             "zh-HK": {
-                "running": "明亮觀察 03 / 共同理解",
+                "running": "明亮觀察 {sec} / 共同理解",
                 "descriptor": "用清晰、有活力的方式呈現證據，以及由此帶來的選擇。",
-                "figure": "訊號 03A / 流動中的證據",
+                "figure": "訊號 {sec}A / 流動中的證據",
                 "caption": "視覺場把複雜證據變成大家都容易理解的共同參照。",
                 "terrain": "現在有甚麼改變",
                 "path": "可行的下一步",
@@ -859,25 +960,25 @@ def build_reference_feature_html(
         },
         "current": {
             "en": {
-                "running": "Flow note 03 / signals in motion",
+                "running": "Flow note {sec} / signals in motion",
                 "descriptor": "A fluid view of how evidence moves from signal to action.",
-                "figure": "Flow 03A / decision current",
+                "figure": "Flow {sec}A / decision current",
                 "caption": "The route map shows where momentum builds, stalls, and changes direction.",
                 "terrain": "Reading the current",
                 "path": "Next moves",
             },
             "zh-CN": {
-                "running": "流动观察 03 / 变化中的信号",
+                "running": "流动观察 {sec} / 变化中的信号",
                 "descriptor": "沿着一条清晰路径，看证据如何从信号走向行动。",
-                "figure": "流向 03A / 决策水流",
+                "figure": "流向 {sec}A / 决策水流",
                 "caption": "路线图显示动力在哪里形成、停滞，以及转向。",
                 "terrain": "看懂当前走向",
                 "path": "下一步行动",
             },
             "zh-HK": {
-                "running": "流動觀察 03 / 變化中的訊號",
+                "running": "流動觀察 {sec} / 變化中的訊號",
                 "descriptor": "沿着一條清晰路徑，看證據如何由訊號走向行動。",
-                "figure": "流向 03A / 決策水流",
+                "figure": "流向 {sec}A / 決策水流",
                 "caption": "路線圖顯示動力在哪裏形成、停滯，以及轉向。",
                 "terrain": "看懂當前走向",
                 "path": "下一步行動",
@@ -885,25 +986,25 @@ def build_reference_feature_html(
         },
         "apricot": {
             "en": {
-                "running": "People note 03 / lived context",
+                "running": "People note {sec} / lived context",
                 "descriptor": "A warm editorial view of people, evidence, and practical choice.",
-                "figure": "Story 03A / human setting",
+                "figure": "Story {sec}A / human setting",
                 "caption": "The scene keeps lived experience visible while the evidence is interpreted.",
                 "terrain": "What the evidence means",
                 "path": "Ways forward",
             },
             "zh-CN": {
-                "running": "人物观察 03 / 真实情境",
+                "running": "人物观察 {sec} / 真实情境",
                 "descriptor": "以温暖的编辑视角理解人、证据与现实选择。",
-                "figure": "故事 03A / 人的现场",
+                "figure": "故事 {sec}A / 人的现场",
                 "caption": "在解读证据时，画面让真实经历始终留在视野中。",
                 "terrain": "这些证据意味着什么",
                 "path": "接下来怎么走",
             },
             "zh-HK": {
-                "running": "人物觀察 03 / 真實情境",
+                "running": "人物觀察 {sec} / 真實情境",
                 "descriptor": "以溫暖的編輯視角理解人、證據與現實選擇。",
-                "figure": "故事 03A / 人的現場",
+                "figure": "故事 {sec}A / 人的現場",
                 "caption": "解讀證據時，畫面讓真實經歷一直留在視野之內。",
                 "terrain": "這些證據代表甚麼",
                 "path": "接下來怎樣走",
@@ -989,6 +1090,37 @@ def transform_callouts(html_body):
     )
 
 
+# A lede is a short standfirst under a section heading. Anything longer is
+# ordinary body copy: setting it at 11.4pt muted over a 126mm measure produces
+# fifteen-line grey slabs that break across pages. Units are visual, so CJK
+# glyphs count double (see visual_text_units).
+MAX_LEDE_UNITS = 270
+
+
+def is_lede_paragraph(text):
+    """True when a post-heading paragraph is short enough to set as a lede."""
+    return 0 < visual_text_units(text) <= MAX_LEDE_UNITS
+
+
+def mark_section_ledes(html_body):
+    """Tag qualifying paragraphs after h1/h2 with the section-lede class."""
+
+    def replace(match):
+        heading, opening, inner = match.group(1), match.group(2), match.group(3)
+        if not is_lede_paragraph(plain_text(inner)):
+            return match.group(0)
+        if "class=" in opening:
+            return match.group(0)
+        return f'{heading}<p class="section-lede">{inner}</p>'
+
+    return re.sub(
+        r"(</h[12]>\s*)(<p\b[^>]*>)(.*?)</p>",
+        replace,
+        html_body,
+        flags=re.DOTALL,
+    )
+
+
 def wrap_sources_section(html_body):
     """Mark the terminal bibliography so printed copies retain link targets."""
     headings = {
@@ -1032,7 +1164,9 @@ def annotate_inline_citations(html_body):
         number = source_numbers.get(html.unescape(match.group("url")))
         if not number:
             return match.group(0)
-        return match.group(0) + f'<sup class="source-ref">[{number}]</sup>'
+        # A bare superscript numeral in the text face. Bracketed bold mono
+        # markers stacked three to a sentence and broke the line rhythm.
+        return match.group(0) + f'<sup class="source-ref">{number}</sup>'
 
     body = re.sub(
         r'<a\b[^>]*href="(?P<url>https?://[^"]+)"[^>]*>.*?</a>',
@@ -1187,6 +1321,11 @@ def localized_settings(lang, template):
         "zh-CN": FONT_SERIF_CN,
         "zh-HK": FONT_SERIF_HK,
     }[lang]
+    mono = {
+        "en": FONT_MONO,
+        "zh-CN": FONT_MONO_CN,
+        "zh-HK": FONT_MONO_HK,
+    }[lang]
     values = {
         "en": {
             "default_title": "Alexandria Research Report",
@@ -1229,6 +1368,7 @@ def localized_settings(lang, template):
         },
     }[lang]
     values["font_sans"] = sans
+    values["font_mono"] = mono
     values["font_display"] = serif if TEMPLATES[template].display_serif else sans
     return values
 
@@ -1283,6 +1423,7 @@ def md_to_html(
         )
 
     html_body = transform_callouts(html_body)
+    html_body = mark_section_ledes(html_body)
     html_body = wrap_sources_section(html_body)
     html_body = annotate_inline_citations(html_body)
     toc_html = build_toc_html(html_body, lang, selected_template)
@@ -1298,7 +1439,7 @@ def md_to_html(
         selected_template,
         font_sans=localized["font_sans"],
         font_display=localized["font_display"],
-        font_mono=FONT_MONO,
+        font_mono=localized["font_mono"],
         header_text=header_text,
         page_label=localized["page_label"],
         page_suffix=localized["page_suffix"],
@@ -1327,14 +1468,14 @@ def md_to_html(
         "current",
         "apricot",
     }:
-        feature_image = (
-            cover_image
-            or bundled_template_image_data_uri(
-                {
-                    "blueprint": "orbit",
-                    "sunbeam": "current",
-                }.get(selected_template, selected_template)
-            )
+        # Blueprint and Sunbeam have no photography of their own. Rather than
+        # borrow Orbit's and Current's plates -- which were also semantically
+        # wrong for them -- they get a generated plate in their own visual
+        # language. See references/pdf-templates.md.
+        feature_image = cover_image or (
+            bundled_template_image_data_uri(selected_template)
+            if selected_template in BUNDLED_TEMPLATE_IMAGES
+            else None
         )
         feature_html, html_body = build_reference_feature_html(
             html_body,
@@ -1550,7 +1691,13 @@ def validate_rewild_for_render(input_path, receipt_path, lang):
         raise ValueError("Rewild production gate failed: " + " ".join(errors))
 
 
-def validate_content_for_render(input_path, ledger_path, receipt_path, lang):
+def validate_content_for_render(
+    input_path,
+    ledger_path,
+    receipt_path,
+    lang,
+    source_fidelity_receipt_path,
+):
     """Reject rendering unless the exact report and ledger passed content review."""
     if not ledger_path:
         raise ValueError(
@@ -1560,6 +1707,10 @@ def validate_content_for_render(input_path, ledger_path, receipt_path, lang):
         raise ValueError(
             "A Content quality gate receipt is required. "
             "Run scripts/content_gate.py first."
+        )
+    if not source_fidelity_receipt_path:
+        raise ValueError(
+            "A source-fidelity receipt is required for PDF production."
         )
     receipt_path = Path(receipt_path)
     try:
@@ -1571,10 +1722,68 @@ def validate_content_for_render(input_path, ledger_path, receipt_path, lang):
         input_path,
         ledger_path,
         receipt,
+        source_fidelity_receipt_path=source_fidelity_receipt_path,
         expected_lang=expected_lang,
     )
     if errors:
         raise ValueError("Content quality production gate failed: " + " ".join(errors))
+
+
+def deterministic_struct_ids():
+    """Make WeasyPrint's tagged-PDF structure IDs reproducible.
+
+    WeasyPrint 69 stamps every table StructElem with ``pydyf.String(id(box))``
+    -- a CPython memory address -- and repeats it in the ``/Headers`` arrays.
+    That single field is the *only* source of byte nondeterminism in our
+    output: with it neutralised, two renders of identical Markdown produce
+    identical SHA-256s. (The earlier belief that font subsetting was to blame
+    was wrong; every /FontFile2 stream already hashes identically run to run.)
+
+    ``id`` is a builtin, so binding a module-level ``id`` inside
+    weasyprint.pdf.tags shadows it for exactly those three call sites. The
+    patch is scoped to one render and always reverted.
+    """
+    import contextlib
+
+    @contextlib.contextmanager
+    def patched():
+        try:
+            from weasyprint.pdf import tags
+        except ImportError:  # pragma: no cover - weasyprint always present
+            yield
+            return
+        # The second source: fontTools stamps head.modified with the current
+        # time in every subset it writes. It honours SOURCE_DATE_EPOCH, so a
+        # build that has not pinned one gets Alexandria's fixed epoch.
+        previous_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+        if previous_epoch is None:
+            os.environ["SOURCE_DATE_EPOCH"] = str(REPRODUCIBLE_EPOCH)
+        counter = {}
+        # Hold a strong reference to everything we number so CPython cannot
+        # recycle an address and hand two different boxes the same key.
+        anchored = []
+        original = tags.__dict__.get("id", None)
+
+        def stable_id(obj):
+            key = builtins_id(obj)
+            if key not in counter:
+                counter[key] = 1_000_000_000 + len(counter)
+                anchored.append(obj)
+            return counter[key]
+
+        builtins_id = id
+        tags.id = stable_id
+        try:
+            yield
+        finally:
+            if original is None:
+                tags.__dict__.pop("id", None)
+            else:
+                tags.id = original
+            if previous_epoch is None:
+                os.environ.pop("SOURCE_DATE_EPOCH", None)
+
+    return patched()
 
 
 def render_pdf(
@@ -1593,13 +1802,20 @@ def render_pdf(
     rewild_receipt=None,
     ledger=None,
     content_receipt=None,
+    source_fidelity_receipt=None,
     keep_html=False,
     force=False,
 ):
     """Render one Markdown file and return the output PDF path."""
     input_path, output_path = validate_paths(input_path, output_path, force=force)
     validate_rewild_for_render(input_path, rewild_receipt, lang)
-    validate_content_for_render(input_path, ledger, content_receipt, lang)
+    validate_content_for_render(
+        input_path,
+        ledger,
+        content_receipt,
+        lang,
+        source_fidelity_receipt,
+    )
     safe_cover_image = validate_cover_image(input_path, cover_image)
     md_text = input_path.read_text(encoding="utf-8")
     rendered_html = md_to_html(
@@ -1636,11 +1852,12 @@ def render_pdf(
     ) as temp_handle:
         temp_path = Path(temp_handle.name)
     try:
-        HTML(
-            string=rendered_html,
-            base_url=input_path.parent.resolve(),
-            url_fetcher=make_url_fetcher(input_path.parent),
-        ).write_pdf(temp_path, pdf_tags=True)
+        with deterministic_struct_ids():
+            HTML(
+                string=rendered_html,
+                base_url=input_path.parent.resolve(),
+                url_fetcher=make_url_fetcher(input_path.parent),
+            ).write_pdf(temp_path, pdf_tags=True)
         temp_path.replace(output_path)
         os.chmod(output_path, 0o644)
     finally:
@@ -1714,6 +1931,11 @@ def main():
         help="passing Content quality receipt bound to the report and ledger",
     )
     parser.add_argument(
+        "--source-fidelity-receipt",
+        required=True,
+        help="passing live-source receipt bound to the evidence ledger",
+    )
+    parser.add_argument(
         "--keep-html",
         action="store_true",
         help="Keep the intermediate HTML file beside the PDF",
@@ -1741,6 +1963,7 @@ def main():
             rewild_receipt=args.rewild_receipt,
             ledger=args.ledger,
             content_receipt=args.content_receipt,
+            source_fidelity_receipt=args.source_fidelity_receipt,
             keep_html=args.keep_html,
             force=args.force,
         )

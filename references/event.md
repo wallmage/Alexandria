@@ -95,6 +95,23 @@ Analytical synthesis — the "so what?"
 - **Future implications**: What does this event set in motion? What should we watch for next?
 - **Unresolved questions**: What do we still not know? What will only become clear with time?
 
+## Evidence scaffold
+
+One row per dimension, matching the coverage-map pattern in `research-protocol.md`. **Best evidence** names the record that would actually settle the question. **Source role** uses the ledger's role vocabulary. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
+
+Events attract two specific distortions: the account written by whoever won, and the account settled on months later when the sequence had been tidied up. Separate contemporaneous record from retrospective interpretation everywhere below, and date both.
+
+| Dimension | Best evidence | Source role | Disconfirming query |
+|---|---|---|---|
+| One-Line Definition | Reference or archival summary compiled independently of any participant | `historical_record`, `independent_analysis` | Do parties on different sides describe the same event as the same event? |
+| Causal Chain | Documents and data predating the event, plus scholarly or official causal analysis | `historical_record`, `expert_interpretation` | What is the strongest rival explanation, and which evidence distinguishes it from mine? |
+| What Happened | Contemporaneous records: dispatches, logs, transcripts, footage, filings, official timelines | `historical_record`, `empirical_data` | Where do independent contemporaneous accounts of the sequence disagree? |
+| Key Players | Their own words and orders at the time, plus inquiry testimony and independent reconstructions | `subject_official`, `historical_record` | Which player's stated motive is attested only by their own later account? |
+| Consequences and Impact | Measured before-and-after data: economic, demographic, legal, or institutional series | `empirical_data`, `independent_analysis` | Which attributed consequence was already trending before the event began? |
+| State of Play | Current records, subsequent official reviews, later data revisions | `independent_analysis`, `empirical_data` | Which early casualty figure, cost estimate, or attribution has since been revised or retracted? |
+| Context (Reference Points) | Comparable cases documented on the same measure | `historical_record`, `empirical_data` | Does the parallel break on the variable that actually drove the outcome? |
+| Verdict | Inquiry findings, declassified or archival records, converging independent scholarship | `historical_record`, `expert_interpretation` | Which serious account holds that the outcome was contingent where I called it structural, or the reverse? |
+
 ## Coverage priority
 
 Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

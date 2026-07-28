@@ -187,12 +187,17 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertTrue(quality.is_file())
         self.assertTrue(schema_path.is_file())
-        self.assertIn("Content quality hard gate", skill)
+        self.assertIn("content quality hard gate", skill.casefold())
         self.assertIn("scripts/content_gate.py", skill)
         self.assertIn("--content-receipt", skill)
+        self.assertIn("scripts/source_fidelity.py", skill)
+        self.assertIn("--source-fidelity-receipt", skill)
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
         self.assertGreaterEqual(workflow.count("--content-receipt"), 3)
+        self.assertGreaterEqual(
+            workflow.count("--source-fidelity-receipt"), 3
+        )
 
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self.assertEqual(2, schema["properties"]["schema_version"]["const"])
@@ -224,7 +229,7 @@ class RepositoryContractTests(unittest.TestCase):
         )
         self.assertIn("claims", schema["required"])
         self.assertIn("sources", schema["required"])
-        self.assertEqual(3, schema["properties"]["schema_version"]["const"])
+        self.assertEqual(4, schema["properties"]["schema_version"]["const"])
         self.assertIn(
             "adversarial_tests",
             schema["$defs"]["synthesis"]["required"],

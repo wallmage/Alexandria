@@ -3,8 +3,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from scripts.content_gate import run_content_gate, validate_content_receipt
+from scripts.source_fidelity import issue_source_fidelity_receipt
 
 ROOT = Path(__file__).parents[1]
 SCORES = (
@@ -85,27 +87,80 @@ class ContentGateTests(unittest.TestCase):
         ledger = work / "ledger.json"
         review = work / "content-review.json"
         receipt = work / "content-receipt.json"
-        report.write_text(
-            (ROOT / "tests" / "fixtures" / "sample-report.md").read_text(
-                encoding="utf-8"
-            ),
-            encoding="utf-8",
+        source_receipt = work / "source-fidelity-receipt.json"
+        source_url = (
+            "https://example.com/research/"
+            "a-very-long-but-valid-path-that-must-wrap-inside-the-page-"
+            "instead-of-running-through-the-margin"
         )
-        ledger.write_text(
+        summary = (
+            "This compact fixture checks typography, navigation, citations, "
+            "and special characters. Its only factual purpose is to exercise "
+            "the report pipeline."
+        )
+        outlook = (
+            "The renderer should remain readable when headings, tables, code, "
+            "and long links appear together."
+        )
+        report_text = (
+            ROOT / "tests" / "fixtures" / "sample-report.md"
+        ).read_text(encoding="utf-8")
+        report_text = report_text.replace(
+            summary, f"{summary} [Record]({source_url})"
+        ).replace(outlook, f"{outlook} [Record]({source_url})")
+        report.write_text(report_text, encoding="utf-8")
+        ledger_data = json.loads(
             (ROOT / "tests" / "fixtures" / "evidence-ledger.json").read_text(
                 encoding="utf-8"
-            ),
-            encoding="utf-8",
+            )
         )
+        ledger_data["claims"][0]["report_excerpts"] = [
+            (
+                "This compact fixture checks typography, navigation, "
+                "citations, and special characters."
+            ),
+            ledger_data["claims"][0]["report_excerpts"][0],
+            outlook,
+        ]
+        ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
         write_review(review, report, ledger)
-        return report, ledger, review, receipt
+        with mock.patch(
+            "scripts.source_fidelity._request_pinned",
+            return_value=(
+                200,
+                {"content-type": "text/plain"},
+                b"Fixture",
+            ),
+        ):
+            issue_source_fidelity_receipt(
+                ledger,
+                source_receipt,
+                now=__import__("datetime").date(2026, 7, 28),
+            )
+        return report, ledger, review, receipt, source_receipt
+
+    def test_source_fidelity_receipt_is_a_hard_prerequisite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, _ = self.make_case(directory)
+            errors = run_content_gate(report, ledger, review, receipt)
+            self.assertTrue(
+                any("Source-fidelity receipt is required" in error for error in errors),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
 
     def test_clean_review_writes_a_bound_receipt_and_revalidates(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             self.assertEqual(
                 [],
-                run_content_gate(report, ledger, review, receipt),
+                run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                ),
             )
             result = json.loads(receipt.read_text(encoding="utf-8"))
             self.assertEqual("passed", result["status"])
@@ -117,18 +172,22 @@ class ContentGateTests(unittest.TestCase):
                     report,
                     ledger,
                     result,
+                    source_fidelity_receipt_path=source_receipt,
                     expected_lang="en",
                 ),
             )
 
     def test_low_score_and_false_required_check_block_the_gate(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
             note["scores"]["evidence_strength"]["score"] = 3
             note["checks"]["counterevidence_tested"] = False
             review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(report, ledger, review, receipt)
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
             joined = " ".join(errors)
             self.assertIn("evidence_strength", joined)
             self.assertIn("counterevidence_tested", joined)
@@ -136,23 +195,29 @@ class ContentGateTests(unittest.TestCase):
 
     def test_stale_report_or_ledger_hash_blocks_the_gate(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
             note["report_sha256"] = "0" * 64
             note["ledger_sha256"] = "1" * 64
             review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(report, ledger, review, receipt)
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
             joined = " ".join(errors)
             self.assertIn("final report", joined)
             self.assertIn("evidence ledger", joined)
 
     def test_review_language_must_match_the_ledger_brief(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
             note["report_lang"] = "zh-CN"
             review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(report, ledger, review, receipt)
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
             self.assertTrue(
                 any("language does not match the evidence ledger" in error for error in errors),
                 errors,
@@ -160,7 +225,7 @@ class ContentGateTests(unittest.TestCase):
 
     def test_unresolved_critical_finding_blocks_the_gate(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
             note["findings"] = [
                 {
@@ -175,7 +240,10 @@ class ContentGateTests(unittest.TestCase):
                 }
             ]
             review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(report, ledger, review, receipt)
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
             self.assertTrue(
                 any("Critical finding F1 must be fixed" in error for error in errors),
                 errors,
@@ -183,7 +251,7 @@ class ContentGateTests(unittest.TestCase):
 
     def test_major_accepted_limitation_must_be_disclosed_in_the_report(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
             note["findings"] = [
                 {
@@ -200,7 +268,10 @@ class ContentGateTests(unittest.TestCase):
                 }
             ]
             review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(report, ledger, review, receipt)
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
             self.assertTrue(
                 any("F2 disclosure cannot be located" in error for error in errors),
                 errors,
@@ -223,19 +294,39 @@ class ContentGateTests(unittest.TestCase):
             review.write_text(json.dumps(note), encoding="utf-8")
             self.assertEqual(
                 [],
-                run_content_gate(report, ledger, review, receipt),
+                run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                ),
             )
 
     def test_receipt_becomes_stale_after_report_or_ledger_changes(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
-            self.assertEqual([], run_content_gate(report, ledger, review, receipt))
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
+            self.assertEqual(
+                [],
+                run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                ),
+            )
             result = json.loads(receipt.read_text(encoding="utf-8"))
             report.write_text(
                 report.read_text(encoding="utf-8") + "\n",
                 encoding="utf-8",
             )
-            errors = validate_content_receipt(report, ledger, result)
+            errors = validate_content_receipt(
+                report,
+                ledger,
+                result,
+                source_fidelity_receipt_path=source_receipt,
+            )
             self.assertTrue(any("current report" in error for error in errors), errors)
 
             report.write_text(
@@ -248,12 +339,17 @@ class ContentGateTests(unittest.TestCase):
                 ledger.read_text(encoding="utf-8") + "\n",
                 encoding="utf-8",
             )
-            errors = validate_content_receipt(report, ledger, result)
+            errors = validate_content_receipt(
+                report,
+                ledger,
+                result,
+                source_fidelity_receipt_path=source_receipt,
+            )
             self.assertTrue(any("current ledger" in error for error in errors), errors)
 
     def test_every_substantive_section_needs_one_matching_value_review(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
             note["section_reviews"].pop()
             note["section_reviews"].append(
@@ -263,18 +359,24 @@ class ContentGateTests(unittest.TestCase):
                 }
             )
             review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(report, ledger, review, receipt)
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
             joined = " ".join(errors)
             self.assertIn("Outlook", joined)
             self.assertIn("not in the final report", joined)
 
     def test_section_review_must_end_in_keep(self):
         with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt = self.make_case(directory)
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
             note["section_reviews"][0]["disposition"] = "revise"
             review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(report, ledger, review, receipt)
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
             self.assertTrue(any("section_reviews" in error for error in errors), errors)
 
 

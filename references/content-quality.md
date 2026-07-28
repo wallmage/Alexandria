@@ -15,7 +15,7 @@ Before searching, state:
 
 For biography, history, or explanatory work, “decision” may mean the judgment or understanding the reader should leave with. Do not force a business recommendation onto a subject that calls for interpretation.
 
-Record the contract in the version-3 evidence ledger. Revisit it when new evidence changes the assignment.
+Record the contract in the version-4 evidence ledger. Revisit it when new evidence changes the assignment.
 
 ## 2. Build a question architecture
 
@@ -211,13 +211,52 @@ The final content review records those four answers for every non-Sources H2
 section. The gate rejects missing, duplicate, extra, or unfinished section
 reviews; a section survives only when its final disposition is `keep`.
 
-This is a reasoning contract, not a mandatory paragraph template. Narrative passages may establish the evidence through a documented scene; technical passages may need a worked example; comparisons may need a table.
+#### The contract is satisfied across the section, never inside each paragraph
+
+This is a reasoning contract, not a paragraph template, and the distinction decides whether a report reads as written or as generated. Narrative passages may establish the evidence through a documented scene; technical passages may need a worked example; comparisons may need a table.
+
+- The four answers may appear **in any order**, and a section satisfies the contract when its whole span delivers them. The limit may be established before the mechanism. The consequence may already be clear from the executive opening and need only a clause.
+- One answer may be **carried by a neighbouring section**. If the previous section tested the trade-off honestly, this one does not repeat the exercise to fill a slot.
+- An answer may be **one sentence, a table cell, or a scene**. Weight follows the evidence, not the checklist.
+- The contract is **not a rhythm**. If a reader can predict the shape of every paragraph's final sentence, the contract has degraded into a template, and the report has manufactured exactly the uniformity the Rewild gate then has to strip out. Diagnose it directly: read only the last sentence of every paragraph in sequence. If they sound like a list of verdicts, the section is over-contracted, and the fix is to delete most of them rather than to reword them.
+
+Nothing here relaxes coverage. A section that never answers a reader question, or never says why it matters, is still a failed section. The requirement is that the four answers be present, not that they be evenly distributed, separately visible, or delivered in the same order twice.
+
+#### Vary section shape deliberately
+
+Across a report, sections should not all be built the same way. Choose a shape from the evidence rather than from habit:
+
+- **Claim first.** Judgment, then the evidence beneath it, then the boundary. Suits a section whose answer is contested.
+- **Investigation.** Follow the question the way the research followed it, including the answer that did not hold. Suits a section where the surprise is the point.
+- **Case then generalization.** One worked example in detail, then what it does and does not prove elsewhere.
+- **Comparison.** A table carries the parallel criteria; the prose carries only the judgment the table cannot express.
+- **Chronology.** Only where sequence itself is the explanation.
+- **Anatomy.** Take the mechanism apart component by component, and stop when the parts are described.
+
+A long report should use at least three distinct shapes. Sections also vary legitimately in length. A decisive section may run four pages and a bounding section half a page; forcing them to the same size flattens the argument's own priorities.
 
 ### Concrete evidence
 
 Use specific cases, numbers, mechanisms, quotations, timelines, or comparisons when they materially improve understanding. A case must be representative, decisive, or revealing—not merely colorful.
 
 Avoid long stretches of abstraction. After a difficult idea, show the reader how it works in a real or carefully bounded example.
+
+#### Cut prose that restates a table
+
+Prose that walks the reader through rows they can already read is the most common filler in a long report. Where a table carries the comparison, the surrounding prose keeps only what the table cannot hold: which differences are decisive, which are cosmetic, where comparability breaks, and what a particular reader should do about it. Feature enumeration in sentence form is a table waiting to be built. If deleting a paragraph would lose nothing except a spoken version of the table above it, delete it and spend the space on mechanism, counterevidence, or a case.
+
+#### Carry named human specifics
+
+Numbers and mechanisms are the easy half of concrete evidence. Reports routinely arrive full of both and empty of people, and the passage a reader remembers a week later is almost always the one with a named human in it.
+
+A long report needs, at minimum, one of the following per roughly 2,000 words of English or 1,500 non-whitespace characters of Chinese, and never fewer than three in total:
+
+- a **named practitioner, participant, or affected party** whose documented experience tests the argument;
+- a **direct quotation** from an identified person or accountable document, quoted accurately and cited;
+- a **dated incident**: what happened, on what date, to whom, with what outcome;
+- a **worked failure case**: a specific deployment, decision, study, or product that did not work, and the traceable reason.
+
+These must come from the evidence ledger. Do not invent a representative user, compose a plausible quotation, or turn an aggregate into an anecdote about a person. If the evidence genuinely contains no named human specifics, that is a finding about the source base: record it as a coverage gap with its effect on the conclusion rather than papering over it with more abstraction.
 
 ### Comparisons
 
@@ -288,10 +327,27 @@ Score each dimension from 1 to 5:
 | Counterevidence | Strong alternatives and contradictions receive fair tests |
 | Explanatory depth | The reader can understand mechanisms, context, and limits |
 | Decision value | The report changes what the reader can decide, do, watch, or explain |
-| Writing clarity | The long report remains coherent, specific, and readable |
+| Writing clarity | The long report remains coherent, specific, and readable, **and its sections differ in shape, weight, and rhythm as their evidence requires** |
 
 A 5 is exceptional. It requires unusually strong evidence, synthesis, and execution; do not award it as a courtesy. Every dimension must reach 4 before production.
 
+### The rubric scores substance, not conformity
+
+Uniform compliance is not a strong result. A report in which every section marches through the same purpose, evidence, limitation, consequence beat has satisfied §9 mechanically and failed it in substance, and the reviewer should say so rather than scoring it well because nothing is missing.
+
+Writing clarity therefore cannot be scored on sentence-level readability alone. Run three structural counts on the exact final report:
+
+1. **Closing-sentence census.** Read the last sentence of every body paragraph in order, ignoring the rest. Count how many end on an evaluative verdict rather than on a fact, figure, source, or mechanical explanation. Above roughly 20%, writing clarity cannot reach 4. The editorial reference for the report language names the specific closer templates to search for.
+2. **Section-shape census.** Name the shape of each section from the menu in §9. Fewer than three distinct shapes across a long report caps writing clarity at 3.
+3. **Section-length spread.** If every section lands within a narrow band of the same length, the report is allocating space by symmetry rather than by decision value. Check that against the §12 finding of which sections carry the verdict.
+
+Record each failure as a finding with `category: structure`, locating the specific sections or paragraphs, and repair it by deleting and rebuilding passages rather than by adding a section for balance.
+
+This test and the §9 Section Contract can appear to pull against each other. They do not. The contract sets what each section must establish; this test confirms it was not established the same way twelve times running. When a reviewer must choose, coverage of the four answers is mandatory and their uniform presentation is a defect.
+
 The required checks and finding fields live in `content-review.schema.json`. Critical findings must be fixed. A major evidence limitation may remain only when the report discloses it in clear language and the review records the exact disclosure excerpt.
 
-Run `scripts/content_gate.py` after the review. Any later change to the report, ledger, review note, or bundled schemas invalidates the receipt.
+Run `scripts/source_fidelity.py --online` first and issue its receipt, then run
+`scripts/content_gate.py` after the review with that receipt. Any later change
+to the report, ledger, source-fidelity receipt, review note, verifier, or
+bundled schemas invalidates the content receipt.

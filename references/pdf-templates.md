@@ -71,8 +71,38 @@ Use these portable blockquote markers only when the content earns the emphasis:
 
 The renderer turns them into a metric card, a dark contrast panel, and a full-width takeaway band. Never invent a number to fill a visual component. Prefer one or two strong components per chapter over decorative repetition.
 
+Keep an `[!INSIGHT]` short. The opening section's insight is promoted into the editorial opener's dark panel, and a panel over roughly 420 visual units (about 420 Latin characters or 210 Chinese glyphs) is left in the body flow instead, because it no longer fits the opener and used to push the page's lower grid onto a blank second sheet.
+
+## Colour and contrast
+
+Every template carries five colour roles, not one accent used five ways:
+
+| Token | Role |
+|---|---|
+| `__ACCENT__` | decorative fills, rules, and diagram strokes. May be bright. Never carries body text. |
+| `__ACCENT_TEXT__` | small uppercase labels and citation markers on white. AA on white *and* on the template's pale panel. |
+| `__ON_ACCENT__` | text set **on** the accent fill, such as the takeaway band. White where the accent is dark enough to hold it, the template's dark ink where it is not. |
+| `__LINK__` | body links on white or pale. A darkened relative of the accent, never the accent itself. |
+| `__LINK_ON_DARK__` | links inside the dark insight panel. |
+
+Body links are also underlined, so a link is identifiable in greyscale and to a reader who cannot separate the accent hue from black.
+
+`scripts/pdf_quality.py` proves every pair against WCAG AA for all eleven templates as a pure-data check, with no render. Adding or retuning a template means adding its tokens to `ON_ACCENT`, `LINK_ON_LIGHT`, and `LINK_ON_DARK` in `scripts/pdf_templates.py` and re-running that check; `scripts/pdf_quality.adjust_to_contrast()` computes a passing value for you.
+
 ## Imagery
 
 Use subject-relevant imagery when it materially improves the selected template. Prefer the assistant's built-in image generator: ask for a high-resolution, on-topic, positive, visually striking editorial image with professional art direction, clean composition, useful negative space for report typography, and no embedded words, logos, watermarks, or fabricated data. If generation is unavailable, use Google Images first and Bing Images as the fallback; verify the original source, resolution, relevance, and usage rights before downloading anything.
 
-Save the verified raster beside the report Markdown and pass `--cover-image`; the renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files. Never use a search thumbnail, an unclear license, a negative or alarming image merely for drama, or an image that implies evidence the report does not contain. Do not delay delivery merely to obtain artwork: Maison, Horizon, Terrain, Orbit, Current, and Apricot include high-definition fallbacks, while Executive, Spectrum, Atlas, Blueprint, and Sunbeam remain complete without one.
+Save the verified raster beside the report Markdown and pass `--cover-image`; the renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files. Never use a search thumbnail, an unclear license, a negative or alarming image merely for drama, or an image that implies evidence the report does not contain.
+
+Do not delay delivery merely to obtain artwork. Six templates - Maison, Horizon, Terrain, Orbit, Current, and Apricot - ship a licensed photograph in `assets/`, listed in `BUNDLED_TEMPLATE_IMAGES`. The other five draw generated, template-native openers instead.
+
+`apricot-workshop.jpeg` is a workplace interior, which fits Apricot's workplace-culture and employee-experience half but not its care and public-health half. It is kept because it is at least a truthful human-scale workplace scene and no licensed replacement is available; pass `--cover-image` with a subject-appropriate photograph whenever an Apricot report is about care or health.
+
+Blueprint and Sunbeam used to borrow a sibling's photograph: Blueprint printed Orbit's scientific plate in greyscale, and Sunbeam loaded Current's mobility ribbon into every PDF (its stylesheet then hid it, so readers paid the bytes and saw nothing). Neither image had anything to do with its template's subject matter, and no licensed replacement was available. Both now draw a plate in their own visual language - Blueprint an orthographic construction snapped to its own 13mm datum grid, Sunbeam its concentric-arc gradient - which is honest about being a designed mark rather than a photograph of something. A borrowed photo is worse than no photo: it makes a specific and false claim about the subject.
+
+## Apparatus must refer to something
+
+The editorial opener carries a running note and a plate number. These are derived from the section they actually sit on, not decorated: an opener over section 01 says "System note 01 / decision architecture" and "Datum 01A". They previously always said 03, on section 01, which is decoration impersonating structure - the one thing a research document cannot afford.
+
+The same rule applies to cover diagrams. Blueprint's cover nodes carried A/B/C labels with no legend and no referent, and Executive's cover carried a three-step "scale" with terminal measurement nodes and no units. Both are now plainly decorative geometry. If a mark cannot be read, it must not look readable.

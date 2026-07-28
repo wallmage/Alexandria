@@ -9,6 +9,7 @@
     "subject",
     "research_question",
     "brief",
+    "people",
     "report_date",
     "coverage",
     "sources",
@@ -18,7 +19,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 3
+      "const": 4
     },
     "subject": {
       "type": "string",
@@ -30,6 +31,12 @@
     },
     "brief": {
       "$ref": "#/$defs/brief"
+    },
+    "people": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/person"
+      }
     },
     "report_date": {
       "type": "string",
@@ -68,6 +75,35 @@
       "uniqueItems": true
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "brief": {
+            "properties": {
+              "archetype": {"const": "person"}
+            },
+            "required": ["archetype"]
+          }
+        },
+        "required": ["brief"]
+      },
+      "then": {
+        "properties": {
+          "people": {
+            "minItems": 1,
+            "contains": {
+              "properties": {
+                "relationship": {"const": "primary_subject"}
+              },
+              "required": ["relationship"]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "brief": {
       "type": "object",
@@ -75,6 +111,7 @@
       "required": [
         "intended_reader",
         "decision_or_use",
+        "archetype",
         "report_language",
         "editorial_mode",
         "scope"
@@ -87,6 +124,17 @@
         "decision_or_use": {
           "type": "string",
           "minLength": 1
+        },
+        "archetype": {
+          "enum": [
+            "artifact",
+            "concept",
+            "event",
+            "organization",
+            "person",
+            "system",
+            "hybrid"
+          ]
         },
         "report_language": {
           "enum": ["en", "zh-CN", "zh-HK"]
@@ -246,7 +294,8 @@
         "provenance",
         "evidence_type",
         "source_family",
-        "roles"
+        "roles",
+        "accountability_basis"
       ],
       "properties": {
         "source_id": {
@@ -259,7 +308,8 @@
         },
         "url": {
           "type": "string",
-          "format": "uri"
+          "format": "uri",
+          "pattern": "^https?://"
         },
         "publisher": {
           "type": "string",
@@ -300,8 +350,14 @@
           ]
         },
         "source_family": {
+          "description": "Independence family. Default to the source URL's registrable domain (or its leading label). Any other value needs family_justification.",
           "type": "string",
           "minLength": 1
+        },
+        "family_justification": {
+          "description": "Why this source is genuinely independent of the other sources sharing its host or registrable domain. Required to override the domain-derived family or to carry a different provenance class from a same-host source.",
+          "type": ["string", "null"],
+          "minLength": 40
         },
         "roles": {
           "type": "array",
@@ -319,11 +375,231 @@
           },
           "uniqueItems": true
         },
+        "accountability_basis": {
+          "enum": [
+            "none",
+            "court_or_regulator_record",
+            "named_source_investigation",
+            "subject_admission"
+          ]
+        },
+        "accountability_note": {
+          "type": ["string", "null"],
+          "minLength": 40
+        },
         "limitations": {
           "type": ["string", "null"]
         },
         "undated_reason": {
           "type": ["string", "null"]
+        }
+      }
+    },
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "person_id",
+        "name",
+        "aliases",
+        "living_status",
+        "public_role",
+        "relationship"
+      ],
+      "properties": {
+        "person_id": {
+          "type": "string",
+          "pattern": "^P[0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "living_status": {
+          "enum": ["living", "recently_deceased", "deceased", "unknown"]
+        },
+        "public_role": {
+          "enum": ["public", "limited_public", "private"]
+        },
+        "relationship": {
+          "enum": ["primary_subject", "adjacent"]
+        }
+      }
+    },
+    "searchRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queries", "expected_locations", "searched_at"],
+      "properties": {
+        "queries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "expected_locations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "searched_at": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "rightOfReply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "response_claim_ids", "search_record"],
+      "properties": {
+        "status": {
+          "enum": [
+            "documented",
+            "declined",
+            "no_public_response",
+            "not_applicable"
+          ]
+        },
+        "response_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "search_record": {
+          "anyOf": [
+            {"$ref": "#/$defs/searchRecord"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "humanHarmReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "legal_stage",
+        "source_floor",
+        "accountable_source_ids",
+        "attributed_to",
+        "sourcing_limitation_excerpt",
+        "event_period",
+        "resolution_status",
+        "resolution_claim_ids",
+        "resolution_search",
+        "right_of_reply",
+        "privacy_basis",
+        "privacy_basis_source_ids",
+        "governing_question_relevance"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "wrongdoing",
+            "misconduct",
+            "personal_failing",
+            "sensitive_private_fact"
+          ]
+        },
+        "legal_stage": {
+          "enum": [
+            "alleged",
+            "investigated",
+            "charged",
+            "indicted",
+            "settled_no_admission",
+            "settled_with_admission",
+            "found_liable",
+            "convicted",
+            "acquitted",
+            "overturned",
+            "expunged",
+            "retracted",
+            "nonlegal"
+          ]
+        },
+        "source_floor": {
+          "enum": ["met", "single_source_limited"]
+        },
+        "accountable_source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^S[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "attributed_to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourcing_limitation_excerpt": {
+          "type": ["string", "null"]
+        },
+        "event_period": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolution_status": {
+          "enum": ["unresolved", "resolved", "not_applicable"]
+        },
+        "resolution_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "resolution_search": {
+          "anyOf": [
+            {"$ref": "#/$defs/searchRecord"},
+            {"type": "null"}
+          ]
+        },
+        "right_of_reply": {
+          "anyOf": [
+            {"$ref": "#/$defs/rightOfReply"},
+            {"type": "null"}
+          ]
+        },
+        "privacy_basis": {
+          "enum": [
+            "not_sensitive",
+            "self_disclosed",
+            "court_or_regulator_record"
+          ]
+        },
+        "privacy_basis_source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^S[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "governing_question_relevance": {
+          "type": "string",
+          "minLength": 40
         }
       }
     },
@@ -336,6 +612,22 @@
           "enum": ["met", "limited", "not_applicable"]
         },
         "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "sourceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "extract_or_location"],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "extract_or_location": {
+          "description": "The exact extract or precise location supplied by this individual source. Live fidelity checks bind probes to this source only.",
           "type": "string",
           "minLength": 1
         }
@@ -357,6 +649,8 @@
         "report_excerpts",
         "supports",
         "contradicts",
+        "person_ids",
+        "human_harm_review",
         "reasoning",
         "decision_relevance",
         "what_would_change",
@@ -365,6 +659,24 @@
         "limitations"
       ],
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source_ids": {
+                "minItems": 1
+              }
+            },
+            "required": ["source_ids"]
+          },
+          "then": {
+            "properties": {
+              "source_evidence": {
+                "minItems": 1
+              }
+            },
+            "required": ["source_evidence"]
+          }
+        },
         {
           "if": {
             "properties": {
@@ -385,6 +697,25 @@
               }
             },
             "required": ["extract_or_location"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "estimate"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "assumptions": {
+                "type": "array",
+                "minItems": 1
+              }
+            },
+            "required": ["assumptions"]
           }
         },
         {
@@ -480,6 +811,72 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "person_ids": {
+                "minItems": 1
+              }
+            },
+            "required": ["person_ids"]
+          },
+          "then": {
+            "required": ["person_claim_role", "person_claim_assessment"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "person_claim_role": {
+                "enum": ["harmful", "sensitive_private_fact"]
+              }
+            },
+            "required": ["person_claim_role"]
+          },
+          "then": {
+            "properties": {
+              "human_harm_review": {
+                "$ref": "#/$defs/humanHarmReview"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "person_claim_role": {
+                "const": "response"
+              }
+            },
+            "required": ["person_claim_role"]
+          },
+          "then": {
+            "required": ["responds_to_claim_ids"],
+            "properties": {
+              "responds_to_claim_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "person_claim_role": {
+                "const": "resolution"
+              }
+            },
+            "required": ["person_claim_role"]
+          },
+          "then": {
+            "required": ["resolves_claim_ids"],
+            "properties": {
+              "resolves_claim_ids": {
+                "minItems": 1
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -506,11 +903,54 @@
           "uniqueItems": true
         },
         "extract_or_location": {
+          "description": "The quoted or located evidence behind claim. Every quantitative token and status assertion in claim must be covered here or declared in derived_assertions.",
           "type": ["string", "null"]
         },
+        "source_evidence": {
+          "description": "One evidence record per direct source_id. Cross-reference validation requires exact, unique coverage.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceEvidence"
+          }
+        },
         "as_of": {
+          "description": "The date the claim was true of the world.",
           "type": ["string", "null"],
           "format": "date"
+        },
+        "verified_at": {
+          "description": "The date the extract was last re-read against the live source. Distinct from as_of: re-dating a claim is not re-verifying it.",
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "assumptions": {
+          "description": "Stated inputs and steps behind original arithmetic. Required for kind estimate.",
+          "type": ["array", "null"],
+          "items": {
+            "type": "string",
+            "minLength": 20
+          },
+          "uniqueItems": true
+        },
+        "derived_assertions": {
+          "description": "Narrow escape hatch: assertions in claim that are computed or inferred rather than quoted. Each entry names the exact expression and states its derivation. Not for restating the source.",
+          "type": ["array", "null"],
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["expression", "derivation"],
+            "properties": {
+              "expression": {
+                "type": "string",
+                "minLength": 1
+              },
+              "derivation": {
+                "type": "string",
+                "minLength": 40
+              }
+            }
+          }
         },
         "confidence": {
           "enum": ["high", "medium", "low"]
@@ -525,11 +965,12 @@
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 40
+            "minLength": 10
           },
           "uniqueItems": true
         },
         "supports": {
+          "description": "Strictly downward: the claims this claim rests on. Listing B in A.supports means B is evidence for A, never the reverse. Cycles, including mutual pairs, are rejected.",
           "type": "array",
           "items": {
             "type": "string",
@@ -544,6 +985,67 @@
             "pattern": "^C[0-9]+$"
           },
           "uniqueItems": true
+        },
+        "person_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^P[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "person_claim_role": {
+          "description": "Required whenever person_ids is non-empty. Classifies the claim before vocabulary-based safety checks so harmful, private, response, and resolution claims cannot rely on a finite keyword list.",
+          "enum": [
+            "neutral",
+            "harmful",
+            "sensitive_private_fact",
+            "response",
+            "resolution"
+          ]
+        },
+        "person_claim_assessment": {
+          "description": "Human/agent semantic screening for every person-linked claim. It makes the role decision explicit instead of treating a finite keyword list as the classifier.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classification", "rationale"],
+          "properties": {
+            "classification": {
+              "enum": [
+                "neutral",
+                "harmful",
+                "sensitive_private_fact",
+                "response",
+                "resolution"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "minLength": 40
+            }
+          }
+        },
+        "responds_to_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "resolves_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "uniqueItems": true
+        },
+        "human_harm_review": {
+          "anyOf": [
+            {"$ref": "#/$defs/humanHarmReview"},
+            {"type": "null"}
+          ]
         },
         "reasoning": {
           "type": ["string", "null"]
@@ -568,33 +1070,10 @@
           "default": false
         },
         "evidence_of_absence": {
-          "type": ["object", "null"],
-          "additionalProperties": false,
-          "required": ["queries", "expected_locations", "searched_at"],
-          "properties": {
-            "queries": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "expected_locations": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "searched_at": {
-              "type": "string",
-              "format": "date"
-            }
-          }
+          "anyOf": [
+            {"$ref": "#/$defs/searchRecord"},
+            {"type": "null"}
+          ]
         }
       }
     },

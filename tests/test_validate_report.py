@@ -37,6 +37,152 @@ The outlook separates observation from inference and names what could change the
 
 
 class MarkdownValidationTests(unittest.TestCase):
+    def test_cited_qualitative_fact_must_map_to_a_ledger_claim(self):
+        report = """# Report
+
+## Finding
+
+The supported figure is 15 incidents.
+
+The vendor filed for bankruptcy and its CEO resigned. [Audit](https://example.com/a)
+
+## Sources
+
+- [Audit](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": "The supported figure is 15 incidents.",
+                    "source_ids": ["S1"],
+                    "supports": [],
+                    "include_in_report": True,
+                    "report_excerpts": [
+                        "The supported figure is 15 incidents."
+                    ],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("maps to no ledger claim" in error for error in errors),
+            errors,
+        )
+
+    def test_uncited_qualitative_fact_must_map_to_a_ledger_claim(self):
+        report = """# Report
+
+## Finding
+
+The supported figure is 15 incidents.
+
+The vendor filed for bankruptcy and its CEO resigned.
+
+## Sources
+
+- [Audit](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": "The supported figure is 15 incidents.",
+                    "source_ids": ["S1"],
+                    "supports": [],
+                    "include_in_report": True,
+                    "report_excerpts": [
+                        "The supported figure is 15 incidents."
+                    ],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("maps to no ledger claim" in error for error in errors),
+            errors,
+        )
+
+    def test_unmapped_factual_paragraph_cannot_hide_behind_a_known_citation(self):
+        report = """# Report
+
+## Finding
+
+The supported figure is 15 incidents.
+
+The later total was 900 incidents, all patched [Record](https://example.com/a).
+
+## Sources
+
+- [Record](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": "The supported figure is 15 incidents.",
+                    "source_ids": ["S1"],
+                    "supports": [],
+                    "include_in_report": True,
+                    "report_excerpts": [
+                        "The supported figure is 15 incidents."
+                    ],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("maps to no ledger claim" in error for error in errors),
+            errors,
+        )
+
+    def test_named_protected_person_harm_must_map_to_a_reviewed_claim(self):
+        report = """# Report
+
+## Finding
+
+The regulator alleged procurement fraud by Alex Doe.
+
+## Sources
+
+- [Record](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [
+                {
+                    "person_id": "P1",
+                    "name": "Alex Doe",
+                    "aliases": ["Doe"],
+                    "living_status": "living",
+                }
+            ],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("Protected-person harm" in error for error in errors),
+            errors,
+        )
+
     def test_accepts_well_formed_report(self):
         errors = validate_report.validate_markdown(
             GOOD_REPORT, min_words=40, min_chars=100, min_sources=2, min_sections=3
@@ -336,6 +482,52 @@ Words after the sources section.
         self.assertTrue(any("not present in the ledger" in error for error in errors))
         self.assertTrue(any("cannot be located" in error for error in errors))
 
+    def test_mapped_report_unit_cannot_append_unsupported_assertions(self):
+        supported = (
+            "The independent audit recorded 15 incidents in the first review."
+        )
+        report = f"""# Title
+
+## Analysis
+
+{supported} The vendor later recorded 900 incidents, all patched.
+[Audit](https://example.com/audit)
+
+## Sources
+
+- [Audit](https://example.com/audit)
+"""
+        ledger = {
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/audit"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": supported,
+                    "kind": "fact",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                    "extract_or_location": (
+                        "The audit records 15 incidents in the first review."
+                    ),
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": (
+                                "The audit records 15 incidents in the first review."
+                            ),
+                        }
+                    ],
+                    "report_excerpts": [supported],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        joined = " ".join(errors)
+        self.assertIn("quantity '900'", joined)
+        self.assertIn("asserts 'patched'", joined)
+
     def test_markdown_url_parser_keeps_balanced_parentheses(self):
         url = "https://en.wikipedia.org/wiki/Function_(mathematics)"
         report = f"# Title\n\n## Body\n\n[Source]({url})\n\n## Sources\n\n- [Source]({url})"
@@ -572,6 +764,128 @@ Choose Alpha because it wins on the operating constraints that matter.
         errors = validate_report.validate_report_against_ledger(report, ledger)
         self.assertFalse(
             any("evidence-of-absence search record" in error for error in errors),
+            errors,
+        )
+    def test_decision_language_must_cite_a_source_that_backs_a_claim(self):
+        report = """# Title
+
+## Decision
+
+Choose Alpha because it wins on the operating constraints that matter.
+[Company home](https://example.com/home)
+
+## Sources
+
+- [Company home](https://example.com/home)
+- [Evidence](https://example.com/evidence)
+"""
+        ledger = {
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/evidence"},
+                {"source_id": "S2", "url": "https://example.com/home"},
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "include_in_report": False,
+                    "source_ids": ["S1"],
+                    "supports": [],
+                    "report_excerpts": [],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                "Decision language cites no source that backs a ledger claim"
+                in error
+                for error in errors
+            ),
+            errors,
+        )
+
+        ledger["claims"][0]["source_ids"] = ["S1", "S2"]
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertFalse(
+            any("Decision language" in error for error in errors),
+            errors,
+        )
+
+    def test_softly_worded_absence_claims_are_caught(self):
+        for sentence in (
+            "No published source measures the per-change cost of either tool.",
+            "No public equivalent appears to exist on the rival platform.",
+            "None was located in the regulator's public register.",
+        ):
+            with self.subTest(sentence=sentence):
+                report = f"""# Title
+
+## Evidence limits
+
+{sentence}
+
+## Sources
+
+- [Search index](https://example.com/search)
+"""
+                ledger = {
+                    "sources": [
+                        {"source_id": "S1", "url": "https://example.com/search"}
+                    ],
+                    "claims": [
+                        {
+                            "claim_id": "C1",
+                            "include_in_report": True,
+                            "source_ids": [],
+                            "supports": [],
+                            "report_excerpts": [sentence],
+                        }
+                    ],
+                }
+                errors = validate_report.validate_report_against_ledger(
+                    report, ledger
+                )
+                self.assertTrue(
+                    any(
+                        "evidence-of-absence search record" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_absence_search_must_be_inside_the_freshness_window(self):
+        sentence = "No independent benchmark was found for the two systems."
+        report = f"""# Title
+
+## Evidence limits
+
+{sentence}
+
+## Sources
+
+- [Search index](https://example.com/search)
+"""
+        ledger = {
+            "report_date": "2026-07-28",
+            "sources": [{"source_id": "S1", "url": "https://example.com/search"}],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "include_in_report": True,
+                    "source_ids": [],
+                    "supports": [],
+                    "report_excerpts": [sentence],
+                    "evidence_of_absence": {
+                        "queries": ["independent benchmark"],
+                        "expected_locations": ["evaluation indexes"],
+                        "searched_at": "2019-01-01",
+                    },
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("rests on a search older than" in error for error in errors),
             errors,
         )
 

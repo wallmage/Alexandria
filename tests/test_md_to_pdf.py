@@ -99,6 +99,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("--date", result.stdout)
         self.assertIn("--cover-image", result.stdout)
         self.assertIn("--rewild-receipt", result.stdout)
+        self.assertIn("--source-fidelity-receipt", result.stdout)
         self.assertIn("--content-receipt", result.stdout)
         self.assertIn("--ledger", result.stdout)
 
@@ -119,6 +120,8 @@ class CommandLineTests(unittest.TestCase):
                     str(Path(temp_dir) / "ledger.json"),
                     "--content-receipt",
                     str(Path(temp_dir) / "content-receipt.json"),
+                    "--source-fidelity-receipt",
+                    str(Path(temp_dir) / "source-fidelity-receipt.json"),
                 ],
                 capture_output=True,
                 text=True,
@@ -181,10 +184,11 @@ Body.
             lang="en",
             template="executive",
         )
-        self.assertIn(
-            '<sup class="source-ref">[01]</sup>',
-            rendered,
-        )
+        # A bare superscript numeral in the text face is the editorial
+        # convention; the earlier bold-mono "[01]" broke the line rhythm wherever
+        # a sentence carried more than one citation.
+        self.assertIn('<sup class="source-ref">01</sup>', rendered)
+        self.assertNotIn("[01]", rendered)
 
     def test_image_covers_have_contrast_protection_for_all_overlay_text(self):
         css = self.converter.build_css(
@@ -239,9 +243,38 @@ Body.
             insight_label="insight",
             takeaway_label="takeaway",
         )
+        # Only paragraphs certified short by is_lede_paragraph() are set as
+        # ledes, and a lede never breaks across pages. break-after: avoid was
+        # deliberately dropped: it pushed whole blocks to the next sheet and
+        # left up to 70mm of trailing white space on the page before.
         self.assertRegex(
             css,
-            r"h1 \+ p,\s*h2 \+ p \{[^}]*break-after: avoid",
+            r"h1 \+ p\.section-lede,\s*h2 \+ p\.section-lede \{[^}]*break-inside: avoid",
+        )
+        lede_rule = re.search(
+            r"h1 \+ p\.section-lede,\s*h2 \+ p\.section-lede \{[^}]*\}", css
+        ).group(0)
+        self.assertNotIn("break-after: avoid", lede_rule)
+
+    def test_only_short_paragraphs_are_set_as_ledes(self):
+        short = "A compact standfirst that introduces the section."
+        long = "word " * 200
+        self.assertTrue(self.converter.is_lede_paragraph(short))
+        self.assertFalse(self.converter.is_lede_paragraph(long))
+        self.assertFalse(self.converter.is_lede_paragraph(""))
+
+        body = f"<h2>Section</h2>\n<p>{short}</p>\n<h2>Other</h2>\n<p>{long}</p>"
+        marked = self.converter.mark_section_ledes(body)
+        self.assertIn(f'<p class="section-lede">{short}</p>', marked)
+        self.assertIn(f"<p>{long}</p>", marked)
+
+    def test_cjk_ledes_count_glyphs_as_double_width(self):
+        # A CJK paragraph occupies roughly twice the measure per character, so
+        # the unit budget must halve the character count it accepts.
+        han = "研" * (self.converter.MAX_LEDE_UNITS // 2 + 5)
+        self.assertFalse(self.converter.is_lede_paragraph(han))
+        self.assertTrue(
+            self.converter.is_lede_paragraph("研" * (self.converter.MAX_LEDE_UNITS // 4))
         )
 
     def test_multi_page_toc_exposes_page_index_for_crop_variation(self):
@@ -462,6 +495,22 @@ Body.
         self.assertNotRegex(css, r"@top-(?:left|right)\s*\{[^}]*padding-bottom")
         self.assertNotRegex(css, r"@bottom-(?:left|right)\s*\{[^}]*padding-top")
         self.assertRegex(css, r"tr,\s*td,\s*th\s*\{[^}]*break-inside:\s*avoid")
+
+    def test_paragraph_splits_keep_a_full_reading_block_on_each_page(self):
+        css = self.converter.build_css(
+            "horizon",
+            font_sans="sans",
+            font_display="serif",
+            font_mono="mono",
+            header_text="Header",
+            page_label="",
+            page_suffix="",
+            footer_text="Footer",
+            insight_label="Insight",
+            takeaway_label="Takeaway",
+        )
+        self.assertIn("orphans: 8", css)
+        self.assertIn("widows: 8", css)
 
     def test_sanitizer_drops_contents_of_active_or_embedded_elements(self):
         value = (
@@ -948,6 +997,223 @@ Body.
             image.write_bytes(tiny_png)
             with self.assertRaisesRegex(ValueError, "resolution"):
                 self.converter.validate_cover_image(report, image)
+
+
+class DesignRegressionTests(unittest.TestCase):
+    """Regressions for defects an editorial review found in shipped PDFs."""
+
+    def setUp(self):
+        self.converter = load_converter()
+        self.css = self.converter.build_css(
+            "blueprint",
+            font_sans="sans",
+            font_display="serif",
+            font_mono="mono",
+            header_text="header",
+            page_label="",
+            page_suffix="",
+            footer_text="footer",
+            insight_label="insight",
+            takeaway_label="takeaway",
+        )
+
+    def rule(self, pattern):
+        match = re.search(pattern, self.css, re.DOTALL)
+        self.assertIsNotNone(match, f"no CSS rule matched {pattern!r}")
+        return match.group(0)
+
+    def test_running_header_is_centred_in_a_deeper_top_margin(self):
+        # vertical-align: bottom in a 21mm margin parked the running head about
+        # 2mm above the first body baseline on roughly half the pages.
+        page_rule = self.rule(r"@page \{.*?\n\}")
+        self.assertIn("margin: 26mm 18mm 19mm 18mm", page_rule)
+        top_boxes = page_rule.split("@bottom-left")[0]
+        self.assertNotIn("vertical-align: bottom", top_boxes)
+        self.assertEqual(top_boxes.count("vertical-align: middle"), 2)
+
+    def test_h2_accent_rule_uses_padding_so_it_survives_a_page_break(self):
+        rule = self.rule(r"\nh2 \{[^}]*\}")
+        self.assertIn("padding: 7mm 0 3.5mm", rule)
+        self.assertNotIn("margin: 11mm", rule)
+
+    def test_inline_code_does_not_break_across_lines(self):
+        self.assertIn("white-space: nowrap", self.rule(r"\ncode \{[^}]*\}"))
+        self.assertIn("white-space: inherit", self.rule(r"\npre code \{[^}]*\}"))
+
+    def test_body_links_carry_a_non_colour_affordance(self):
+        rule = self.rule(r"\na \{[^}]*\}")
+        self.assertIn("text-decoration: underline", rule)
+        # Mid-word breaking belongs to raw URLs, not to link titles.
+        self.assertNotIn("overflow-wrap", rule)
+        self.assertIn("a[href]::after,", self.css)
+
+    def test_citation_marker_is_a_bare_numeral_in_the_text_face(self):
+        rule = self.rule(r"\.source-ref \{[^}]*\}")
+        self.assertNotIn("__FONT_MONO__", rule)
+        self.assertNotIn("mono", rule)
+        self.assertIn("vertical-align: super", rule)
+
+    def test_sources_page_groups_each_url_with_its_own_entry(self):
+        rule = self.rule(r'\.sources-section a\[href\^="http"\]::after \{[^}]*\}')
+        # The literal \A injected a phantom blank line that pushed every URL
+        # toward the following entry instead of its own.
+        content = re.search(r"content: [^;]+;", rule).group(0)
+        self.assertEqual(content, "content: attr(href);")
+        self.assertIn("margin-top", rule)
+
+    def test_sources_entries_have_a_hanging_indent_and_their_own_page(self):
+        item_rule = self.rule(r"\.sources-section li \{[^}]*\}")
+        self.assertIn("padding-left: 9mm", item_rule)
+        self.assertIn("text-indent: -9mm", item_rule)
+        section_rule = self.rule(r"\.sources-section \{[^}]*\}")
+        self.assertIn("page-break-before: always", section_rule)
+        self.assertIn("page: sources", section_rule)
+        self.assertIn("ALEXANDRIA  /  SOURCES", self.rule(r"@page sources \{[^}]*\}"))
+
+    def test_toc_folio_is_not_optically_smaller_than_the_title(self):
+        folio = self.rule(r"\.toc-page-number \{[^}]*\}")
+        size = float(re.search(r"font-size: ([\d.]+)pt", folio).group(1))
+        self.assertGreaterEqual(size, 10.0)
+        # Truncated teasers are gone entirely.
+        self.assertNotIn("toc-summary", self.css)
+
+    def test_opener_never_spills_onto_a_second_sheet(self):
+        rule = self.rule(
+            r"\.horizon-feature-lower,\s*\.horizon-feature-narrative,"
+            r"\s*\.horizon-feature-path \{[^}]*\}"
+        )
+        self.assertIn("break-inside: avoid", rule)
+
+    def test_toc_pages_are_balanced_not_fixed_size(self):
+        chunks = self.converter.balanced_toc_chunks(list(range(15)), 12)
+        self.assertEqual([len(chunk) for chunk in chunks], [8, 7])
+        self.assertEqual(
+            [len(c) for c in self.converter.balanced_toc_chunks(list(range(12)), 12)],
+            [12],
+        )
+        # No page is ever left holding two entries above a sheet of blank paper.
+        for size in range(1, 40):
+            with self.subTest(entries=size):
+                counts = [
+                    len(c)
+                    for c in self.converter.balanced_toc_chunks(list(range(size)), 12)
+                ]
+                self.assertLessEqual(max(counts) - min(counts), 1)
+
+    def test_toc_entries_carry_no_teaser_text(self):
+        rendered = self.converter.build_toc_html(
+            '<h2 id="one">One</h2><p>A summary that used to be truncated.</p>'
+            '<h2 id="two">Two</h2><p>Another summary.</p>',
+            "en",
+            "executive",
+        )
+        self.assertNotIn("toc-summary", rendered)
+        self.assertNotIn("used to be truncated", rendered)
+
+    def test_opener_numbering_is_derived_from_the_real_section(self):
+        body = (
+            '<h2 id="one">Opening section</h2><p>Short lede.</p>'
+            '<h2 id="two">Second</h2><p>More.</p>'
+        )
+        feature, _ = self.converter.build_reference_feature_html(
+            body, "en", "blueprint", None, decorative_image=True
+        )
+        # The shipped opener always claimed "03" while sitting on section 01.
+        self.assertIn("System note 01", feature)
+        self.assertNotIn("System note 03", feature)
+        self.assertNotIn("{sec}", feature)
+
+    def test_templates_without_photography_get_a_generated_plate(self):
+        body = '<h2 id="one">Opening section</h2><p>Short lede.</p>'
+        feature, _ = self.converter.build_reference_feature_html(
+            body, "en", "blueprint", None, decorative_image=True
+        )
+        self.assertIn('class="feature-plate"', feature)
+        self.assertNotIn("<img", feature)
+        # Blueprint borrowed Orbit's photograph and Sunbeam borrowed Current's.
+        self.assertNotIn("blueprint", self.converter.BUNDLED_TEMPLATE_IMAGES)
+        self.assertNotIn("sunbeam", self.converter.BUNDLED_TEMPLATE_IMAGES)
+
+    def test_opener_card_is_capped_so_the_lower_grid_still_fits(self):
+        long_insight = "word " * 400
+        body = (
+            '<h2 id="one">Opening section</h2>'
+            f'<aside class="insight-panel"><p>{long_insight}</p></aside>'
+            "<p>A short narrative paragraph.</p>"
+        )
+        feature, remaining = self.converter.build_reference_feature_html(
+            body, "en", "blueprint", None, decorative_image=True
+        )
+        self.assertNotIn(long_insight.strip(), feature)
+        self.assertIn("insight-panel", remaining)
+
+    def test_zh_stacks_are_script_pure(self):
+        simplified = self.converter.FONT_SANS_CN + self.converter.FONT_SERIF_CN
+        traditional = self.converter.FONT_SANS_HK + self.converter.FONT_SERIF_HK
+        for marker in ("HK", "TC", "JhengHei", "PMingLiU"):
+            self.assertNotIn(marker, simplified)
+        for marker in ("SC", "YaHei", "SimSun"):
+            self.assertNotIn(marker, traditional)
+        # No generic terminator: fontconfig answered `serif` with Songti in
+        # whichever script it felt like, which is how a zh-HK document ended up
+        # carrying Songti SC-Bold.
+        for stack in (self.converter.FONT_SANS_CN, self.converter.FONT_SERIF_CN,
+                      self.converter.FONT_SANS_HK, self.converter.FONT_SERIF_HK):
+            self.assertFalse(stack.rstrip().endswith("serif"))
+        # Hiragino is Japanese and has no business in a Chinese document.
+        self.assertNotIn("Hiragino", traditional)
+
+    def test_mono_stack_is_locale_aware(self):
+        settings = self.converter.localized_settings("zh-HK", "maison")
+        self.assertIn("PingFang HK", settings["font_mono"])
+        self.assertFalse(settings["font_mono"].rstrip().endswith("monospace"))
+        english = self.converter.localized_settings("en", "maison")["font_mono"]
+        self.assertTrue(english.rstrip().endswith("monospace"))
+
+    def test_cjk_typography_is_not_latin_css(self):
+        block = self.rule(r'html\[lang\^="zh"\] body \{[^}]*\}')
+        self.assertIn("text-align: justify", block)
+        self.assertIn("line-break: strict", block)
+        self.assertIn("text-spacing", block)
+
+    def test_struct_ids_are_deterministic(self):
+        from weasyprint.pdf import tags
+
+        one, two = object(), object()
+        with self.converter.deterministic_struct_ids():
+            first, second = tags.id(one), tags.id(two)
+            self.assertNotEqual(first, second)
+            self.assertEqual(first, tags.id(one))
+            self.assertIsInstance(first, int)
+        self.assertNotIn("id", tags.__dict__)
+
+    def test_reproducible_epoch_is_restored_after_a_render(self):
+        import os
+
+        before = os.environ.get("SOURCE_DATE_EPOCH")
+        with self.converter.deterministic_struct_ids():
+            self.assertIn("SOURCE_DATE_EPOCH", os.environ)
+        self.assertEqual(os.environ.get("SOURCE_DATE_EPOCH"), before)
+
+    def test_blueprint_cover_drawing_snaps_to_the_datum_grid(self):
+        # 17mm..185mm x 111mm..255mm on a 24mm grid anchored at 17mm/15mm.
+        self.assertIn("background-position: 17mm 15mm", self.css)
+        self.assertIn("inset: 111mm 25mm 42mm 17mm", self.css)
+        for offset in ("left: 24mm", "top: 24mm", "width: 48mm", "height: 48mm"):
+            self.assertIn(offset, self.css)
+        self.assertIn("top: 72mm", self.css)
+        self.assertIn("left: 96mm", self.css)
+        # Body text starts on a grid line rather than 6mm off one.
+        body_rule = self.rule(r"\.template-blueprint \.report-body \{[^}]*\}")
+        self.assertIn("padding-left: 8mm", body_rule)
+
+    def test_cover_diagrams_do_not_pretend_to_be_informative(self):
+        art = self.converter.cover_art_html("blueprint")
+        # A/B/C node labels had no legend and no referent.
+        self.assertNotIn(">A<", art)
+        self.assertNotIn(">B<", art)
+        self.assertNotIn(">C<", art)
+        self.assertNotIn(".executive-scale::after", self.css)
 
 
 if __name__ == "__main__":

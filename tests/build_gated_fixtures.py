@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.content_gate import run_content_gate
 from scripts.rewild_gate import file_sha256, run_gate
+from scripts.source_fidelity import issue_source_fidelity_receipt
+from scripts.validate_report import _report_prose
 
 SCORES = (
     "question_answered",
@@ -42,7 +45,8 @@ CASES = (
         "fixture": "sample-report.md",
         "lang": "en",
         "profile": "rewild",
-        "url": "https://example.com/research/a-very-long-but-valid-path-that-must-wrap-inside-the-page-instead-of-running-through-the-margin",
+        "fixture_url": "https://example.com/research/a-very-long-but-valid-path-that-must-wrap-inside-the-page-instead-of-running-through-the-margin",
+        "url": "https://example.com/?research=a-very-long-but-valid-path-that-must-wrap-inside-the-page-instead-of-running-through-the-margin",
         "excerpt": "The pipeline converts Markdown into a styled PDF, builds a contents page, and keeps a source link clickable.",
         "sources_heading": "## Sources",
         "section_headings": ("Executive summary", "Key process", "Outlook"),
@@ -58,7 +62,8 @@ CASES = (
         "fixture": "sample-report.zh-CN.md",
         "lang": "zh-CN",
         "profile": "rewild-zh",
-        "url": "https://example.com/cn-source",
+        "fixture_url": "https://example.com/cn-source",
+        "url": "https://example.com/?source=cn",
         "excerpt": "系统会把 Markdown 转成 PDF，建立目录，并保留可点击的资料来源，让测试可以同时核对排版结果和引用路径。",
         "sources_heading": "## 参考资料",
         "section_headings": ("摘要", "主要流程", "未来展望"),
@@ -73,7 +78,8 @@ CASES = (
         "fixture": "sample-report.zh-HK.md",
         "lang": "zh-HK",
         "profile": "rewild-hk",
-        "url": "https://example.com/hk-source",
+        "fixture_url": "https://example.com/hk-source",
+        "url": "https://example.com/?source=hk",
         "excerpt": "系統會把 Markdown 轉成 PDF，建立目錄，並保留可按的資料來源，讓測試可以同時核對排版結果和引用路徑。",
         "sources_heading": "## 參考資料",
         "section_headings": ("摘要", "主要流程", "未來展望"),
@@ -98,6 +104,23 @@ def build_case(case, output_root):
         heading,
         case["depth"]() + "\n\n" + heading,
     )
+    report_text = report_text.replace(case["fixture_url"], case["url"])
+    body, source_tail = report_text.split("\n\n" + heading, 1)
+    body_parts = body.split("\n\n")
+    mapped_excerpts = []
+    for index, part in enumerate(body_parts):
+        raw = part.lstrip()
+        if raw.startswith(("#", ">", "|", "```")):
+            continue
+        if not re.search(r"https?://", part):
+            part += f" [Fixture source]({case['url']})"
+            body_parts[index] = part
+        normalized = re.sub(
+            r"\s+", " ", _report_prose(part, [])
+        ).strip()
+        if len(normalized) >= 10:
+            mapped_excerpts.append(normalized)
+    report_text = "\n\n".join(body_parts) + "\n\n" + heading + source_tail
 
     report = case_root / "report.md"
     source = case_root / "pre-rewild.md"
@@ -106,6 +129,7 @@ def build_case(case, output_root):
     ledger = case_root / "ledger.json"
     content_review = case_root / "content-review.json"
     content_receipt = case_root / "content-receipt.json"
+    source_fidelity_receipt = case_root / "source-fidelity-receipt.json"
     report.write_text(report_text, encoding="utf-8")
     final_text, source_text = case["source_rewrite"]
     if final_text not in report_text:
@@ -157,10 +181,19 @@ def build_case(case, output_root):
     )
     ledger_data["brief"]["report_language"] = case["lang"]
     ledger_data["sources"][0]["url"] = case["url"]
-    ledger_data["claims"][0]["report_excerpts"] = [case["excerpt"]]
+    ledger_data["claims"][0]["report_excerpts"] = mapped_excerpts
+    ledger_data["claims"][0]["extract_or_location"] = "Example Domain"
+    ledger_data["claims"][0]["source_evidence"][0][
+        "extract_or_location"
+    ] = "Example Domain"
     ledger.write_text(
         json.dumps(ledger_data, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+    )
+    issue_source_fidelity_receipt(
+        ledger,
+        source_fidelity_receipt,
+        now=__import__("datetime").date(2026, 7, 28),
     )
     content_review.write_text(
         json.dumps(
@@ -219,6 +252,7 @@ def build_case(case, output_root):
         ledger,
         content_review,
         content_receipt,
+        source_fidelity_receipt_path=source_fidelity_receipt,
     )
     if errors:
         raise RuntimeError(

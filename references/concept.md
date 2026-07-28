@@ -83,6 +83,24 @@ Analytical assessment — but note that for concepts, "verdict" is less about fu
 - **Durability**: Will this concept endure, evolve, or be superseded? What would it take to overthrow it?
 - **Why it matters**: For the non-specialist reader — why should anyone care about this concept? What does understanding it give you?
 
+## Evidence scaffold
+
+One row per dimension, matching the coverage-map pattern in `research-protocol.md`. **Best evidence** names the record that would actually settle the question. **Source role** uses the ledger's role vocabulary. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
+
+Concepts fail differently from things: the risk is not vendor spin but textbook drift, where the version everyone repeats has quietly detached from what the original argued and what the evidence supports. Go to the primary text, and check whether the field still believes what the summaries say it believes.
+
+| Dimension | Best evidence | Source role | Disconfirming query |
+|---|---|---|---|
+| One-Line Definition | The originating text's own formulation, plus a current authoritative reference | `historical_record`, `expert_interpretation` | Do practitioners in adjacent fields use this term to mean something incompatible? |
+| Genesis | The original paper, book, or lecture; correspondence; contemporaneous reception | `historical_record` | Who formulated an equivalent idea earlier or independently, and why is that claim not credited? |
+| Core Content | The primary formulation, including its formal statement, assumptions, and stated scope | `historical_record`, `expert_interpretation` | Which assumption is load-bearing, and what happens to the claim when it fails? |
+| Evolution and Development | Citation lineage, later revisions by the originators, review articles tracking the change | `expert_interpretation`, `independent_analysis` | Where does today's popular version differ from what the original text actually claimed? |
+| Debates and Critiques | The strongest critical papers in their own words, plus replication or failed-replication records | `expert_interpretation`, `empirical_data` | What is the single best-argued case that this concept is wrong, and has it been answered? |
+| State of Play | Recent reviews, current citation and funding patterns, syllabi and practitioner surveys | `empirical_data`, `expert_interpretation` | Which specialists consider this settled, superseded, or discredited, and since when? |
+| Verdict | The accumulated empirical record on both sides, and documented applications with results | `empirical_data`, `expert_interpretation` | What observation would falsify this concept, and has anyone looked for it? |
+
+Where a concept is contested along political, ideological, or disciplinary lines, source the critics from their own strongest writing rather than from the proponents' characterization of them, and say plainly which questions the evidence cannot settle.
+
 ## Coverage priority
 
 Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.

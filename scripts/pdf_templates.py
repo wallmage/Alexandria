@@ -24,6 +24,53 @@ TEMPLATE_CHOICES = (
 )
 
 FONT_ROOT = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+
+# Optional bundled CJK faces. Alexandria cannot redistribute Apple's PingFang
+# or Songti, and no OFL CJK face is vendored by default because a full Noto
+# CJK pair is ~40MB. Drop the files below into assets/fonts/ and every zh
+# render becomes host-independent; without them the host stack is used and
+# scripts/pdf_quality.check_cjk_fonts() fails loudly if the render mixes
+# Simplified and Traditional faces. See references/pdf-production.md.
+CJK_FONT_FILES = {
+    "zh-CN": ("Alexandria CJK SC", "AlexandriaCJK-SC.ttf"),
+    "zh-HK": ("Alexandria CJK TC", "AlexandriaCJK-TC.ttf"),
+}
+
+
+def bundled_cjk_font_path(lang):
+    """Return the bundled CJK font file for a locale, or None."""
+    entry = CJK_FONT_FILES.get(lang)
+    if not entry:
+        return None
+    path = FONT_ROOT / entry[1]
+    return path if path.is_file() else None
+
+
+def bundled_cjk_font_family(lang):
+    """Return the bundled CJK family name for a locale, or None."""
+    entry = CJK_FONT_FILES.get(lang)
+    if entry and bundled_cjk_font_path(lang):
+        return entry[0]
+    return None
+
+
+def _cjk_font_faces():
+    faces = []
+    for family, filename in CJK_FONT_FILES.values():
+        path = FONT_ROOT / filename
+        if not path.is_file():
+            continue
+        faces.append(
+            "@font-face {\n"
+            f'    font-family: "{family}";\n'
+            f'    src: url("{path.as_uri()}") format("truetype");\n'
+            "    font-weight: 100 900;\n"
+            "    font-style: normal;\n"
+            "}\n"
+        )
+    return "".join(faces)
+
+
 BUNDLED_FONT_CSS = f"""
 @font-face {{
     font-family: "Alexandria Sans";
@@ -43,7 +90,7 @@ BUNDLED_FONT_CSS = f"""
     font-weight: 200 900;
     font-style: normal;
 }}
-"""
+{_cjk_font_faces()}"""
 
 
 @dataclass(frozen=True)
@@ -63,7 +110,7 @@ TEMPLATES = {
         name="executive",
         display_name="Executive",
         accent="#16827c",
-        accent_text="#16827c",
+        accent_text="#147772",
         dark="#123047",
         muted="#657483",
         pale="#edf3f4",
@@ -351,17 +398,22 @@ def select_adaptive_companion(subject_text):
     return winners[int.from_bytes(digest[:2], "big") % len(winners)]
 
 
+# Templates that ship their own licensed photograph. Everything else draws a
+# generated plate in its own visual language rather than borrowing one.
+BUNDLED_TEMPLATE_IMAGES = {
+    "horizon": "horizon-landscape.jpg",
+    "maison": "maison-interior.jpeg",
+    "terrain": "terrain-aerial.jpeg",
+    "orbit": "orbit-scientific.jpeg",
+    "current": "current-ribbon.jpeg",
+    "apricot": "apricot-workshop.jpeg",
+}
+
+
 @lru_cache(maxsize=12)
 def bundled_template_image_data_uri(template):
     """Return a bundled editorial image as a portable embedded JPEG."""
-    filenames = {
-        "horizon": "horizon-landscape.jpg",
-        "maison": "maison-interior.jpeg",
-        "terrain": "terrain-aerial.jpeg",
-        "orbit": "orbit-scientific.jpeg",
-        "current": "current-ribbon.jpeg",
-        "apricot": "apricot-workshop.jpeg",
-    }
+    filenames = BUNDLED_TEMPLATE_IMAGES
     if template not in filenames:
         raise ValueError(f"Template '{template}' has no bundled image.")
     image_path = Path(__file__).resolve().parent.parent / "assets" / filenames[template]
@@ -432,9 +484,9 @@ def cover_art_html(template, cover_image=None):
             <span class="blueprint-datum datum-b"></span>
             <span class="blueprint-axis blueprint-axis-x"></span>
             <span class="blueprint-axis blueprint-axis-y"></span>
-            <span class="blueprint-node node-a">A</span>
-            <span class="blueprint-node node-b">B</span>
-            <span class="blueprint-node node-c">C</span>
+            <span class="blueprint-node node-a"></span>
+            <span class="blueprint-node node-b"></span>
+            <span class="blueprint-node node-c"></span>
             <span class="blueprint-ruler"></span>
         </div>
         """
@@ -536,7 +588,12 @@ def cover_art_html(template, cover_image=None):
 COMMON_CSS = """
 @page {
     size: A4;
-    margin: 21mm 18mm 19mm 18mm;
+    /* 26mm top margin with the running head centred in it: the header sits
+       ~13mm off the trim edge and clears the first body baseline by ~12mm on
+       every page. vertical-align:bottom parked it against the text block and
+       collided with body copy on roughly half the pages.
+       scripts/pdf_quality.py asserts the measured gap. */
+    margin: 26mm 18mm 19mm 18mm;
 
     @top-left {
         content: "ALEXANDRIA  /  DEEP RESEARCH";
@@ -545,7 +602,7 @@ COMMON_CSS = """
         font-weight: 700;
         letter-spacing: 1.25pt;
         color: __DARK__;
-        vertical-align: bottom;
+        vertical-align: middle;
     }
     @top-right {
         content: "__HEADER__";
@@ -553,7 +610,7 @@ COMMON_CSS = """
         font-size: 7pt;
         letter-spacing: 0.65pt;
         color: __MUTED__;
-        vertical-align: bottom;
+        vertical-align: middle;
     }
     @bottom-left {
         content: "__FOOTER__";
@@ -582,9 +639,14 @@ COMMON_CSS = """
 }
 
 @page toc {
-    margin: 18mm;
+    margin: 26mm 18mm 19mm 18mm;
     @top-left { content: "ALEXANDRIA  /  REPORT CONTENTS"; }
     @top-right { content: "__TEMPLATE_NAME__"; }
+}
+
+@page sources {
+    @top-left { content: "ALEXANDRIA  /  SOURCES"; }
+    @top-right { content: "__HEADER__"; }
 }
 
 html, body {
@@ -602,6 +664,51 @@ body {
 
 .report {
     color: __TEXT__;
+}
+
+/* ---- CJK setting -------------------------------------------------------
+   Chinese text is not Latin text at a different size. Justified setting with
+   a slightly looser leading and a wider optical measure reads correctly;
+   line-break: strict plus the CJK punctuation rules below approximate 避头尾
+   (no line may open with a closing bracket or a full stop, none may end with
+   an opening bracket). text-spacing adds the Latin-CJK quarter space where
+   the renderer supports it and is ignored where it does not. */
+html[lang^="zh"] body {
+    font-size: 10.6pt;
+    line-height: 1.78;
+    text-align: justify;
+    text-justify: inter-character;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+    text-spacing: trim-start allow-end trim-adjacent ideograph-alpha
+        ideograph-numeric;
+    hanging-punctuation: allow-end;
+}
+html[lang^="zh"] p,
+html[lang^="zh"] li,
+html[lang^="zh"] td,
+html[lang^="zh"] th {
+    line-break: strict;
+    text-spacing: trim-start allow-end trim-adjacent ideograph-alpha
+        ideograph-numeric;
+}
+html[lang^="zh"] h1,
+html[lang^="zh"] h2,
+html[lang^="zh"] h3,
+html[lang^="zh"] h4 {
+    /* Display sizes stay ragged-right: justification opens ugly rivers in a
+       two-line CJK heading. Negative Latin tracking is wrong for CJK. */
+    text-align: left;
+    letter-spacing: 0;
+    line-break: strict;
+}
+html[lang^="zh"] h1 { font-size: 26pt; line-height: 1.28; }
+html[lang^="zh"] h2 { font-size: 19.5pt; line-height: 1.34; }
+html[lang^="zh"] code,
+html[lang^="zh"] pre {
+    line-break: auto;
+    text-align: left;
 }
 
 .cover {
@@ -798,7 +905,7 @@ body {
     grid-template-columns: 12mm 1fr 12mm;
     gap: 4mm;
     align-items: start;
-    padding: 4.2mm 0 3.6mm;
+    padding: 3.1mm 0 2.7mm;
     border-bottom: 0.45pt solid __RULE__;
     break-inside: avoid;
 }
@@ -820,19 +927,11 @@ body {
     text-decoration: none;
 }
 
-.toc-summary {
-    display: block;
-    margin-top: 1.2mm;
-    max-width: 118mm;
-    font-size: 8.2pt;
-    line-height: 1.35;
-    color: __MUTED__;
-}
-
 .toc-page-number {
     text-align: right;
-    font-size: 8pt;
+    font-size: 10.5pt;
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
     color: __DARK__;
 }
 
@@ -859,8 +958,10 @@ h1 {
 }
 
 h2 {
-    margin: 11mm 0 4mm;
-    padding: 0 0 3.5mm;
+    /* Padding, not margin: a top margin collapses to zero at a page break and
+       drops the accent rule flush under the running header. */
+    margin: 4mm 0 4mm;
+    padding: 7mm 0 3.5mm;
     border-bottom: 0.8pt solid __RULE__;
     break-after: avoid;
     font-family: __FONT_DISPLAY__;
@@ -899,18 +1000,25 @@ h4 {
 
 p {
     margin: 1.8mm 0;
-    orphans: 3;
-    widows: 3;
+    /* A three-line CJK remnant can carry under 100 characters and consume an
+       otherwise empty page. Keep a full reading block on both sides of a
+       paragraph break; normal short paragraphs remain indivisible. */
+    orphans: 8;
+    widows: 8;
 }
 
-h1 + p,
-h2 + p {
+/* Only paragraphs the HTML step certified as short enough are set as ledes;
+   see is_lede_paragraph() in md_to_pdf.py. A lede never breaks across pages. */
+h1 + p.section-lede,
+h2 + p.section-lede {
     margin-bottom: 5mm;
     max-width: 126mm;
     font-size: 11.4pt;
     line-height: 1.48;
     color: __MUTED__;
-    break-after: avoid;
+    break-inside: avoid;
+    orphans: 3;
+    widows: 3;
 }
 
 strong, b {
@@ -920,15 +1028,22 @@ strong, b {
 
 a {
     color: __LINK__;
-    text-decoration: none;
+    text-decoration: underline;
+    text-decoration-thickness: 0.4pt;
+    text-underline-offset: 1.2pt;
+}
+/* Mid-word breaking belongs to raw URLs only, never to link titles. */
+a[href]::after,
+.sources-section a[href] {
     overflow-wrap: anywhere;
 }
 .source-ref {
-    margin-left: 0.4mm;
-    font-family: __FONT_MONO__;
-    font-size: 6.4pt;
-    font-weight: 700;
+    margin-left: 0.3mm;
+    font-size: 6.6pt;
+    font-weight: 600;
+    letter-spacing: 0.15pt;
     color: __ACCENT_TEXT__;
+    text-decoration: none;
     vertical-align: super;
 }
 
@@ -1022,13 +1137,28 @@ blockquote p {
     color: inherit;
 }
 
+.insight-panel a {
+    color: __LINK_ON_DARK__;
+}
+
+.insight-panel .source-ref {
+    color: __LINK_ON_DARK__;
+}
+
 .takeaway-band {
     margin: 7mm 0;
     padding: 5.5mm 7mm;
     background: __TAKEAWAY__;
-    color: #fff;
+    color: __ON_ACCENT__;
     font-size: 11pt;
     font-weight: 600;
+}
+
+.takeaway-band a,
+.takeaway-band strong,
+.takeaway-band b,
+.takeaway-band .source-ref {
+    color: inherit;
 }
 
 .takeaway-band::before {
@@ -1092,6 +1222,12 @@ code {
     background: __PALE__;
     color: __DARK__;
     font-size: 9pt;
+    /* Short inline code is a single token to the reader; never break it. */
+    white-space: nowrap;
+}
+
+pre code {
+    white-space: inherit;
 }
 
 pre {
@@ -1126,22 +1262,41 @@ hr {
 
 .sources-section {
     counter-reset: sourceitem;
+    /* The bibliography always opens its own page. */
+    page-break-before: always;
+    page: sources;
+}
+.sources-section ul,
+.sources-section ol {
+    margin: 3mm 0;
+    padding-left: 0;
 }
 .sources-section li {
     counter-increment: sourceitem;
     list-style: none;
-    padding-left: 0;
+    /* Hanging indent: wrapped title lines align with the title, not with the
+       [nn] marker, so the marker column stays a column. */
+    margin: 0 0 4mm;
+    padding-left: 9mm;
+    text-indent: -9mm;
+    break-inside: avoid;
 }
 .sources-section li::before {
-    content: "[" counter(sourceitem, decimal-leading-zero) "] ";
+    content: "[" counter(sourceitem, decimal-leading-zero) "]\\2003";
     color: __ACCENT_TEXT__;
     font-family: __FONT_MONO__;
     font-size: 7pt;
 }
+.sources-section a[href] {
+    text-decoration: none;
+}
 .sources-section a[href^="http"]::after {
-    content: "\\A" attr(href);
+    /* display:block already opens the line; a literal \\A here would inject a
+       phantom blank line and group each URL with the NEXT entry. */
+    content: attr(href);
     display: block;
-    white-space: pre-wrap;
+    margin-top: 0.6mm;
+    text-indent: 0;
     color: __MUTED__;
     font-family: __FONT_MONO__;
     font-size: 6.8pt;
@@ -1269,9 +1424,16 @@ SHARED_REFERENCE_FEATURE_CSS = """
 .horizon-feature-page {
     page: horizonfeature;
     position: relative;
-    min-height: 245mm;
+    min-height: 232mm;
     page-break-after: always;
     color: __TEXT__;
+}
+/* The opener is a single designed page. Without this the lower grid spills a
+   couple of orphaned list items onto an otherwise blank sheet. */
+.horizon-feature-lower,
+.horizon-feature-narrative,
+.horizon-feature-path {
+    break-inside: avoid;
 }
 .horizon-feature-running,
 .horizon-feature-figure-label,
@@ -1313,9 +1475,20 @@ SHARED_REFERENCE_FEATURE_CSS = """
 }
 .horizon-feature-photo {
     position: relative;
-    height: 85mm;
+    height: 78mm;
     overflow: hidden;
     background: __PALE__;
+}
+
+/* Generated plate used by templates that ship no photograph of their own. */
+.feature-plate {
+    position: absolute;
+    inset: 0;
+    display: block;
+}
+.feature-plate i {
+    position: absolute;
+    display: block;
 }
 .horizon-feature-photo img {
     width: 100%;
@@ -1459,17 +1632,11 @@ TEMPLATE_CSS = {
     height: 8mm;
     border-bottom: 0.55pt solid #a8c4ca;
 }
-.executive-scale::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    bottom: -2.1mm;
-    width: 4mm;
-    height: 4mm;
-    border: 0.7pt solid #16827c;
-    border-radius: 50%;
-    background: #fff;
-}
+/* Deliberately three plain graduated rules: an abstract mark, not a scale.
+   The measurement-node terminals were removed because nothing calibrated
+   them. */
+.executive-scale.scale-b { width: 26mm; }
+.executive-scale.scale-c { width: 18mm; }
 .scale-a { top: 132mm; }
 .scale-b { top: 150mm; }
 .scale-c { top: 168mm; }
@@ -2593,6 +2760,7 @@ TEMPLATE_CSS = {
         linear-gradient(to bottom, rgba(74,159,216,0.08) 0.35pt, transparent 0.35pt),
         #fff;
     background-size: 24mm 24mm;
+    background-position: 17mm 15mm;
 }
 .template-blueprint .cover-copy {
     width: 170mm;
@@ -2618,21 +2786,22 @@ TEMPLATE_CSS = {
     width: 116mm;
 }
 .blueprint-art {
-    inset: 105mm 17mm 42mm;
+    /* 17mm..185mm x 111mm..255mm == 7 x 6 modules on the 24mm cover grid. */
+    inset: 111mm 25mm 42mm 17mm;
     border: 0.7pt solid #4a9fd8;
 }
 .blueprint-datum {
     position: absolute;
     border: 0.7pt solid #4a9fd8;
 }
-.datum-a { left: 14mm; top: 18mm; width: 48mm; height: 42mm; }
-.datum-b { right: 14mm; bottom: 18mm; width: 54mm; height: 45mm; }
+.datum-a { left: 24mm; top: 24mm; width: 48mm; height: 48mm; }
+.datum-b { right: 24mm; bottom: 24mm; width: 48mm; height: 48mm; }
 .blueprint-axis {
     position: absolute;
     background: #4a9fd8;
 }
-.blueprint-axis-x { left: 0; top: 50%; width: 100%; height: 0.5pt; }
-.blueprint-axis-y { left: 50%; top: 0; width: 0.5pt; height: 100%; }
+.blueprint-axis-x { left: 0; top: 72mm; width: 100%; height: 0.5pt; }
+.blueprint-axis-y { left: 96mm; top: 0; width: 0.5pt; height: 100%; }
 .blueprint-node {
     position: absolute;
     width: 19mm;
@@ -2647,10 +2816,19 @@ TEMPLATE_CSS = {
     font-size: 7pt;
     color: #1a1a1a;
 }
-.node-a { left: 22mm; top: 29mm; }
-.node-b { left: 78mm; top: 63mm; }
-.node-c { right: 24mm; bottom: 31mm; }
-.blueprint-ruler,
+/* Centred on the (24,24), (96,72) and (144,120) datum intersections. */
+.node-a { left: 14.5mm; top: 14.5mm; }
+.node-b { left: 86.5mm; top: 62.5mm; }
+.node-c { left: 134.5mm; top: 110.5mm; }
+.blueprint-ruler {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -9mm;
+    height: 3mm;
+    border-top: 0.6pt solid #4a9fd8;
+    background: repeating-linear-gradient(to right, #4a9fd8 0 0.5pt, transparent 0.5pt 24mm);
+}
 .orbit-ruler {
     position: absolute;
     left: 8mm;
@@ -2695,16 +2873,50 @@ TEMPLATE_CSS = {
         #fff;
     background-size: 30mm 30mm;
 }
-.blueprint-feature-photo {
+/* Generated opener plate: the datum grid the template is named for, with an
+   orthographic construction snapped to a 13mm module. Blueprint ships no
+   photograph, and borrowing Orbit's was both dishonest and off-subject. */
+.template-blueprint .horizon-feature-photo {
     border: 0.7pt solid #4a9fd8;
-    filter: grayscale(1) contrast(1.1);
+    background: #f7fbfe;
 }
-.blueprint-feature-photo img {
-    width: 195%;
-    max-width: none;
-    object-position: left center;
+.template-blueprint .feature-plate {
+    background:
+        linear-gradient(to right, rgba(74,159,216,0.30) 0.35pt, transparent 0.35pt),
+        linear-gradient(to bottom, rgba(74,159,216,0.24) 0.35pt, transparent 0.35pt);
+    background-size: 13mm 13mm;
+}
+.template-blueprint .feature-plate i:nth-child(1) {
+    left: 26mm;
+    top: 13mm;
+    width: 52mm;
+    height: 52mm;
+    border: 0.7pt solid #4a9fd8;
+}
+.template-blueprint .feature-plate i:nth-child(2) {
+    left: 91mm;
+    top: 26mm;
+    width: 39mm;
+    height: 39mm;
+    border: 0.7pt solid #4a9fd8;
+    border-radius: 50%;
+}
+.template-blueprint .feature-plate i:nth-child(3) {
+    left: 0;
+    top: 39mm;
+    width: 100%;
+    height: 0.5pt;
+    background: rgba(74,159,216,0.85);
+}
+.template-blueprint .feature-plate i:nth-child(4) {
+    left: 65mm;
+    top: 0;
+    width: 0.5pt;
+    height: 100%;
+    background: rgba(74,159,216,0.85);
 }
 .blueprint-feature-insight {
+    margin-right: 0;
     background: #1a1a1a;
     border-radius: 0;
 }
@@ -2714,7 +2926,7 @@ TEMPLATE_CSS = {
     font-weight: 720;
 }
 .template-blueprint .report-body {
-    padding-left: 6mm;
+    padding-left: 8mm;
     border-left: 0.5pt solid rgba(74,159,216,0.55);
     background-image:
         linear-gradient(to right, rgba(74,159,216,0.04) 0.35pt, transparent 0.35pt);
@@ -3217,12 +3429,54 @@ TEMPLATE_CSS = {
 .toc-sunbeam .toc-page-number {
     color: __ACCENT_TEXT__;
 }
+/* Generated opener plate. Sunbeam ships no photograph of its own, and the
+   mobility ribbon it used to borrow from Current had nothing to do with
+   education, youth or civic work. The double-position colour stops the old
+   rule used were dropped by the renderer, which is why the plate printed as a
+   flat pale rectangle. */
 .sunbeam-feature-photo {
-    height: 62mm;
-    background:
-        radial-gradient(circle at 77% 53%, #151515 0 15mm, transparent 15.3mm),
-        linear-gradient(180deg, #ff6b35 0 58%, #ffd84d 58%);
+    height: 66mm;
+    background: linear-gradient(
+        180deg,
+        #ff6b35 0%,
+        #ff6b35 58%,
+        #ffd84d 58%,
+        #ffd84d 100%
+    );
 }
+.template-sunbeam .feature-plate i {
+    border-radius: 50%;
+}
+.template-sunbeam .feature-plate i:nth-child(1) {
+    right: 22mm;
+    top: 11mm;
+    width: 34mm;
+    height: 34mm;
+    background: #151515;
+}
+.template-sunbeam .feature-plate i:nth-child(2) {
+    right: 12mm;
+    top: 1mm;
+    width: 54mm;
+    height: 54mm;
+    border: 0.9pt solid #151515;
+}
+.template-sunbeam .feature-plate i:nth-child(3) {
+    right: 2mm;
+    top: -9mm;
+    width: 74mm;
+    height: 74mm;
+    border: 0.6pt solid rgba(21,21,21,0.45);
+}
+.template-sunbeam .feature-plate i:nth-child(4) {
+    left: 21mm;
+    bottom: 9mm;
+    width: 15mm;
+    height: 15mm;
+    background: #fff2c7;
+}
+/* Sunbeam draws its own opener plate; it never showed a photograph, and it
+   no longer loads Current's into the PDF either. */
 .sunbeam-feature-photo img {
     display: none;
 }
@@ -3641,6 +3895,133 @@ TEMPLATE_CSS = {
 }
 
 
+# Text colour carried on the accent fill (takeaway band). White where the
+# accent is dark enough to hold it at >= 4.5:1, otherwise the template's own
+# dark ink. Derived once with scripts.pdf_quality.adjust_to_contrast and pinned
+# here so the CSS stays deterministic; scripts/pdf_quality.py re-verifies every
+# pair on every run.
+ON_ACCENT = {
+    "executive": "#ffffff",
+    "spectrum": "#ffffff",
+    "atlas": "#ffffff",
+    "horizon": "#ffffff",
+    "maison": "#1a1a1a",
+    "blueprint": "#1a1a1a",
+    "terrain": "#ffffff",
+    "orbit": "#ffffff",
+    "sunbeam": "#151515",
+    "current": "#1a1a1a",
+    "apricot": "#1a1a1a",
+}
+
+# Link ink on white and on the template's pale panel, >= 4.75:1 on both. This
+# is deliberately a separate token from the decorative accent: the accent may
+# stay bright, the link may not.
+LINK_ON_LIGHT = {
+    "executive": "#147772",
+    "spectrum": "#4f46e5",
+    "atlas": "#2f7448",
+    "horizon": "#0b61f1",
+    "maison": "#7a6942",
+    "blueprint": "#36749f",
+    "terrain": "#2d5e3a",
+    "orbit": "#0061fd",
+    "sunbeam": "#b34b26",
+    "current": "#bf4500",
+    "apricot": "#9d5e00",
+}
+
+# Link ink inside the dark insight panel, >= 4.75:1 on __DARK__.
+LINK_ON_DARK = {
+    "executive": "#58a6a1",
+    "spectrum": "#7d76ec",
+    "atlas": "#83ac92",
+    "horizon": "#2d79f7",
+    "maison": "#b39a61",
+    "blueprint": "#4a9fd8",
+    "terrain": "#8ca793",
+    "orbit": "#3482ff",
+    "sunbeam": "#ff6b35",
+    "current": "#ff5c00",
+    "apricot": "#ff9800",
+}
+
+BODY_TEXT = {
+    "atlas": "#233a2b",
+    "terrain": "#233a2b",
+    "maison": "#2b2926",
+    "sunbeam": "#1a1a1a",
+    "current": "#1a1a1a",
+    "apricot": "#1a1a1a",
+}
+
+RULE_COLORS = {
+    "executive": "#c8d3d8",
+    "spectrum": "#d9dce5",
+    "atlas": "#cad4c8",
+    "horizon": "#d7dee8",
+    "maison": "#d8d2c8",
+    "blueprint": "#d8e7f0",
+    "terrain": "#d6ddd0",
+    "orbit": "#d8e2f2",
+    "sunbeam": "#d5cec2",
+    "current": "#ddd8d0",
+    "apricot": "#d9d4ce",
+}
+
+ROW_COLORS = {
+    "atlas": "#f5f7f3",
+    "terrain": "#f5f3ee",
+    "maison": "#f4f2ef",
+    "blueprint": "#f7f8fa",
+    "orbit": "#f7f8fa",
+    "sunbeam": "#fff8e3",
+    "current": "#fff7f2",
+    "apricot": "#fcfaf7",
+}
+
+INSIGHT_ACCENT = {
+    "executive": "#7fd6cf",
+    "spectrum": "#c9ff17",
+    "atlas": "#b9d5bf",
+    "horizon": "#dbeaff",
+    "maison": "#e6d9bc",
+    "blueprint": "#d9effc",
+    "terrain": "#a8ccaf",
+    "orbit": "#dbe7ff",
+    "sunbeam": "#ffd84d",
+    "current": "#fff4ec",
+    "apricot": "#fff3e6",
+}
+
+
+def css_color_tokens(template):
+    """Return every colour-valued CSS token for one template.
+
+    Pure data: scripts/pdf_quality.py consumes this to prove WCAG contrast for
+    all eleven templates without rendering anything.
+    """
+    spec = TEMPLATES[template]
+    return {
+        "__ACCENT__": spec.accent,
+        "__ACCENT_TEXT__": spec.accent_text,
+        "__DARK__": spec.dark,
+        "__MUTED__": spec.muted,
+        "__PALE__": spec.pale,
+        "__TEXT__": BODY_TEXT.get(template, "#172330"),
+        "__ON_ACCENT__": ON_ACCENT[template],
+        "__LINK__": LINK_ON_LIGHT[template],
+        "__LINK_ON_DARK__": LINK_ON_DARK[template],
+        "__RULE__": RULE_COLORS[template],
+        "__ROW__": ROW_COLORS.get(template, "#f6f8f9"),
+        "__INSIGHT_ACCENT__": INSIGHT_ACCENT[template],
+        "__TAKEAWAY__": spec.accent,
+        # The band label shares the body ink; hierarchy comes from size,
+        # weight and letterspacing rather than from a washed-out tint.
+        "__TAKEAWAY_ACCENT__": ON_ACCENT[template],
+    }
+
+
 def build_css(
     template,
     *,
@@ -3665,72 +4046,9 @@ def build_css(
         "__PAGE_LABEL__": page_label,
         "__PAGE_SUFFIX__": page_suffix,
         "__TEMPLATE_NAME__": spec.display_name.upper(),
-        "__ACCENT__": spec.accent,
-        "__ACCENT_TEXT__": spec.accent_text,
-        "__DARK__": spec.dark,
-        "__MUTED__": spec.muted,
-        "__PALE__": spec.pale,
-        "__TEXT__": {
-            "atlas": "#233a2b",
-            "terrain": "#233a2b",
-            "maison": "#2b2926",
-            "sunbeam": "#1a1a1a",
-            "current": "#1a1a1a",
-            "apricot": "#1a1a1a",
-        }.get(template, "#172330"),
-        "__LINK__": spec.accent,
-        "__RULE__": {
-            "executive": "#c8d3d8",
-            "spectrum": "#d9dce5",
-            "atlas": "#cad4c8",
-            "horizon": "#d7dee8",
-            "maison": "#d8d2c8",
-            "blueprint": "#d8e7f0",
-            "terrain": "#d6ddd0",
-            "orbit": "#d8e2f2",
-            "sunbeam": "#d5cec2",
-            "current": "#ddd8d0",
-            "apricot": "#d9d4ce",
-        }[template],
-        "__ROW__": {
-            "atlas": "#f5f7f3",
-            "terrain": "#f5f3ee",
-            "maison": "#f4f2ef",
-            "blueprint": "#f7f8fa",
-            "orbit": "#f7f8fa",
-            "sunbeam": "#fff8e3",
-            "current": "#fff7f2",
-            "apricot": "#fcfaf7",
-        }.get(template, "#f6f8f9"),
         "__INSIGHT_LABEL__": insight_label,
-        "__INSIGHT_ACCENT__": {
-            "executive": "#7fd6cf",
-            "spectrum": "#c9ff17",
-            "atlas": "#b9d5bf",
-            "horizon": "#dbeaff",
-            "maison": "#e6d9bc",
-            "blueprint": "#d9effc",
-            "terrain": "#a8ccaf",
-            "orbit": "#dbe7ff",
-            "sunbeam": "#ffd84d",
-            "current": "#fff4ec",
-            "apricot": "#fff3e6",
-        }[template],
         "__TAKEAWAY_LABEL__": takeaway_label,
-        "__TAKEAWAY__": spec.accent,
-        "__TAKEAWAY_ACCENT__": {
-            "executive": "#d7fffb",
-            "spectrum": "#d9ff39",
-            "atlas": "#d9eadc",
-            "horizon": "#dbeaff",
-            "maison": "#f2e8d2",
-            "blueprint": "#d9effc",
-            "terrain": "#d6e4d8",
-            "orbit": "#dbe7ff",
-            "sunbeam": "#ffd84d",
-            "current": "#fff4ec",
-            "apricot": "#fff3e6",
-        }[template],
+        **css_color_tokens(template),
     }
     shared_feature = (
         SHARED_REFERENCE_FEATURE_CSS

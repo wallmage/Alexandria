@@ -8,6 +8,7 @@ import re
 import sys
 import tempfile
 from collections import Counter
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
@@ -19,6 +20,27 @@ try:
     from .report_contract import detect_language
 except ImportError:
     from report_contract import detect_language
+
+try:
+    from .validate_ledger import (
+        FRESHNESS_WINDOW_DAYS,
+        HUMAN_HARM_PATTERN,
+        NEGATIVE_EXISTENCE_PATTERN,
+        PROTECTED_LIVING_STATUSES,
+        SENSITIVE_PRIVATE_PATTERN,
+        evidence_coverage_errors,
+        mentions_person_alias,
+    )
+except ImportError:
+    from validate_ledger import (
+        FRESHNESS_WINDOW_DAYS,
+        HUMAN_HARM_PATTERN,
+        NEGATIVE_EXISTENCE_PATTERN,
+        PROTECTED_LIVING_STATUSES,
+        SENSITIVE_PRIVATE_PATTERN,
+        evidence_coverage_errors,
+        mentions_person_alias,
+    )
 
 SOURCE_HEADINGS = {
     "sources",
@@ -355,6 +377,14 @@ def validate_markdown(
     return errors
 
 
+def _searched_within_window(value, report_day):
+    try:
+        searched = date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return False
+    return 0 <= (report_day - searched).days <= FRESHNESS_WINDOW_DAYS
+
+
 def validate_report_against_ledger(text, ledger):
     """Check that report links and claim locations exist in the ledger."""
     if not isinstance(ledger, dict):
@@ -441,10 +471,17 @@ def validate_report_against_ledger(text, ledger):
         r"advantage|stronger option|safer default)\b|"
         r"(?:選擇|选择|建議|建议|推薦|推荐|較強|较强|更適合|更适合)"
     )
-    absence_pattern = re.compile(
-        r"(?i)\bno\b.{0,100}\b(?:was|were|could be)\s+found\b|"
-        r"(?:未找到|沒有找到|没有找到|找不到|未發現|未发现)"
-    )
+    cited_source_urls = {
+        source_urls[source_id]
+        for claim in claims
+        if isinstance(claim, dict) and claim.get("claim_id")
+        for source_id in foundation_source_ids(claim.get("claim_id"))
+        if source_id in source_urls
+    }
+    try:
+        report_day = date.fromisoformat(str(ledger.get("report_date")))
+    except (TypeError, ValueError):
+        report_day = None
     for paragraph, normalized_paragraph in normalized_paragraphs.items():
         if not normalized_paragraph or normalized_paragraph.startswith("#"):
             continue
@@ -453,30 +490,125 @@ def validate_report_against_ledger(text, ledger):
             for excerpt, claim in excerpt_claims
             if excerpt in normalized_paragraph
         ]
-        if (
-            decision_pattern.search(normalized_paragraph)
-            and not mapped_claims
-            and not extract_markdown_urls(paragraph)
-        ):
-            errors.append(
-                "Decision language is not traceable to a mapped claim or "
-                f"nearby citation: {normalized_paragraph[:120]}"
+        if HUMAN_HARM_PATTERN.search(
+            normalized_paragraph
+        ) or SENSITIVE_PRIVATE_PATTERN.search(normalized_paragraph):
+            mapped_person_ids = {
+                person_id
+                for claim in mapped_claims
+                for person_id in claim.get("person_ids", [])
+            }
+            for person in ledger.get("people", []):
+                if (
+                    isinstance(person, dict)
+                    and person.get("living_status")
+                    in PROTECTED_LIVING_STATUSES
+                    and mentions_person_alias(normalized_paragraph, person)
+                    and person.get("person_id") not in mapped_person_ids
+                ):
+                    errors.append(
+                        "Protected-person harm in the report is not mapped to "
+                        f"the correct reviewed claim: {person.get('person_id')}."
+                    )
+        if not mapped_claims:
+            metadata_only = bool(
+                re.fullmatch(
+                    r"(?:[A-Za-z]+\s+)?(?:"
+                    r"[0-9]{4}年[0-9]{1,2}月(?:[0-9]{1,2}日)?|"
+                    r"[0-9]{4}(?:[-/][0-9]{1,2})"
+                    r"(?:[-/][0-9]{1,2})?|[0-9]{4})",
+                    normalized_paragraph.strip(),
+                )
             )
-        if absence_pattern.search(normalized_paragraph):
+            raw = paragraph.lstrip()
+            structural_only = (
+                raw.startswith(("#", ">", "|", "```"))
+                or normalized_paragraph.endswith("?")
+                or normalized_paragraph.endswith("？")
+            )
+            transition_only = bool(
+                re.match(
+                    r"(?i)^(?:this|the (?:next|following|previous)) "
+                    r"(?:section|chapter|part|report) "
+                    r"(?:examines|explains|describes|outlines|covers|"
+                    r"discusses|turns to|sets out)\b"
+                    r"|^(?:本|下|上一)(?:節|节|章|部分|報告|报告).{0,12}"
+                    r"(?:說明|说明|介紹|介绍|討論|讨论|概述|轉向|转向)",
+                    normalized_paragraph,
+                )
+            )
+            if not (
+                metadata_only or structural_only or transition_only
+            ):
+                errors.append(
+                    "Report unit carries externally checkable assertions but "
+                    "maps to no ledger claim: "
+                    + normalized_paragraph[:120]
+                )
+        if mapped_claims:
+            mapped_evidence = []
+            for claim in mapped_claims:
+                mapped_evidence.extend(
+                    (
+                        str(claim.get("claim") or ""),
+                        str(claim.get("extract_or_location") or ""),
+                    )
+                )
+                for entry in claim.get("source_evidence", []):
+                    if isinstance(entry, dict):
+                        mapped_evidence.append(
+                            str(entry.get("extract_or_location") or "")
+                        )
+            errors.extend(
+                "Report assertion is not carried by its mapped ledger claim: "
+                + error
+                for error in evidence_coverage_errors(
+                    {
+                        "claim_id": "report unit",
+                        "kind": "fact",
+                        "claim": normalized_paragraph,
+                        "extract_or_location": " ".join(mapped_evidence),
+                    }
+                )
+            )
+        if decision_pattern.search(normalized_paragraph) and not mapped_claims:
+            paragraph_urls = set(extract_markdown_urls(paragraph))
+            if not paragraph_urls:
+                errors.append(
+                    "Decision language is not traceable to a mapped claim or "
+                    f"nearby citation: {normalized_paragraph[:120]}"
+                )
+            elif not paragraph_urls & cited_source_urls:
+                errors.append(
+                    "Decision language cites no source that backs a ledger "
+                    f"claim: {normalized_paragraph[:120]}"
+                )
+        if NEGATIVE_EXISTENCE_PATTERN.search(normalized_paragraph):
             search_records = [
                 claim.get("evidence_of_absence")
                 for claim in mapped_claims
                 if isinstance(claim.get("evidence_of_absence"), dict)
             ]
-            if not any(
-                record.get("queries")
+            complete = [
+                record
+                for record in search_records
+                if record.get("queries")
                 and record.get("expected_locations")
                 and record.get("searched_at")
-                for record in search_records
-            ):
+            ]
+            if not complete:
                 errors.append(
                     "Negative existence claim has no evidence-of-absence "
                     f"search record: {normalized_paragraph[:120]}"
+                )
+            elif report_day and not any(
+                _searched_within_window(record.get("searched_at"), report_day)
+                for record in complete
+            ):
+                errors.append(
+                    "Negative existence claim rests on a search older than "
+                    f"{FRESHNESS_WINDOW_DAYS} days: "
+                    f"{normalized_paragraph[:120]}"
                 )
 
     for claim in claims:
@@ -601,7 +733,37 @@ def validate_pdf(
         errors.append("PDF page sizes are inconsistent.")
     if "/Outlines" not in root:
         errors.append("PDF is missing navigation bookmarks.")
+    errors.extend(_page_quality_errors(path, expected_lang))
     return errors
+
+
+def _page_quality_errors(path, expected_lang=None):
+    """Render-derived layout checks: near-blank pages, header collisions.
+
+    The visual-inspection checklist in references/pdf-production.md used to be
+    enforced by eye alone, which is how a near-blank page shipped. These run the
+    mechanical part of that checklist. A missing render backend downgrades to a
+    warning on stderr rather than a silent pass, so the gap is visible.
+    """
+    try:
+        from scripts import pdf_quality
+    except ImportError:  # pragma: no cover - packaging fallback
+        import pdf_quality
+    try:
+        report = pdf_quality.run_quality_checks(
+            path, lang=expected_lang, check_tokens=True
+        )
+    except ImportError as exc:
+        print(
+            f"[WARN] PDF page-quality checks skipped, render backend missing: {exc}",
+            file=sys.stderr,
+        )
+        return []
+    except Exception as exc:
+        return [f"PDF page-quality checks could not run: {exc}"]
+    for finding in report.warnings:
+        print(f"[WARN] {finding.format()}", file=sys.stderr)
+    return [finding.format() for finding in report.errors]
 
 
 def _file_sha256(path):
@@ -702,6 +864,34 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
                     ),
                     encoding="utf-8",
                 )
+            # The notes must come from the hash-bound file on disk, never
+            # from the receipt's own embedded copies: replaying
+            # receipt-embedded notes would make any tampered receipt
+            # self-validating.
+            fidelity_notes_path = None
+            recorded_notes_path = receipt.get("fidelity_notes_path")
+            recorded_notes_sha = receipt.get("fidelity_notes_sha256")
+            if receipt.get("fidelity_notes") and not recorded_notes_path:
+                errors.append(
+                    "Rewild receipt records acknowledged findings but no "
+                    "bound fidelity-notes file."
+                )
+            if recorded_notes_path:
+                notes_file = Path(recorded_notes_path)
+                if not notes_file.is_file():
+                    errors.append(
+                        "Rewild receipt's fidelity-notes file is missing: "
+                        f"{recorded_notes_path}"
+                    )
+                elif _file_sha256(notes_file) != recorded_notes_sha:
+                    errors.append(
+                        "Fidelity-notes file does not match the hash "
+                        "recorded in the Rewild receipt."
+                    )
+                else:
+                    fidelity_notes_path = notes_file
+            if errors:
+                return errors
             rerun_errors = run_gate(
                 report_path,
                 Path(receipt["source_path"]),
@@ -709,7 +899,19 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
                 review_note_path=Path(receipt["review_note_path"]),
                 receipt_path=regenerated,
                 waiver_path=waiver_path,
+                fidelity_notes_path=fidelity_notes_path,
             )
+            if not rerun_errors and regenerated.is_file():
+                fresh = json.loads(regenerated.read_text(encoding="utf-8"))
+                for audit_field in ("heuristic_exemptions", "fidelity_notes"):
+                    if fresh.get(audit_field, []) != receipt.get(
+                        audit_field, []
+                    ):
+                        errors.append(
+                            f"Rewild receipt {audit_field} do not match the "
+                            "recomputed gate audit trail; the receipt was "
+                            "altered after issue."
+                        )
             errors.extend(
                 f"Rewild gate recheck failed: {error}" for error in rerun_errors
             )
@@ -727,6 +929,10 @@ def build_parser():
     parser.add_argument(
         "--content-receipt",
         help="required content-quality receipt bound to the report and ledger",
+    )
+    parser.add_argument(
+        "--source-fidelity-receipt",
+        help="required live-source receipt bound to the evidence ledger",
     )
     parser.add_argument("--pdf", help="Rendered PDF to reopen and validate")
     parser.add_argument("--min-words", type=int, default=0)
@@ -796,6 +1002,11 @@ def main(argv=None):
         errors.append(
             "Content receipt validation requires --ledger."
         )
+    elif not args.source_fidelity_receipt:
+        errors.append(
+            "A source-fidelity receipt is required. "
+            "Run scripts/source_fidelity.py --online first."
+        )
     else:
         try:
             content_receipt = json.loads(
@@ -813,6 +1024,9 @@ def main(argv=None):
                     markdown_path,
                     Path(args.ledger),
                     content_receipt,
+                    source_fidelity_receipt_path=Path(
+                        args.source_fidelity_receipt
+                    ),
                     expected_lang=args.expected_lang,
                 )
             )

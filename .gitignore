@@ -1,5 +1,8 @@
 .DS_Store
 .venv/
 tmp/
+# Generated deliverables: reports are produced per run, not carried in the repo.
+reports/
+.ruff_cache/
 __pycache__/
 *.py[cod]

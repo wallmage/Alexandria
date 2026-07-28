@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wallmage/Alexandria/references/rewild-fidelity-notes.schema.json",
+  "title": "Alexandria Rewild fidelity notes",
+  "description": "Acknowledgments for review-mandated edits that genuinely change meaning against the pre-Rewild source. The bound blind review is authoritative for semantic equivalence; these notes suppress only the deterministic clause backstops, and every suppression is recorded in the Rewild receipt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fidelity_notes"],
+  "properties": {
+    "fidelity_notes": {
+      "type": "array",
+      "description": "At most eight acknowledgments per report. The budget is deliberate: discretion is rationed, and a report needing more acknowledged meaning changes must be re-drafted rather than annotated. Each note documents one edit and is bound to one clause pair; it must match at least one semantic finding or the gate fails closed. Direction reversals, added causal claims, and causal substitutions can never be acknowledged.",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_fragment", "report_fragment", "reason"],
+        "properties": {
+          "source_fragment": {
+            "type": "string",
+            "description": "The edited wording quoted from the pre-Rewild source. Matched as a substring of the compared source prose, ignoring letter case only.",
+            "minLength": 15
+          },
+          "report_fragment": {
+            "type": "string",
+            "description": "The replacement wording quoted from the final report. Matched as a substring of the compared report prose, ignoring letter case only.",
+            "minLength": 15
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the resolved blind-review finding required this specific meaning change.",
+            "minLength": 40
+          }
+        }
+      }
+    }
+  }
+}

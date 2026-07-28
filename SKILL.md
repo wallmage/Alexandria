@@ -55,7 +55,7 @@ Set `REPORT_LANG` to `en`, `zh-CN`, or `zh-HK` from that decision and reuse it f
 
 Choose an archetype:
 
-- person → `references/person.md`
+- person → `references/person.md` (its Allegations, Harm, and Privacy dimension is mandatory for living subjects)
 - organization, company, project, institution → `references/organization.md`
 - artifact, product, work, technology → `references/artifact.md`
 - event, controversy, movement, conflict → `references/event.md`
@@ -110,15 +110,35 @@ For every consequential claim, add a ledger entry with:
 - a stable claim ID;
 - a precise claim;
 - fact, reported claim, estimate, or analysis;
-- source ID and URL;
+- source ID and public HTTP(S) URL;
 - publication and access dates;
 - `undated_reason` when a living source has no publication date;
-- faithful extract or source location;
+- one faithful `source_evidence` extract or source location for every direct
+  source; never reuse one source's wording as proof for another;
 - evidence type, source family, role, and independence;
 - importance, confidence, limitations, and decision relevance;
 - the reasoning behind analysis and what would change it;
 - honest triangulation status;
 - reciprocal supporting or contradicting claim IDs and conflict resolution.
+
+A claim may not assert more than its per-source evidence carries. Every number,
+date, version, score, unit, direction, and status in `claim` must appear in
+`source_evidence`, be declared in `derived_assertions`, or — for original
+arithmetic — be recorded as `kind: estimate` with `assumptions`. Record
+`verified_at`, the date you re-read the source, separately from `as_of`, the date
+the fact was true. `supports` points downward only, to the evidence a claim rests
+on; cycles are rejected.
+
+Bind every named person through `people` and `person_ids`, then classify every
+person-linked claim with `person_claim_role` and a substantive
+`person_claim_assessment`; do not rely on a keyword scan to decide whether a
+claim is harmful. Harmful claims about a living, recently
+deceased, or unknown-status person require
+`human_harm_review`: exact legal stage, accountable corroboration (or a limited
+single-source exception), attribution, resolution search, right of reply, and
+privacy relevance. A response must reciprocally name the harmful claim in
+`responds_to_claim_ids` and use subject-origin evidence; a resolution must use
+`resolves_claim_ids`. Carry either in the same report paragraph.
 
 Mark changing claims such as price, availability, leadership, policy, and
 current product behavior as `time_sensitive`, and record a non-null `as_of`
@@ -140,7 +160,7 @@ source set to make interested evidence sufficient.
 
 Before drafting:
 
-- save the merged ledger for deterministic validation in Step 7;
+- save the merged version-4 ledger for deterministic validation in Step 7;
 - deduplicate syndicated or copied stories into one source family;
 - reconcile conflicts or present them explicitly;
 - verify quotations against the original source;
@@ -171,7 +191,7 @@ Outline around reader questions and causal relationships. Combine weak or repeti
 
 ## 5. Draft with citations
 
-The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md` when a specific register would help. Read the visual-component section of `references/pdf-templates.md` before drafting; use metric, insight, and takeaway blocks only for content that deserves that visual weight. Apply the section contract and value-density edit in `references/content-quality.md`.
+The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md` when a specific register would help. Read the visual-component section of `references/pdf-templates.md` before drafting; use metric, insight, and takeaway blocks only for content that deserves that visual weight. Apply the section contract and value-density edit in `references/content-quality.md`. The section contract is satisfied across a section's whole span and must not become a repeated paragraph rhythm; vary section shape across the report.
 
 Requirements:
 
@@ -179,6 +199,10 @@ Requirements:
 - Use concrete nouns and verbs.
 - Explain specialist terms on first use.
 - Keep paragraphs focused on one movement of thought.
+- Most paragraphs end on their last fact; reserve evaluative closers for section ends.
+- Observe the measurable caps in the editorial reference for the report language, and count them on the finished draft.
+- Place caveats at the front of the sentence so the paragraph lands on substance.
+- Carry named human specifics: practitioners, quotations, dated incidents, or worked failure cases, drawn only from the ledger.
 - Use tables only for real comparisons.
 - Use Markdown links for citations and the Sources list: `[source title](URL)`.
 - Place citations next to the claims they support.
@@ -201,22 +225,24 @@ Choose the bundled profile from `REPORT_LANG`, then read its `SKILL.md`. Open it
 | `zh-CN` | `references/rewild/rewild-zh/SKILL.md` | `zh` |
 | `zh-HK` | `references/rewild/rewild-hk/SKILL.md` | `hk` |
 
-Immediately before each Rewild pass, preserve the current draft as `REPORT_PRE_REWILD_MD`. Mark non-rewrite zones before editing:
+Read `references/rewild-gate.md` before running this step. It carries the
+non-rewrite zones, the blind-review protocol, and the waiver and fidelity-note
+rules.
 
-- numbers, dates, names, quotations, units, and official titles;
-- citations and their claim placement;
-- uncertainty, attribution, severity, and causal limits;
-- distinctions between verified fact, reported claim, estimate, and analysis;
-- the central conclusion unless new evidence requires a change.
-
-Snapshot the real draft before Rewild. If the final report is byte-identical,
-the review cannot claim a resolved finding; record no change or make the edit.
+Preserve the draft as `REPORT_PRE_REWILD_MD` before the **first** Rewild pass and
+never overwrite it; later iterations write their own per-iteration snapshot. The
+original is the only evidence that humanization happened, so a refreshed snapshot
+destroys the very diff the receipt certifies.
 
 Run the selected profile over the complete report. Inspect first. Leave clean passages alone, edit isolated tells in place, and re-say dense passages only where the profile permits it. Match the report genre: professional research must remain professional, not become chatty. For `zh-HK`, regional identity and Hong Kong written-Chinese register are hard requirements.
 
-Give a blind reviewer only the edited report and the selected profile's quick-reference checklist, not the pre-edit draft, user request, evidence ledger, or drafting notes. The reviewer flags problems and does not rewrite. If a separate reviewer is unavailable, perform the profile's fresh-eyes fallback in a context-isolated pass; never skip the second pass. The primary agent then applies justified fixes, rejects style changes that would create a new formula, and checks every material edit against the pre-edit draft and evidence ledger. Record the blind findings, dispositions, and primary fidelity verification in `REWILD_REVIEW_NOTE` using `references/rewild-review.schema.json`. Bind the note to the exact report, pre-Rewild source, language, and bundled profile with their required hashes and identifiers; a stale note is invalid. The four fidelity checks must all be true. Region and fidelity findings must be resolved; they cannot be rejected.
+Then run a blind review and record it in `REWILD_REVIEW_NOTE` using `references/rewild-review.schema.json`, bound by hash to the exact report, source, language, and profile.
 
-Run the bundled gate with both report versions. Set `ALEXANDRIA_REWILD_PYTHON` to the Step 7 environment's Python when it already exists; otherwise use the available Python 3 executable. The gate chooses the mapped checker; combines the mandatory report-bound fidelity review with deterministic backstops for AI vocabulary, fidelity, region, Hong Kong register, direction, negation, and causal-association defects; requires an exact written reason for each retainable statistical style warning; and writes a receipt bound to the hashes of the report, source, checker, and review note. The bound review is authoritative for semantic equivalence; pattern checks add fail-closed coverage for common rewrites but do not replace that review.
+Run the bundled gate with both report versions. Use the Step 7 Python when
+available. It combines the report-bound review with deterministic style,
+regional, direction, negation, and causality checks, then binds the report,
+source, checker, and review note into a receipt. The review remains
+authoritative for semantic equivalence.
 
 ```bash
 ALEXANDRIA_REWILD_PYTHON="${ALEXANDRIA_PYTHON:-python3}"
@@ -226,33 +252,41 @@ ALEXANDRIA_REWILD_PYTHON="${ALEXANDRIA_PYTHON:-python3}"
   --review-note "$REWILD_REVIEW_NOTE" --receipt "$REWILD_RECEIPT"
 ```
 
-The checker has no third-party dependencies and may run under `python3` before the Step 7 environment exists. Pointing `ALEXANDRIA_REWILD_PYTHON` at `ALEXANDRIA_PYTHON` keeps the commands consistent when that environment has already been created. If a retainable statistical style warning is intentionally kept, supply a JSON file with `style_waivers` entries containing the checker's exact `section`, exact `message`, and a specific `reason`, then add `--style-waivers "$REWILD_STYLE_WAIVERS"`. AI-vocabulary, fidelity, region, Hong Kong register, and semantic-association warnings cannot be waived.
+The checker can run under `python3` before Step 7. The gate reference explains
+`--style-waivers` and `--fidelity-notes`. AI-vocabulary, fidelity, regional,
+and Hong Kong register failures cannot be waived; direction reversals and
+causal corruption cannot be acknowledged.
 
-The gate passes only when:
-
-- all fidelity warnings are resolved;
-- for `zh-HK`, all region and conversion warnings are resolved;
-- all blind-review findings are fixed or explicitly rejected because the change would reduce fidelity, genre fit, or naturalness;
-- every remaining style warning has a concrete written justification in the internal gate note;
-- the edited report still meets the hard length range through substantive depth.
+Pass only after resolving fidelity and regional failures, disposing of every
+blind-review finding, justifying retainable style warnings, and restoring any
+lost length with substantive content.
 
 If Rewild takes the report below the minimum length, deepen the research, analysis, counterevidence, or implications, then repeat this gate. Never restore filler or dilute the edit to hit the count. Do not proceed to Step 7 until the Rewild hard gate passes.
 
-Any change to report text after the receipt is written invalidates it. Return to this step, refresh `REPORT_PRE_REWILD_MD`, review the changed report, and issue a new receipt.
+Any change to report text after the receipt is written invalidates it. Return to this step, review the changed report against the preserved original snapshot, and issue a new receipt. Do not refresh `REPORT_PRE_REWILD_MD`.
 
-## 7. Content quality hard gate
+## 7. Source fidelity and content quality hard gates
 
-Review the exact post-Rewild report and final ledger using Section 13 of `references/content-quality.md`. Use an independent reviewer when available; otherwise use a context-isolated fresh-eyes pass. Record the review in `CONTENT_REVIEW_NOTE` using `references/content-review.schema.json`.
-
-Every dimension must score at least 4. Fix critical findings. A major evidence limitation may remain only when the report clearly discloses it and the review records the exact disclosure. Then issue a receipt:
+Re-read the weighted source sample online. Offline, empty, unreachable, or
+partial runs cannot issue a receipt:
 
 ```bash
 ALEXANDRIA_ENV="$(mktemp -d)/venv"
 python3 -m venv "$ALEXANDRIA_ENV"
 ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
 "$ALEXANDRIA_PYTHON" -m pip install -r "$SKILL_ROOT/requirements.txt"
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/source_fidelity.py" "$LEDGER_JSON" \
+  --online --receipt "$SOURCE_FIDELITY_RECEIPT"
+```
+
+Review the exact post-Rewild report and final ledger using Section 13 of `references/content-quality.md`. Include the three structural counts in Section 13: the closing-sentence census, the section-shape census, and the section-length spread. Record structural uniformity as a `structure` finding. Use an independent reviewer when available; otherwise use a context-isolated fresh-eyes pass. Record the review in `CONTENT_REVIEW_NOTE` using `references/content-review.schema.json`.
+
+Every dimension must score at least 4. Fix critical findings. A major evidence limitation may remain only when the report clearly discloses it and the review records the exact disclosure. Then issue a receipt:
+
+```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/content_gate.py" "$REPORT_MD" \
   --ledger "$LEDGER_JSON" --review-note "$CONTENT_REVIEW_NOTE" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
   --receipt "$CONTENT_RECEIPT"
 ```
 
@@ -279,12 +313,14 @@ Reuse the task-owned environment from Step 7. On Windows, set `ALEXANDRIA_PYTHON
 # English
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
   --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
   --content-receipt "$CONTENT_RECEIPT" --expected-lang en \
   --min-words 7500 --max-words 15000 --min-sections 3 --min-sources 1
 
 # Simplified or Traditional Chinese
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
   --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
   --content-receipt "$CONTENT_RECEIPT" --expected-lang zh-CN \
   --min-chars 5000 --max-chars 10000 --min-sections 3 --min-sources 1
 ```
@@ -311,10 +347,13 @@ Read `references/pdf-production.md`. Use the supplied scripts and pinned depende
   "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
   --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY" \
   --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
   --content-receipt "$CONTENT_RECEIPT"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
   "$REPORT_MD" --ledger "$LEDGER_JSON" \
-  --rewild-receipt "$REWILD_RECEIPT" --content-receipt "$CONTENT_RECEIPT" \
+  --rewild-receipt "$REWILD_RECEIPT" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
+  --content-receipt "$CONTENT_RECEIPT" \
   --pdf "$REPORT_PDF" \
   --expected-lang "$REPORT_LANG" \
   --min-pages 10 --min-text-chars 5000 --min-links 1

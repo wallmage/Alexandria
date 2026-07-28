@@ -25,6 +25,11 @@ except ImportError:
         validate_report_against_ledger,
     )
 
+try:
+    from .source_fidelity import validate_source_fidelity_receipt
+except ImportError:
+    from source_fidelity import validate_source_fidelity_receipt
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
@@ -129,7 +134,14 @@ def _write_receipt(path, payload):
         raise
 
 
-def run_content_gate(report_path, ledger_path, review_note_path, receipt_path):
+def run_content_gate(
+    report_path,
+    ledger_path,
+    review_note_path,
+    receipt_path,
+    *,
+    source_fidelity_receipt_path=None,
+):
     """Return errors; on success write a receipt bound to every input."""
     report_path = Path(report_path).resolve()
     ledger_path = Path(ledger_path).resolve()
@@ -137,6 +149,23 @@ def run_content_gate(report_path, ledger_path, review_note_path, receipt_path):
     receipt_path = Path(receipt_path).resolve()
 
     errors = []
+    if not source_fidelity_receipt_path:
+        errors.append(
+            "Source-fidelity receipt is required before content review."
+        )
+        return errors
+    source_fidelity_receipt_path = Path(
+        source_fidelity_receipt_path
+    ).resolve()
+    source_receipt, source_errors = _read_json(
+        source_fidelity_receipt_path,
+        "Source-fidelity receipt",
+    )
+    errors.extend(source_errors)
+    if source_receipt is not None:
+        errors.extend(
+            validate_source_fidelity_receipt(ledger_path, source_receipt)
+        )
     try:
         report_text = report_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -225,7 +254,7 @@ def run_content_gate(report_path, ledger_path, review_note_path, receipt_path):
 
     scores = review["scores"]
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "passed",
         "report_lang": review["report_lang"],
         "report_path": str(report_path),
@@ -238,6 +267,10 @@ def run_content_gate(report_path, ledger_path, review_note_path, receipt_path):
         "content_review_schema_sha256": file_sha256(CONTENT_REVIEW_SCHEMA),
         "evidence_ledger_schema_path": str(EVIDENCE_LEDGER_SCHEMA.resolve()),
         "evidence_ledger_schema_sha256": file_sha256(EVIDENCE_LEDGER_SCHEMA),
+        "source_fidelity_receipt_path": str(source_fidelity_receipt_path),
+        "source_fidelity_receipt_sha256": file_sha256(
+            source_fidelity_receipt_path
+        ),
         "minimum_score": min(item["score"] for item in scores.values()),
     }
     _write_receipt(receipt_path, receipt)
@@ -249,6 +282,7 @@ def validate_content_receipt(
     ledger_path,
     receipt,
     *,
+    source_fidelity_receipt_path=None,
     expected_lang=None,
 ):
     """Verify and deterministically replay a content-gate receipt."""
@@ -258,7 +292,7 @@ def validate_content_receipt(
         return ["Content receipt root must be an object."]
 
     errors = []
-    if receipt.get("schema_version") != 1:
+    if receipt.get("schema_version") != 2:
         errors.append("Content receipt has an unsupported schema version.")
     if receipt.get("status") != "passed":
         errors.append("Content receipt does not record a passing gate.")
@@ -268,6 +302,40 @@ def validate_content_receipt(
         errors.append("Content receipt belongs to a different report.")
     if not _same_bound_name(receipt.get("ledger_path"), ledger_path):
         errors.append("Content receipt belongs to a different ledger.")
+    if not source_fidelity_receipt_path:
+        errors.append("Source-fidelity receipt is required.")
+        source_fidelity_receipt_path = None
+    else:
+        source_fidelity_receipt_path = Path(
+            source_fidelity_receipt_path
+        ).resolve()
+        if not _same_bound_name(
+            receipt.get("source_fidelity_receipt_path"),
+            source_fidelity_receipt_path,
+        ):
+            errors.append(
+                "Content receipt belongs to a different source-fidelity receipt."
+            )
+        source_receipt, source_errors = _read_json(
+            source_fidelity_receipt_path,
+            "Source-fidelity receipt",
+        )
+        errors.extend(source_errors)
+        if source_receipt is not None:
+            errors.extend(
+                validate_source_fidelity_receipt(ledger_path, source_receipt)
+            )
+        try:
+            source_hash = file_sha256(source_fidelity_receipt_path)
+        except OSError as exc:
+            errors.append(
+                f"Source-fidelity receipt could not be verified: {exc}"
+            )
+        else:
+            if receipt.get("source_fidelity_receipt_sha256") != source_hash:
+                errors.append(
+                    "Source-fidelity receipt has changed since content review."
+                )
 
     for path, key, label in (
         (report_path, "report_sha256", "current report"),
@@ -323,6 +391,7 @@ def validate_content_receipt(
                 ledger_path,
                 review_path,
                 regenerated,
+                source_fidelity_receipt_path=source_fidelity_receipt_path,
             )
             errors.extend(
                 f"Content gate recheck failed: {error}"
@@ -347,6 +416,11 @@ def main(argv=None):
         required=True,
         help="content-gate receipt JSON to write",
     )
+    parser.add_argument(
+        "--source-fidelity-receipt",
+        required=True,
+        help="passing source-fidelity receipt bound to the evidence ledger",
+    )
     args = parser.parse_args(argv)
 
     errors = run_content_gate(
@@ -354,6 +428,7 @@ def main(argv=None):
         args.ledger,
         args.review_note,
         args.receipt,
+        source_fidelity_receipt_path=args.source_fidelity_receipt,
     )
     if errors:
         for error in errors:

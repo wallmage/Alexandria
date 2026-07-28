@@ -285,7 +285,15 @@ def build_toc_html(html_body, lang="en", template="executive"):
             f"{page_html}</div>"
         )
 
-    if template in {"maison", "blueprint", "terrain", "orbit"}:
+    if template in {
+        "maison",
+        "blueprint",
+        "terrain",
+        "orbit",
+        "sunbeam",
+        "current",
+        "apricot",
+    }:
         chrome = {
             "en": {
                 "register": "Editorial register",
@@ -295,6 +303,9 @@ def build_toc_html(html_body, lang="en", template="executive"):
                 "decision": "Decision",
                 "field_index": "Field index / evidence terrain",
                 "orientation": "Orientation / evidence to action",
+                "bright_path": "Bright path / evidence to possibility",
+                "flow_path": "Flow map / signal to action",
+                "people_path": "People lens / context to choice",
             },
             "zh-CN": {
                 "register": "编辑脉络",
@@ -304,6 +315,9 @@ def build_toc_html(html_body, lang="en", template="executive"):
                 "decision": "决策",
                 "field_index": "田野索引 / 证据地形",
                 "orientation": "阅读方位 / 从证据到行动",
+                "bright_path": "明亮路径 / 从证据到可能性",
+                "flow_path": "流动地图 / 从信号到行动",
+                "people_path": "人的视角 / 从情境到选择",
             },
             "zh-HK": {
                 "register": "編輯脈絡",
@@ -313,6 +327,9 @@ def build_toc_html(html_body, lang="en", template="executive"):
                 "decision": "決策",
                 "field_index": "田野索引 / 證據地形",
                 "orientation": "閱讀方位 / 由證據到行動",
+                "bright_path": "明亮路徑 / 由證據到可能性",
+                "flow_path": "流動地圖 / 由訊號到行動",
+                "people_path": "人的視角 / 由情境到選擇",
             },
         }[lang]
         special = {
@@ -355,6 +372,33 @@ def build_toc_html(html_body, lang="en", template="executive"):
                     "</div>"
                 ),
             },
+            "sunbeam": {
+                "class": "toc-sunbeam",
+                "marker": (
+                    '<div class="sunbeam-toc-system">'
+                    '<span class="sunbeam-toc-ring"></span>'
+                    f'<strong>{html.escape(chrome["bright_path"])}</strong>'
+                    "</div>"
+                ),
+            },
+            "current": {
+                "class": "toc-current",
+                "marker": (
+                    '<div class="current-toc-system">'
+                    '<span class="current-toc-line"></span>'
+                    f'<strong>{html.escape(chrome["flow_path"])}</strong>'
+                    "</div>"
+                ),
+            },
+            "apricot": {
+                "class": "toc-apricot",
+                "marker": (
+                    '<div class="apricot-toc-system">'
+                    '<span class="apricot-toc-dot"></span>'
+                    f'<strong>{html.escape(chrome["people_path"])}</strong>'
+                    "</div>"
+                ),
+            },
         }[template]
         pages = []
         chunk_size = {
@@ -362,6 +406,9 @@ def build_toc_html(html_body, lang="en", template="executive"):
             "blueprint": 8,
             "terrain": 6,
             "orbit": 8,
+            "sunbeam": 6,
+            "current": 6,
+            "apricot": 6,
         }[template]
         chunks = [
             items[index : index + chunk_size]
@@ -704,6 +751,84 @@ def build_reference_feature_html(html_body, lang, template, image_src):
                 "path": "行動次序",
             },
         },
+        "sunbeam": {
+            "en": {
+                "running": "Bright note 03 / shared understanding",
+                "descriptor": "A clear, energetic view of the evidence and the choices it opens.",
+                "figure": "Signal 03A / evidence in motion",
+                "caption": "The visual field turns complex evidence into a shared point of reference.",
+                "terrain": "What changes now",
+                "path": "Practical moves",
+            },
+            "zh-CN": {
+                "running": "明亮观察 03 / 共同理解",
+                "descriptor": "用清晰、有活力的方式呈现证据及其带来的选择。",
+                "figure": "信号 03A / 流动中的证据",
+                "caption": "视觉场把复杂证据变成大家都能理解的共同参照。",
+                "terrain": "现在发生了什么变化",
+                "path": "可行的下一步",
+            },
+            "zh-HK": {
+                "running": "明亮觀察 03 / 共同理解",
+                "descriptor": "用清晰、有活力的方式呈現證據，以及由此帶來的選擇。",
+                "figure": "訊號 03A / 流動中的證據",
+                "caption": "視覺場把複雜證據變成大家都容易理解的共同參照。",
+                "terrain": "現在有甚麼改變",
+                "path": "可行的下一步",
+            },
+        },
+        "current": {
+            "en": {
+                "running": "Flow note 03 / signals in motion",
+                "descriptor": "A fluid view of how evidence moves from signal to action.",
+                "figure": "Flow 03A / decision current",
+                "caption": "The route map shows where momentum builds, stalls, and changes direction.",
+                "terrain": "Reading the current",
+                "path": "Next moves",
+            },
+            "zh-CN": {
+                "running": "流动观察 03 / 变化中的信号",
+                "descriptor": "沿着一条清晰路径，看证据如何从信号走向行动。",
+                "figure": "流向 03A / 决策水流",
+                "caption": "路线图显示动力在哪里形成、停滞，以及转向。",
+                "terrain": "看懂当前走向",
+                "path": "下一步行动",
+            },
+            "zh-HK": {
+                "running": "流動觀察 03 / 變化中的訊號",
+                "descriptor": "沿着一條清晰路徑，看證據如何由訊號走向行動。",
+                "figure": "流向 03A / 決策水流",
+                "caption": "路線圖顯示動力在哪裏形成、停滯，以及轉向。",
+                "terrain": "看懂當前走向",
+                "path": "下一步行動",
+            },
+        },
+        "apricot": {
+            "en": {
+                "running": "People note 03 / lived context",
+                "descriptor": "A warm editorial view of people, evidence, and practical choice.",
+                "figure": "Story 03A / human setting",
+                "caption": "The scene keeps lived experience visible while the evidence is interpreted.",
+                "terrain": "What the evidence means",
+                "path": "Ways forward",
+            },
+            "zh-CN": {
+                "running": "人物观察 03 / 真实情境",
+                "descriptor": "以温暖的编辑视角理解人、证据与现实选择。",
+                "figure": "故事 03A / 人的现场",
+                "caption": "在解读证据时，画面让真实经历始终留在视野中。",
+                "terrain": "这些证据意味着什么",
+                "path": "接下来怎么走",
+            },
+            "zh-HK": {
+                "running": "人物觀察 03 / 真實情境",
+                "descriptor": "以溫暖的編輯視角理解人、證據與現實選擇。",
+                "figure": "故事 03A / 人的現場",
+                "caption": "解讀證據時，畫面讓真實經歷一直留在視野之內。",
+                "terrain": "這些證據代表甚麼",
+                "path": "接下來怎樣走",
+            },
+        },
     }[template][lang]
     feature_html, remaining_html = build_horizon_feature_html(
         html_body,
@@ -1035,11 +1160,22 @@ def md_to_html(
             lang,
             horizon_image,
         )
-    elif selected_template in {"maison", "blueprint", "terrain", "orbit"}:
+    elif selected_template in {
+        "maison",
+        "blueprint",
+        "terrain",
+        "orbit",
+        "sunbeam",
+        "current",
+        "apricot",
+    }:
         feature_image = (
             safe_cover_image
             or bundled_template_image_data_uri(
-                "orbit" if selected_template == "blueprint" else selected_template
+                {
+                    "blueprint": "orbit",
+                    "sunbeam": "current",
+                }.get(selected_template, selected_template)
             )
         )
         feature_html, html_body = build_reference_feature_html(

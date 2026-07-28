@@ -79,7 +79,7 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertIn(f'$SKILL_ROOT/scripts/{script}', production)
         self.assertNotIn("python3 scripts/", production)
 
-    def test_pdf_intake_is_non_blocking_and_offers_all_eight_templates(self):
+    def test_pdf_intake_is_non_blocking_and_offers_all_eleven_templates(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         templates = (ROOT / "references" / "pdf-templates.md").read_text(
             encoding="utf-8"
@@ -97,8 +97,17 @@ class RepositoryContractTests(unittest.TestCase):
             "F — Blueprint",
             "G — Terrain",
             "H — Orbit",
+            "I — Sunbeam",
+            "J — Current",
+            "K — Apricot",
         ):
             self.assertIn(label, templates)
+        self.assertIn("all eleven", skill)
+        self.assertIn("Sunbeam", production := (
+            ROOT / "references" / "pdf-production.md"
+        ).read_text(encoding="utf-8"))
+        self.assertIn("Current", production)
+        self.assertIn("Apricot", production)
         self.assertIn("Default: Off", templates)
         self.assertIn("if an answer arrives after a draft PDF was rendered", templates)
         self.assertIn("two PDFs", templates)

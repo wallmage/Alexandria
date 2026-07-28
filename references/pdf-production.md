@@ -30,7 +30,7 @@ On Debian/Ubuntu CI, install `fonts-noto-cjk`. A PDF that extracts the right Uni
 
 ## Render
 
-Read `references/pdf-templates.md` and resolve the intake values before rendering. Set `REPORT_TEMPLATE` to `executive`, `spectrum`, `atlas`, `horizon`, `maison`, `blueprint`, `terrain`, or `orbit`; use `auto` only when deterministic topic adaptation is intended.
+Read `references/pdf-templates.md` and resolve the intake values before rendering. The available systems are Executive, Spectrum, Atlas, Horizon, Maison, Blueprint, Terrain, Orbit, Sunbeam, Current, and Apricot. Set `REPORT_TEMPLATE` to the matching lowercase identifier; use `auto` only when deterministic topic adaptation is intended.
 
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
@@ -46,7 +46,7 @@ Optional metadata and imagery:
 - `--client "$CLIENT_NAME"`: show a client field only when the value is non-empty.
 - `--confidential`: add “Strictly Confidential” and controlled-copy footer wording. Omit the flag when confidentiality is Off.
 - `--date "$REPORT_DATE"`: override the Markdown metadata date and today's fallback.
-- `--cover-image "$COVER_IMAGE"`: use a verified local raster image inside the report directory when the selected visual system benefits from subject-specific imagery, especially Maison, Atlas, Horizon, or Terrain.
+- `--cover-image "$COVER_IMAGE"`: use a verified local raster image inside the report directory when the selected visual system benefits from subject-specific imagery, especially Maison, Atlas, Horizon, Terrain, Current, or Apricot.
 
 When the user did not choose a template, render Executive first, then render the non-Executive result from `select_adaptive_companion()` in `scripts/pdf_templates.py` to a second filename. Both PDFs must use the same Markdown, evidence, and Rewild receipt.
 

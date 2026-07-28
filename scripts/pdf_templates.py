@@ -18,6 +18,9 @@ TEMPLATE_CHOICES = (
     "blueprint",
     "terrain",
     "orbit",
+    "sunbeam",
+    "current",
+    "apricot",
 )
 
 
@@ -105,6 +108,33 @@ TEMPLATES = {
         pale="#f7f8fa",
         display_serif=False,
     ),
+    "sunbeam": TemplateSpec(
+        name="sunbeam",
+        display_name="Sunbeam",
+        accent="#ff6b35",
+        dark="#151515",
+        muted="#6e6a63",
+        pale="#fff2c7",
+        display_serif=True,
+    ),
+    "current": TemplateSpec(
+        name="current",
+        display_name="Current",
+        accent="#ff5c00",
+        dark="#1a1a1a",
+        muted="#666666",
+        pale="#fff4ec",
+        display_serif=False,
+    ),
+    "apricot": TemplateSpec(
+        name="apricot",
+        display_name="Apricot",
+        accent="#ff9800",
+        dark="#1a1a1a",
+        muted="#6e6a63",
+        pale="#fff3e6",
+        display_serif=True,
+    ),
 }
 
 
@@ -185,6 +215,30 @@ ORBIT_TERMS = {
     "機械人", "半导体", "半導體", "软件基础设施", "軟件基礎設施", "航天",
 }
 
+SUNBEAM_TERMS = {
+    "civic participation", "community education", "community initiative",
+    "creative economy", "entrepreneurship", "public engagement", "social impact",
+    "youth", "youth development", "青年", "青年发展", "青年發展", "创业",
+    "創業", "社区教育", "社區教育", "公众参与", "公眾參與", "社会影响",
+    "社會影響", "创意经济", "創意經濟",
+}
+
+CURRENT_TERMS = {
+    "change management", "circular economy", "customer journey",
+    "future of work", "innovation program", "mobility", "service innovation",
+    "service operations", "work redesign", "变革管理", "變革管理", "循环经济",
+    "循環經濟", "客户旅程", "客戶旅程", "未来工作", "未來工作", "创新项目",
+    "創新項目", "出行", "流动性", "流動性", "服务创新", "服務創新",
+}
+
+APRICOT_TERMS = {
+    "care", "caregiving", "community health", "employee experience",
+    "lifelong learning", "mental health", "people and culture", "public health",
+    "workplace culture", "照护", "照護", "照顾", "照顧", "社区健康",
+    "社區健康", "员工体验", "員工體驗", "终身学习", "終身學習", "心理健康",
+    "人才与文化", "人才與文化", "公共卫生", "公共衞生", "职场文化", "職場文化",
+}
+
 
 TEMPLATE_TERM_SETS = {
     "executive": EXECUTIVE_TERMS,
@@ -195,6 +249,9 @@ TEMPLATE_TERM_SETS = {
     "blueprint": BLUEPRINT_TERMS,
     "terrain": TERRAIN_TERMS,
     "orbit": ORBIT_TERMS,
+    "sunbeam": SUNBEAM_TERMS,
+    "current": CURRENT_TERMS,
+    "apricot": APRICOT_TERMS,
 }
 
 
@@ -203,7 +260,14 @@ def topic_match_count(subject_text, terms):
     score = 0
     for term in terms:
         if term.isascii():
-            pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+            escaped = re.escape(term)
+            if term.endswith("y") and len(term) > 1 and term[-2] not in "aeiou":
+                inflected = re.escape(term[:-1]) + r"(?:y|ies)"
+            elif not term.endswith("s"):
+                inflected = escaped + r"(?:s|es)?"
+            else:
+                inflected = escaped
+            pattern = rf"(?<![a-z0-9])(?:{inflected})(?![a-z0-9])"
             score += bool(re.search(pattern, subject_text))
         else:
             score += term in subject_text
@@ -253,7 +317,7 @@ def select_adaptive_companion(subject_text):
     return winners[int.from_bytes(digest[:2], "big") % len(winners)]
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=12)
 def bundled_template_image_data_uri(template):
     """Return a bundled editorial image as a portable embedded JPEG."""
     filenames = {
@@ -261,6 +325,8 @@ def bundled_template_image_data_uri(template):
         "maison": "maison-interior.jpeg",
         "terrain": "terrain-aerial.jpeg",
         "orbit": "orbit-scientific.jpeg",
+        "current": "current-ribbon.jpeg",
+        "apricot": "apricot-workshop.jpeg",
     }
     if template not in filenames:
         raise ValueError(f"Template '{template}' has no bundled image.")
@@ -361,6 +427,58 @@ def cover_art_html(template, cover_image=None):
             <span class="orbit-node orbit-node-b">B</span>
             <span class="orbit-node orbit-node-c">C</span>
             <span class="orbit-ruler"></span>
+        </div>
+        """
+    if template == "sunbeam":
+        return """
+        <div class="cover-art sunbeam-art" aria-hidden="true">
+            <span class="sunbeam-black-field"></span>
+            <span class="sunbeam-orange-field"></span>
+            <span class="sunbeam-yellow-field"></span>
+            <span class="sunbeam-motif">
+                <i class="sunbeam-ring"></i>
+                <i class="sunbeam-needle"></i>
+            </span>
+        </div>
+        """
+    if template == "current":
+        return """
+        <div class="cover-art current-art" aria-hidden="true">
+            <span class="current-grid"></span>
+            <svg class="current-flow-map" viewBox="0 0 595 842"
+                 preserveAspectRatio="none" role="presentation">
+                <defs>
+                    <linearGradient id="current-a" x1="0" y1="1" x2="1" y2="0">
+                        <stop offset="0" stop-color="#ff5c00"/>
+                        <stop offset=".5" stop-color="#ff8533"/>
+                        <stop offset="1" stop-color="#ffb380"/>
+                    </linearGradient>
+                    <linearGradient id="current-b" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#ffb380"/>
+                        <stop offset=".55" stop-color="#ff8533"/>
+                        <stop offset="1" stop-color="#ff5c00"/>
+                    </linearGradient>
+                </defs>
+                <path fill="url(#current-a)" opacity=".94"
+                      d="M595 88c-90 15-115 77-189 109-92 40-135 99-117 178 23 98 153 128 306 216v151c-158-104-348-156-376-311-25-136 44-228 156-278 99-44 127-97 220-115z"/>
+                <path fill="url(#current-b)" opacity=".82"
+                      d="M595 229c-102 9-186 49-201 116-18 76 58 114 201 160v89c-170-45-280-118-269-220 12-101 124-171 269-193z"/>
+                <path fill="url(#current-a)" opacity=".86"
+                      d="M595 645c-102-45-204-88-260-151-47-53-61-108-47-157-41 69-39 150 12 217 62 82 171 128 295 208z"/>
+                <path fill="#fffdf8" opacity=".92"
+                      d="M595 356c-90-13-141-1-167 30-21 26-8 52 25 76-31-23-64-52-57-87 10-51 85-83 199-71z"/>
+            </svg>
+            <span class="current-node"></span>
+        </div>
+        """
+    if template == "apricot":
+        photo = cover_image or bundled_template_image_data_uri("apricot")
+        return f"""
+        <div class="cover-art apricot-art" aria-hidden="true">
+            <span class="apricot-spine"></span>
+            <img class="cover-photo apricot-photo" src="{photo}" alt="">
+            <span class="apricot-photo-wash"></span>
+            <span class="apricot-orbit"></span>
         </div>
         """
     horizon_image = cover_image or bundled_template_image_data_uri("horizon")
@@ -2762,6 +2880,580 @@ TEMPLATE_CSS = {
     background: #0062ff;
 }
 """,
+    "sunbeam": """
+@page toc {
+    margin: 17mm;
+    background: #fffdf8;
+    @top-left { content: "ALEXANDRIA  /  BRIGHT FIELD"; border: 0; }
+    @top-right { content: "SUNBEAM"; border: 0; }
+}
+.template-sunbeam .cover {
+    padding: 16mm 18mm;
+    background: #151515;
+    color: #fffdf8;
+}
+.sunbeam-black-field {
+    position: absolute;
+    inset: 0 0 47% 0;
+    background: #151515;
+}
+.sunbeam-orange-field {
+    position: absolute;
+    inset: 53% 0 20% 0;
+    background: #ff6b35;
+}
+.sunbeam-yellow-field {
+    position: absolute;
+    inset: 80% 0 0;
+    background: #ffd84d;
+}
+.sunbeam-motif {
+    position: absolute;
+    right: 17mm;
+    top: 179mm;
+    width: 38mm;
+    height: 38mm;
+    border-radius: 50%;
+    background: #151515;
+}
+.sunbeam-ring {
+    position: absolute;
+    inset: 6mm;
+    border: 1.1pt solid #ffd84d;
+    border-radius: 50%;
+}
+.sunbeam-needle {
+    position: absolute;
+    left: 18.5mm;
+    top: -12mm;
+    width: 1.2pt;
+    height: 62mm;
+    background: #fffdf8;
+    transform: rotate(28deg);
+    transform-origin: center;
+}
+.template-sunbeam .cover-topline {
+    border: 0;
+    color: #fffdf8;
+}
+.template-sunbeam .cover-topline span:first-child {
+    color: #ffd84d;
+}
+.template-sunbeam .cover-copy {
+    width: 172mm;
+    margin-top: 38mm;
+}
+.template-sunbeam .cover-kicker {
+    color: #ff6b35;
+}
+.template-sunbeam .cover h1,
+.template-sunbeam .cover-title-accent {
+    display: block;
+    max-width: 172mm;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: #fffdf8;
+    font-size: 43pt;
+    font-weight: 600;
+    line-height: 0.98;
+}
+.template-sunbeam .cover-title-accent {
+    color: #ffd84d;
+}
+.template-sunbeam .cover .subtitle {
+    width: 127mm;
+    color: #d7d3cb;
+}
+.template-sunbeam .cover-record {
+    bottom: 12mm;
+    padding: 0;
+    border: 0;
+}
+.template-sunbeam .cover-record .meta-cell {
+    flex-basis: 48mm;
+}
+.template-sunbeam .meta-label {
+    color: #6d5a28;
+}
+.template-sunbeam .meta-value,
+.template-sunbeam .confidential-stamp {
+    color: #151515;
+}
+.template-sunbeam .cover-confidential-note {
+    bottom: 4mm;
+    color: #6d5a28;
+}
+.toc-sunbeam {
+    position: relative;
+    color: #151515;
+}
+.toc-sunbeam::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    left: -17mm;
+    right: -17mm;
+    top: -17mm;
+    height: 66mm;
+    background: #ff6b35;
+}
+.toc-sunbeam > * {
+    position: relative;
+    z-index: 1;
+}
+.toc-sunbeam .toc-kicker {
+    color: #151515;
+}
+.toc-sunbeam .toc-title {
+    margin-top: 3mm;
+    font-size: 39pt;
+    color: #151515;
+}
+.toc-sunbeam .toc-intro {
+    width: 110mm;
+    margin-bottom: 19mm;
+    border: 0;
+    color: #151515;
+}
+.sunbeam-toc-system {
+    position: absolute;
+    right: 0;
+    top: 60mm;
+    width: 46mm;
+    height: 46mm;
+    padding: 12mm 5mm 0;
+    box-sizing: border-box;
+    border-radius: 50%;
+    background: #151515;
+    color: #ffd84d;
+    text-align: center;
+}
+.sunbeam-toc-ring {
+    position: absolute;
+    inset: 5mm;
+    border: 0.7pt solid #ff6b35;
+    border-radius: 50%;
+}
+.sunbeam-toc-system strong {
+    position: relative;
+    font-family: __FONT_MONO__;
+    font-size: 6.1pt;
+    line-height: 1.3;
+    letter-spacing: 0.6pt;
+    text-transform: uppercase;
+}
+.toc-sunbeam .toc-list {
+    width: 126mm;
+}
+.toc-sunbeam .toc-entry {
+    grid-template-columns: 11mm 1fr 10mm;
+    border-color: #d5cec2;
+}
+.toc-sunbeam .toc-number::before,
+.toc-sunbeam .toc-page-number {
+    color: #ff6b35;
+}
+.sunbeam-feature-photo {
+    height: 62mm;
+    background:
+        radial-gradient(circle at 77% 53%, #151515 0 15mm, transparent 15.3mm),
+        linear-gradient(180deg, #ff6b35 0 58%, #ffd84d 58%);
+}
+.sunbeam-feature-photo img {
+    display: none;
+}
+.sunbeam-feature-datum {
+    left: 21mm;
+    top: 14mm;
+    width: 50mm;
+    height: 0.8pt;
+    background: #151515;
+    transform: rotate(-18deg);
+}
+.sunbeam-feature-insight {
+    width: 95mm;
+    margin: -22mm 10mm 0 auto;
+    background: #151515;
+    box-shadow: none;
+}
+.sunbeam-feature-insight > span {
+    color: #ffd84d;
+}
+.sunbeam-feature-lower {
+    grid-template-columns: 1fr 61mm;
+}
+.sunbeam-feature-path {
+    padding: 5mm;
+    background: #ffd84d;
+}
+.template-sunbeam h1,
+.template-sunbeam h2,
+.template-sunbeam h3 {
+    color: #151515;
+}
+.template-sunbeam .metric-card {
+    border-top-color: #ff6b35;
+    background: #ffd84d;
+}
+.template-sunbeam .insight-panel {
+    background: #151515;
+}
+.template-sunbeam .takeaway-band {
+    background: #ff6b35;
+}
+""",
+    "current": """
+@page toc {
+    margin: 17mm;
+    background: #fffdf8;
+    @top-left { content: "ALEXANDRIA  /  FLOW MAP"; border: 0; }
+    @top-right { content: "CURRENT"; border: 0; }
+}
+.template-current .cover {
+    padding: 16mm 18mm;
+    border-left: 2.4mm solid #ff5c00;
+    background: #fffdf8;
+}
+.current-grid {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(rgba(26,26,26,.055) 0.5pt, transparent 0.5pt),
+        linear-gradient(90deg, rgba(26,26,26,.055) 0.5pt, transparent 0.5pt);
+    background-size: 22mm 22mm;
+}
+.current-flow-map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+.current-node {
+    position: absolute;
+    right: 26mm;
+    bottom: 56mm;
+    width: 13mm;
+    height: 13mm;
+    border: 4mm solid #fffdf8;
+    border-radius: 50%;
+    background: #ff5c00;
+    box-shadow: 0 0 0 1.2pt #ff5c00;
+}
+.template-current .cover-topline {
+    border: 0;
+}
+.template-current .cover-copy {
+    width: 129mm;
+    margin-top: 42mm;
+    padding: 8mm 8mm 9mm;
+    box-sizing: border-box;
+    background: rgba(255,253,248,.93);
+}
+.template-current .cover h1,
+.template-current .cover-title-accent {
+    display: block;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: #1a1a1a;
+    font-family: __FONT_SANS__;
+    font-size: 39pt;
+    font-weight: 760;
+    line-height: 0.98;
+}
+.template-current .cover-title-accent {
+    color: #ff5c00;
+}
+.template-current .cover .subtitle {
+    color: #555;
+}
+.template-current .cover-record {
+    right: 74mm;
+    bottom: 13mm;
+    padding: 6mm;
+    border: 0;
+    background: rgba(255,253,248,.94);
+}
+.template-current .cover-confidential-note {
+    bottom: 5mm;
+}
+.toc-current {
+    position: relative;
+}
+.toc-current::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    right: -17mm;
+    top: -17mm;
+    width: 52mm;
+    height: 264mm;
+    background: linear-gradient(165deg, #ffb380 0 29%, #ff8533 29% 61%, #ff5c00 61%);
+    clip-path: polygon(48% 0,100% 0,100% 100%,4% 100%,38% 69%,12% 38%);
+}
+.toc-current > * {
+    position: relative;
+    z-index: 1;
+}
+.toc-current .toc-title {
+    font-family: __FONT_SANS__;
+    font-size: 41pt;
+    font-weight: 760;
+}
+.toc-current .toc-intro,
+.toc-current .toc-list {
+    width: 136mm;
+}
+.current-toc-system {
+    width: 136mm;
+    margin: -4mm 0 7mm;
+    font-family: __FONT_MONO__;
+    font-size: 6.5pt;
+    letter-spacing: 0.8pt;
+    text-transform: uppercase;
+    color: #ff5c00;
+}
+.current-toc-line {
+    display: inline-block;
+    width: 48mm;
+    height: 2mm;
+    margin-right: 4mm;
+    border-radius: 2mm;
+    vertical-align: middle;
+    background: linear-gradient(90deg, #ff5c00, #ffb380);
+}
+.toc-current .toc-entry-title {
+    font-size: 12pt;
+}
+.current-feature-photo {
+    height: 72mm;
+    background: #fff4ec;
+}
+.current-feature-photo img {
+    object-fit: cover;
+}
+.current-feature-insight {
+    width: 98mm;
+    margin: -25mm 8mm 0 auto;
+    border-radius: 3mm;
+    background: linear-gradient(120deg, #ff5c00, #ff8533);
+    box-shadow: 0 2mm 7mm rgba(255,92,0,.24);
+}
+.current-feature-insight > span {
+    color: #fff;
+}
+.current-feature-lower {
+    grid-template-columns: 1fr 61mm;
+}
+.current-feature-path {
+    padding: 5mm;
+    border-radius: 3mm;
+    background: #fff4ec;
+}
+.template-current h1,
+.template-current h2,
+.template-current h3 {
+    font-family: __FONT_SANS__;
+    font-weight: 740;
+}
+.template-current h2 {
+    border-bottom-color: #ff5c00;
+}
+.template-current .metric-card,
+.template-current .insight-panel,
+.template-current .takeaway-band {
+    border-radius: 3mm;
+}
+.template-current .insight-panel,
+.template-current .takeaway-band {
+    background: linear-gradient(120deg, #ff5c00, #ff8533);
+}
+""",
+    "apricot": """
+@page toc {
+    margin: 17mm;
+    background: #fffdf8;
+    @top-left { content: "ALEXANDRIA  /  PEOPLE & CONTEXT"; border: 0; }
+    @top-right { content: "APRICOT"; border: 0; }
+}
+.template-apricot .cover {
+    padding: 17mm 18mm;
+    border-left: 3mm solid #ff9800;
+    background: #fffdf8;
+}
+.apricot-spine {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3mm;
+    background: #ff9800;
+}
+.apricot-photo {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 47%;
+    height: 100%;
+    object-fit: cover;
+}
+.apricot-photo-wash {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 47%;
+    height: 100%;
+    background: linear-gradient(90deg, #fffdf8 0, transparent 23%, rgba(255,152,0,.13));
+}
+.apricot-orbit {
+    position: absolute;
+    right: 20mm;
+    bottom: 26mm;
+    width: 52mm;
+    height: 52mm;
+    border: 0.8pt solid rgba(255,255,255,.84);
+    border-radius: 50%;
+}
+.apricot-orbit::after {
+    content: "";
+    position: absolute;
+    inset: 9mm;
+    border: 0.8pt solid rgba(255,152,0,.8);
+    border-radius: 50%;
+}
+.template-apricot .cover-topline {
+    width: 47%;
+}
+.template-apricot .cover-copy {
+    width: 91mm;
+    margin-top: 48mm;
+}
+.template-apricot .cover-kicker {
+    color: #ff9800;
+}
+.template-apricot .cover h1,
+.template-apricot .cover-title-accent {
+    display: block;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: #1a1a1a;
+    font-size: 38pt;
+    font-weight: 600;
+    line-height: 1;
+}
+.template-apricot .cover-title-accent {
+    color: #ff9800;
+}
+.template-apricot .cover .subtitle {
+    width: 83mm;
+    font-size: 11pt;
+}
+.template-apricot .cover-record {
+    right: 109mm;
+    bottom: 17mm;
+    gap: 3mm;
+    padding-top: 5mm;
+    border-color: #ff9800;
+}
+.template-apricot .cover-record .meta-cell {
+    flex-basis: 72mm;
+}
+.template-apricot .cover-confidential-note {
+    right: 109mm;
+}
+.toc-apricot {
+    position: relative;
+}
+.toc-apricot::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    left: -17mm;
+    top: -17mm;
+    width: 42mm;
+    height: 264mm;
+    background: #ff9800;
+}
+.toc-apricot > * {
+    position: relative;
+    z-index: 1;
+}
+.toc-apricot .toc-kicker,
+.toc-apricot .toc-title,
+.toc-apricot .toc-intro,
+.toc-apricot .toc-list,
+.apricot-toc-system {
+    margin-left: 19mm;
+}
+.toc-apricot .toc-title {
+    font-size: 40pt;
+    font-weight: 600;
+}
+.toc-apricot .toc-intro {
+    width: 122mm;
+}
+.apricot-toc-system {
+    margin-bottom: 5mm;
+    font-family: __FONT_MONO__;
+    font-size: 6.4pt;
+    letter-spacing: .8pt;
+    text-transform: uppercase;
+    color: #ff9800;
+}
+.apricot-toc-dot {
+    display: inline-block;
+    width: 5mm;
+    height: 5mm;
+    margin-right: 3mm;
+    border: 1pt solid #ff9800;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+.toc-apricot .toc-entry-title {
+    font-family: __FONT_DISPLAY__;
+    font-size: 13pt;
+    font-weight: 600;
+}
+.apricot-feature-photo {
+    height: 84mm;
+    border-left: 3mm solid #ff9800;
+}
+.apricot-feature-photo img {
+    object-position: center 38%;
+}
+.apricot-feature-insight {
+    width: 91mm;
+    background: #ff9800;
+    box-shadow: 0 2mm 7mm rgba(255,152,0,.2);
+}
+.apricot-feature-insight > span {
+    color: #fff;
+}
+.apricot-feature-lower {
+    grid-template-columns: 1fr 64mm;
+}
+.apricot-feature-path {
+    padding: 5mm;
+    background: #fff3e6;
+}
+.template-apricot h1,
+.template-apricot h2,
+.template-apricot h3 {
+    font-weight: 600;
+}
+.template-apricot .metric-card {
+    border-top-color: #ff9800;
+    background: #fff3e6;
+}
+.template-apricot .insight-panel {
+    background: #ff9800;
+}
+.template-apricot .takeaway-band {
+    background: #ffb04a;
+}
+""",
 }
 
 
@@ -2797,6 +3489,9 @@ def build_css(
             "atlas": "#233a2b",
             "terrain": "#233a2b",
             "maison": "#2b2926",
+            "sunbeam": "#1a1a1a",
+            "current": "#1a1a1a",
+            "apricot": "#1a1a1a",
         }.get(template, "#172330"),
         "__LINK__": spec.accent,
         "__RULE__": {
@@ -2808,6 +3503,9 @@ def build_css(
             "blueprint": "#d8e7f0",
             "terrain": "#d6ddd0",
             "orbit": "#d8e2f2",
+            "sunbeam": "#d5cec2",
+            "current": "#ddd8d0",
+            "apricot": "#d9d4ce",
         }[template],
         "__ROW__": {
             "atlas": "#f5f7f3",
@@ -2815,6 +3513,9 @@ def build_css(
             "maison": "#f4f2ef",
             "blueprint": "#f7f8fa",
             "orbit": "#f7f8fa",
+            "sunbeam": "#fff8e3",
+            "current": "#fff7f2",
+            "apricot": "#fcfaf7",
         }.get(template, "#f6f8f9"),
         "__INSIGHT_LABEL__": insight_label,
         "__INSIGHT_ACCENT__": {
@@ -2826,6 +3527,9 @@ def build_css(
             "blueprint": "#d9effc",
             "terrain": "#a8ccaf",
             "orbit": "#dbe7ff",
+            "sunbeam": "#ffd84d",
+            "current": "#fff4ec",
+            "apricot": "#fff3e6",
         }[template],
         "__TAKEAWAY_LABEL__": takeaway_label,
         "__TAKEAWAY__": spec.accent,
@@ -2838,6 +3542,9 @@ def build_css(
             "blueprint": "#d9effc",
             "terrain": "#d6e4d8",
             "orbit": "#dbe7ff",
+            "sunbeam": "#ffd84d",
+            "current": "#fff4ec",
+            "apricot": "#fff3e6",
         }[template],
     }
     css = COMMON_CSS
@@ -2845,7 +3552,16 @@ def build_css(
         css = css.replace(placeholder, value)
     shared_feature = (
         SHARED_REFERENCE_FEATURE_CSS
-        if template in {"maison", "blueprint", "terrain", "orbit"}
+        if template
+        in {
+            "maison",
+            "blueprint",
+            "terrain",
+            "orbit",
+            "sunbeam",
+            "current",
+            "apricot",
+        }
         else ""
     )
     return css + shared_feature + TEMPLATE_CSS[template] + RESPONSIVE_COVER_CSS

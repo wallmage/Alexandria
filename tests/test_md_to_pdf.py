@@ -160,7 +160,11 @@ class ConverterUnitTests(unittest.TestCase):
             ("Operating model, process governance, and organizational design", "auto", "blueprint"),
             ("Wetland conservation, agriculture, and land-use ecology", "auto", "terrain"),
             ("Artificial intelligence, semiconductors, and advanced robotics", "auto", "orbit"),
+            ("Youth entrepreneurship, civic participation, and community education", "auto", "sunbeam"),
+            ("Mobility innovation, customer journeys, and the future of work", "auto", "current"),
+            ("Workplace culture, public health, care, and lifelong learning", "auto", "apricot"),
             ("A cultural history of river landscapes", "spectrum", "spectrum"),
+            ("A global bank strategy review", "sunbeam", "sunbeam"),
         )
 
         for subject, requested, expected in cases:
@@ -179,6 +183,9 @@ class ConverterUnitTests(unittest.TestCase):
             "blueprint",
             "terrain",
             "orbit",
+            "sunbeam",
+            "current",
+            "apricot",
         ):
             rendered = self.render_html(
                 "# Research title\n\n## Finding\n\nEvidence and implications.",
@@ -198,6 +205,9 @@ class ConverterUnitTests(unittest.TestCase):
         blueprint = self.render_html("# T\n\n## F\n\nBody.", template="blueprint")
         terrain = self.render_html("# T\n\n## F\n\nBody.", template="terrain")
         orbit = self.render_html("# T\n\n## F\n\nBody.", template="orbit")
+        sunbeam = self.render_html("# T\n\n## F\n\nBody.", template="sunbeam")
+        current = self.render_html("# T\n\n## F\n\nBody.", template="current")
+        apricot = self.render_html("# T\n\n## F\n\nBody.", template="apricot")
         self.assertIn("#123047", executive)
         self.assertIn("#4f46e5", spectrum)
         self.assertIn("#173d2a", atlas)
@@ -206,6 +216,9 @@ class ConverterUnitTests(unittest.TestCase):
         self.assertIn("#4a9fd8", blueprint)
         self.assertIn("#2d5e3a", terrain)
         self.assertIn("#0062ff", orbit)
+        self.assertIn("#ff6b35", sunbeam)
+        self.assertIn("#ff5c00", current)
+        self.assertIn("#ff9800", apricot)
 
     def test_new_templates_build_distinct_reference_compositions(self):
         expected_markers = {
@@ -228,6 +241,21 @@ class ConverterUnitTests(unittest.TestCase):
                 "orbit-field",
                 "orbit-toc-field",
                 "orbit-feature-page",
+            ),
+            "sunbeam": (
+                "sunbeam-motif",
+                "sunbeam-toc-system",
+                "sunbeam-feature-page",
+            ),
+            "current": (
+                "current-flow-map",
+                "current-toc-system",
+                "current-feature-page",
+            ),
+            "apricot": (
+                "apricot-photo",
+                "apricot-toc-system",
+                "apricot-feature-page",
             ),
         }
         source = (

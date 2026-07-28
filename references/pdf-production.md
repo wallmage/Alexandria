@@ -57,7 +57,10 @@ When the user did not choose a template, render Executive first, then render the
 
 The contents page includes only the report structure: section titles, short section descriptions, and page numbers. Do not add document-control or engagement panels.
 
-Relative raster-image paths resolve from the Markdown file's directory. Remote images, SVG, active HTML, local-file traversal, and network resource fetches are blocked.
+Relative raster-image paths resolve from the Markdown file's directory. Remote
+images, SVG, active HTML, local-file traversal, and network resource fetches are
+blocked. User-supplied cover images must also meet the converter's minimum
+resolution floor.
 
 ## Validate
 
@@ -74,6 +77,10 @@ Reopen and cross-check the report and rendered PDF:
 ```
 
 Set `REPORT_LANG` to `en`, `zh-CN`, or `zh-HK`. Also enforce `--min-words 7500 --max-words 15000` for English, or `--min-chars 5000 --max-chars 10000` for Simplified or Traditional Chinese.
+
+The PDF check also requires title and author metadata, the declared document
+language, tagged structure for assistive technology, navigation bookmarks,
+consistent A4 pages, selectable text, and clickable source links.
 
 ## Visual inspection
 

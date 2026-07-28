@@ -11,7 +11,6 @@ from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
-
 SOURCE_HEADINGS = {
     "sources",
     "references",
@@ -461,11 +460,18 @@ def validate_report_against_ledger(text, ledger):
     return errors
 
 
-def validate_pdf(path, *, min_pages=1, min_text_chars=1, min_links=0):
+def validate_pdf(
+    path,
+    *,
+    min_pages=1,
+    min_text_chars=1,
+    min_links=0,
+    expected_lang=None,
+):
     """Return errors after reopening and extracting text from a rendered PDF."""
     try:
         from pypdf import PdfReader
-    except ModuleNotFoundError as exc:
+    except ModuleNotFoundError:
         return [
             "PDF validation needs pypdf. Install dependencies with "
             "'python3 -m pip install -r requirements.txt'."
@@ -475,6 +481,12 @@ def validate_pdf(path, *, min_pages=1, min_text_chars=1, min_links=0):
         reader = PdfReader(path)
         page_count = len(reader.pages)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        metadata = reader.metadata or {}
+        root = reader.root_object
+        page_sizes = [
+            (float(page.mediabox.width), float(page.mediabox.height))
+            for page in reader.pages
+        ]
         link_count = 0
         for page in reader.pages:
             for annotation_ref in page.get("/Annots", []):
@@ -497,6 +509,34 @@ def validate_pdf(path, *, min_pages=1, min_text_chars=1, min_links=0):
         errors.append(
             f"PDF has {link_count} external clickable links; minimum is {min_links}."
         )
+    if not str(metadata.get("/Title") or "").strip():
+        errors.append("PDF is missing title metadata.")
+    if not str(metadata.get("/Author") or "").strip():
+        errors.append("PDF is missing author metadata.")
+    mark_info = root.get("/MarkInfo", {})
+    if not mark_info.get("/Marked") or "/StructTreeRoot" not in root:
+        errors.append("PDF is not tagged for assistive technology.")
+    pdf_lang = str(root.get("/Lang") or "").strip()
+    if not pdf_lang:
+        errors.append("PDF is missing its document language.")
+    elif expected_lang and pdf_lang.casefold() != expected_lang.casefold():
+        errors.append(
+            f"PDF language is {pdf_lang}; expected {expected_lang}."
+        )
+    a4_width, a4_height = 595.28, 841.89
+    for index, (width, height) in enumerate(page_sizes, start=1):
+        if abs(width - a4_width) > 2 or abs(height - a4_height) > 2:
+            errors.append(
+                f"PDF page {index} is not A4: {width:.2f}x{height:.2f} pt."
+            )
+    if page_sizes and any(
+        abs(width - page_sizes[0][0]) > 0.1
+        or abs(height - page_sizes[0][1]) > 0.1
+        for width, height in page_sizes[1:]
+    ):
+        errors.append("PDF page sizes are inconsistent.")
+    if "/Outlines" not in root:
+        errors.append("PDF is missing navigation bookmarks.")
     return errors
 
 
@@ -718,6 +758,7 @@ def main(argv=None):
                 min_pages=max(args.min_pages, 0),
                 min_text_chars=max(args.min_text_chars, 0),
                 min_links=max(args.min_links, 0),
+                expected_lang=args.expected_lang,
             )
         )
 

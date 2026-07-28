@@ -75,7 +75,7 @@ Read `references/research-protocol.md` and `references/content-quality.md`. Crea
 1. a reader contract and governing question;
 2. a prioritized coverage map derived from the selected archetype;
 3. direct, corroborating, and disconfirming query plans;
-4. a version-2 evidence ledger using `references/evidence-ledger.schema.json`;
+4. a version-3 evidence ledger using `references/evidence-ledger.schema.json`;
 5. an explicit list of unresolved questions and their effect on the verdict.
 
 If parallel research is available and appropriate, divide coverage areas among research agents. Give each agent exclusive primary ownership and a disjoint numeric ID range—for example, `S1000–S1999` and `C1000–C1999`—while allowing it to flag cross-cutting evidence. Each returns ledger entries, contradictions, gaps, and a short synthesis—not a detached pile of URLs. The primary agent deduplicates sources and rewrites IDs and relationships before validation.
@@ -121,7 +121,8 @@ Before drafting:
 - verify quotations against the original source;
 - verify current facts close to delivery;
 - mark unsupported coverage areas as gaps rather than filling them with inference.
-- test the strongest rival explanation and material counterevidence;
+- record and test the strongest rival explanation and material counterevidence
+  in `synthesis.adversarial_tests`;
 - record the central judgments, implications, usable takeaways or scenarios, limitations, and research stop reason in `synthesis`.
 
 No source minimum is mandatory. Use enough independent evidence to support the claims and perspectives the report actually contains.

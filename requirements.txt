@@ -1,5 +1,5 @@
 Markdown==3.10.2
 WeasyPrint==69.0
-pypdf==6.10.0
+pypdf==6.14.2
 jsonschema==4.25.1
 pypdfium2==5.12.1

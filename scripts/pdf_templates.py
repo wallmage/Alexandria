@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-
 TEMPLATE_CHOICES = (
     "auto",
     "executive",
@@ -29,6 +28,7 @@ class TemplateSpec:
     name: str
     display_name: str
     accent: str
+    accent_text: str
     dark: str
     muted: str
     pale: str
@@ -40,6 +40,7 @@ TEMPLATES = {
         name="executive",
         display_name="Executive",
         accent="#16827c",
+        accent_text="#16827c",
         dark="#123047",
         muted="#657483",
         pale="#edf3f4",
@@ -49,6 +50,7 @@ TEMPLATES = {
         name="spectrum",
         display_name="Spectrum",
         accent="#4f46e5",
+        accent_text="#4f46e5",
         dark="#191919",
         muted="#626262",
         pale="#f2f3ff",
@@ -58,8 +60,9 @@ TEMPLATES = {
         name="atlas",
         display_name="Atlas",
         accent="#2f7448",
+        accent_text="#2f7448",
         dark="#173d2a",
-        muted="#748176",
+        muted="#687469",
         pale="#eef2ec",
         display_serif=True,
     ),
@@ -67,6 +70,7 @@ TEMPLATES = {
         name="horizon",
         display_name="Horizon",
         accent="#0b63f6",
+        accent_text="#0b63f6",
         dark="#0b0e14",
         muted="#617083",
         pale="#eef4ff",
@@ -76,6 +80,7 @@ TEMPLATES = {
         name="maison",
         display_name="Maison",
         accent="#b39a61",
+        accent_text="#766329",
         dark="#1a1a1a",
         muted="#55514b",
         pale="#f4f2ef",
@@ -85,6 +90,7 @@ TEMPLATES = {
         name="blueprint",
         display_name="Blueprint",
         accent="#4a9fd8",
+        accent_text="#17638d",
         dark="#1a1a1a",
         muted="#666666",
         pale="#f7f8fa",
@@ -94,6 +100,7 @@ TEMPLATES = {
         name="terrain",
         display_name="Terrain",
         accent="#2d5e3a",
+        accent_text="#2d5e3a",
         dark="#1b3a28",
         muted="#4a6b52",
         pale="#f5f3ee",
@@ -103,6 +110,7 @@ TEMPLATES = {
         name="orbit",
         display_name="Orbit",
         accent="#0062ff",
+        accent_text="#0062ff",
         dark="#1a1a1a",
         muted="#4b5563",
         pale="#f7f8fa",
@@ -112,6 +120,7 @@ TEMPLATES = {
         name="sunbeam",
         display_name="Sunbeam",
         accent="#ff6b35",
+        accent_text="#a93612",
         dark="#151515",
         muted="#6e6a63",
         pale="#fff2c7",
@@ -121,6 +130,7 @@ TEMPLATES = {
         name="current",
         display_name="Current",
         accent="#ff5c00",
+        accent_text="#a63c00",
         dark="#1a1a1a",
         muted="#666666",
         pale="#fff4ec",
@@ -130,6 +140,7 @@ TEMPLATES = {
         name="apricot",
         display_name="Apricot",
         accent="#ff9800",
+        accent_text="#8f5000",
         dark="#1a1a1a",
         muted="#6e6a63",
         pale="#fff3e6",
@@ -624,7 +635,7 @@ body {
     font-weight: 700;
     letter-spacing: 1.55pt;
     text-transform: uppercase;
-    color: __ACCENT__;
+    color: __ACCENT_TEXT__;
 }
 
 .cover h1 {
@@ -732,7 +743,7 @@ body {
     font-weight: 700;
     letter-spacing: 1.5pt;
     text-transform: uppercase;
-    color: __ACCENT__;
+    color: __ACCENT_TEXT__;
 }
 
 .toc-title {
@@ -777,7 +788,7 @@ body {
     font-size: 7.5pt;
     font-weight: 800;
     letter-spacing: 0.7pt;
-    color: __ACCENT__;
+    color: __ACCENT_TEXT__;
 }
 
 .toc-entry-title {
@@ -861,7 +872,7 @@ h4 {
     font-weight: 800;
     letter-spacing: 0.35pt;
     text-transform: uppercase;
-    color: __ACCENT__;
+    color: __ACCENT_TEXT__;
 }
 
 p {
@@ -1207,7 +1218,7 @@ SHARED_REFERENCE_FEATURE_CSS = """
     font-weight: 700;
     letter-spacing: 1.1pt;
     text-transform: uppercase;
-    color: __ACCENT__;
+    color: __ACCENT_TEXT__;
 }
 .horizon-feature-heading-row {
     display: grid;
@@ -1316,7 +1327,7 @@ SHARED_REFERENCE_FEATURE_CSS = """
 .horizon-feature-path li span {
     font-family: __FONT_MONO__;
     font-size: 6.5pt;
-    color: __ACCENT__;
+    color: __ACCENT_TEXT__;
 }
 .horizon-feature-path li strong {
     font-size: 8.2pt;
@@ -2354,7 +2365,7 @@ TEMPLATE_CSS = {
 }
 .template-maison .cover-kicker {
     margin-bottom: 6mm;
-    color: #b39a61;
+    color: __ACCENT_TEXT__;
 }
 .template-maison .cover h1,
 .template-maison .cover-title-accent {
@@ -2416,7 +2427,7 @@ TEMPLATE_CSS = {
     font-size: 6.5pt;
     letter-spacing: 1pt;
     text-transform: uppercase;
-    color: #b39a61;
+    color: __ACCENT_TEXT__;
 }
 .maison-toc-note strong {
     margin-top: 5mm;
@@ -2944,7 +2955,7 @@ TEMPLATE_CSS = {
     margin-top: 38mm;
 }
 .template-sunbeam .cover-kicker {
-    color: #ff6b35;
+    color: __ACCENT_TEXT__;
 }
 .template-sunbeam .cover h1,
 .template-sunbeam .cover-title-accent {
@@ -3052,7 +3063,7 @@ TEMPLATE_CSS = {
 }
 .toc-sunbeam .toc-number::before,
 .toc-sunbeam .toc-page-number {
-    color: #ff6b35;
+    color: __ACCENT_TEXT__;
 }
 .sunbeam-feature-photo {
     height: 62mm;
@@ -3163,7 +3174,7 @@ TEMPLATE_CSS = {
     line-height: 0.98;
 }
 .template-current .cover-title-accent {
-    color: #ff5c00;
+    color: __ACCENT_TEXT__;
 }
 .template-current .cover .subtitle {
     color: #555;
@@ -3212,7 +3223,7 @@ TEMPLATE_CSS = {
     font-size: 6.5pt;
     letter-spacing: 0.8pt;
     text-transform: uppercase;
-    color: #ff5c00;
+    color: __ACCENT_TEXT__;
 }
 .current-toc-line {
     display: inline-block;
@@ -3330,7 +3341,7 @@ TEMPLATE_CSS = {
     margin-top: 48mm;
 }
 .template-apricot .cover-kicker {
-    color: #ff9800;
+    color: __ACCENT_TEXT__;
 }
 .template-apricot .cover h1,
 .template-apricot .cover-title-accent {
@@ -3344,7 +3355,7 @@ TEMPLATE_CSS = {
     line-height: 1;
 }
 .template-apricot .cover-title-accent {
-    color: #ff9800;
+    color: __ACCENT_TEXT__;
 }
 .template-apricot .cover .subtitle {
     width: 83mm;
@@ -3400,7 +3411,7 @@ TEMPLATE_CSS = {
     font-size: 6.4pt;
     letter-spacing: .8pt;
     text-transform: uppercase;
-    color: #ff9800;
+    color: __ACCENT_TEXT__;
 }
 .apricot-toc-dot {
     display: inline-block;
@@ -3482,6 +3493,7 @@ def build_css(
         "__PAGE_SUFFIX__": page_suffix,
         "__TEMPLATE_NAME__": spec.display_name.upper(),
         "__ACCENT__": spec.accent,
+        "__ACCENT_TEXT__": spec.accent_text,
         "__DARK__": spec.dark,
         "__MUTED__": spec.muted,
         "__PALE__": spec.pale,

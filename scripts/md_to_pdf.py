@@ -13,32 +13,31 @@ Dependencies: install from requirements.txt
 import argparse
 import html
 import json
+import os
 import re
 import sys
 import tempfile
-from datetime import date
+from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from pdf_templates import (  # noqa: E402
+from content_gate import validate_content_receipt
+from pdf_templates import (
     TEMPLATE_CHOICES,
     TEMPLATES,
+    build_css,
     bundled_horizon_image_data_uri,
     bundled_template_image_data_uri,
-    build_css,
     cover_art_html,
-    select_adaptive_companion,
+    select_adaptive_companion,  # noqa: F401 -- intentional public helper
     select_template,
 )
-from content_gate import validate_content_receipt  # noqa: E402
-from validate_report import validate_markdown, validate_rewild_receipt  # noqa: E402
-
+from validate_report import validate_markdown, validate_rewild_receipt
 
 LANG_CHOICES = ("auto", "en", "zh-CN", "zh-HK")
 TRADITIONAL_MARKERS = set("這個為與報發後裡麼還說對時國學術據點體現關於會開")
@@ -67,6 +66,8 @@ SAFE_IMAGE_DATA_TYPES = (
     "data:image/webp",
 )
 MAX_ASSET_BYTES = 25_000_000
+MIN_COVER_SHORT_EDGE = 600
+MIN_COVER_LONG_EDGE = 1000
 
 FONT_SANS_EN = '"Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif'
 FONT_SANS_CN = (
@@ -950,7 +951,7 @@ def load_weasyprint_html():
 
 
 def localized_today(lang, today=None):
-    today = today or date.today()
+    today = today or datetime.now().astimezone().date()
     if lang == "en":
         return f"{today.day:02d} {today.strftime('%B')} {today.year}"
     return f"{today.year}年{today.month}月{today.day}日"
@@ -1266,6 +1267,10 @@ def md_to_html(
     return (
         "<!DOCTYPE html>"
         f'<html lang="{lang}"><head><meta charset="UTF-8">'
+        f"<title>{html.escape(title)}</title>"
+        f'<meta name="author" content="{html.escape(prepared_by, quote=True)}">'
+        f'<meta name="description" content="'
+        f'{html.escape(subtitle or localized["deep_research"], quote=True)}">'
         f"<style>{css}</style></head><body>"
         f'<div class="report template-{selected_template}" '
         f'data-template="{selected_template}">'
@@ -1315,6 +1320,27 @@ def validate_cover_image(input_path, cover_image):
     if candidate.stat().st_size > MAX_ASSET_BYTES:
         raise ValueError(
             f"Cover image exceeds the {MAX_ASSET_BYTES}-byte limit: {candidate}"
+        )
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Cover-image validation needs Pillow, installed with WeasyPrint."
+        ) from exc
+    try:
+        with Image.open(candidate) as image:
+            width, height = image.size
+    except (OSError, UnidentifiedImageError) as exc:
+        raise ValueError(f"Cover image could not be decoded: {candidate}") from exc
+    short_edge, long_edge = sorted((width, height))
+    if (
+        short_edge < MIN_COVER_SHORT_EDGE
+        or long_edge < MIN_COVER_LONG_EDGE
+    ):
+        raise ValueError(
+            "Cover image resolution is too low for professional PDF output: "
+            f"{width}x{height}; minimum edges are "
+            f"{MIN_COVER_SHORT_EDGE}x{MIN_COVER_LONG_EDGE} pixels."
         )
     return candidate.relative_to(asset_root).as_posix()
 
@@ -1444,21 +1470,21 @@ def render_pdf(
         print(f"[OK] HTML generated: {debug_path}")
 
     HTML = load_weasyprint_html()
-    temp_handle = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         prefix=f".{output_path.stem}-",
         suffix=".pdf",
         dir=output_path.parent,
         delete=False,
-    )
-    temp_path = Path(temp_handle.name)
-    temp_handle.close()
+    ) as temp_handle:
+        temp_path = Path(temp_handle.name)
     try:
         HTML(
             string=rendered_html,
             base_url=input_path.parent.resolve(),
             url_fetcher=make_url_fetcher(input_path.parent),
-        ).write_pdf(temp_path)
+        ).write_pdf(temp_path, pdf_tags=True)
         temp_path.replace(output_path)
+        os.chmod(output_path, 0o644)
     finally:
         temp_path.unlink(missing_ok=True)
     size_kb = output_path.stat().st_size / 1024

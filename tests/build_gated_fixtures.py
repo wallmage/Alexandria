@@ -6,13 +6,11 @@ import json
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.rewild_gate import file_sha256, run_gate  # noqa: E402
-from scripts.content_gate import run_content_gate  # noqa: E402
-
+from scripts.content_gate import run_content_gate
+from scripts.rewild_gate import file_sha256, run_gate
 
 SCORES = (
     "question_answered",
@@ -47,6 +45,7 @@ CASES = (
         "url": "https://example.com/research/a-very-long-but-valid-path-that-must-wrap-inside-the-page-instead-of-running-through-the-margin",
         "excerpt": "The pipeline converts Markdown into a styled PDF, builds a contents page, and keeps a source link clickable.",
         "sources_heading": "## Sources",
+        "section_headings": ("Executive summary", "Key process", "Outlook"),
         "depth": lambda: " ".join(f"observation{index}" for index in range(7500))
         + ".",
     },
@@ -58,6 +57,7 @@ CASES = (
         "url": "https://example.com/cn-source",
         "excerpt": "系统会把 Markdown 转成 PDF，建立目录，并保留可点击的资料来源，让测试可以同时核对排版结果和引用路径。",
         "sources_heading": "## 参考资料",
+        "section_headings": ("摘要", "主要流程", "未来展望"),
         "depth": lambda: "研究数据市场方法结果分析证据" * 500 + "。",
     },
     {
@@ -68,6 +68,7 @@ CASES = (
         "url": "https://example.com/hk-source",
         "excerpt": "系統會把 Markdown 轉成 PDF，建立目錄，並保留可按的資料來源，讓測試可以同時核對排版結果和引用路徑。",
         "sources_heading": "## 參考資料",
+        "section_headings": ("摘要", "主要流程", "未來展望"),
         "depth": lambda: "研究數據市場方法結果分析證據" * 500 + "。",
     },
 )
@@ -146,7 +147,7 @@ def build_case(case, output_root):
     content_review.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "status": "completed",
                 "report_path": str(report.resolve()),
                 "report_sha256": file_sha256(report),
@@ -166,6 +167,20 @@ def build_case(case, output_root):
                     for name in SCORES
                 },
                 "checks": {name: True for name in CHECKS},
+                "section_reviews": [
+                    {
+                        "section_heading": heading,
+                        "purpose": "Advance the fixture's governing production question.",
+                        "new_value": "Add distinct evidence, explanation, or decision value.",
+                        "evidence_or_reasoning": "Use the evidence bound to the fixture ledger.",
+                        "limitation_or_tradeoff": "Remain limited to the synthetic production contract.",
+                        "contribution_to_governing_question": (
+                            "Move the reader toward the fixture's central judgment."
+                        ),
+                        "disposition": "keep",
+                    }
+                    for heading in case["section_headings"]
+                ],
                 "findings": [],
                 "evidence_limitations": [
                     "This fixture tests production controls, not real-world research."

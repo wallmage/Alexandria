@@ -11,7 +11,6 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = {
     "en": ("rewild", "en"),

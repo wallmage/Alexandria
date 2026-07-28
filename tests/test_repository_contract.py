@@ -5,7 +5,6 @@ import sys
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -148,6 +147,12 @@ class RepositoryContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("tests/build_gated_fixtures.py", workflow)
         self.assertGreaterEqual(workflow.count("--rewild-receipt"), 6)
+        for template in (
+            "executive", "spectrum", "atlas", "horizon", "maison",
+            "blueprint", "terrain", "orbit", "sunbeam", "current", "apricot",
+        ):
+            self.assertIn(template, workflow)
+        self.assertIn("pip_audit", workflow)
 
     def test_content_quality_gate_is_bundled_required_and_ci_exercised(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -170,6 +175,8 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertGreaterEqual(workflow.count("--content-receipt"), 3)
 
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(2, schema["properties"]["schema_version"]["const"])
+        self.assertIn("section_reviews", schema["required"])
         self.assertEqual(4, schema["$defs"]["score"]["properties"]["score"]["minimum"])
         result = subprocess.run(
             [sys.executable, "-S", str(ROOT / "scripts" / "content_gate.py"), "--help"],
@@ -191,6 +198,11 @@ class RepositoryContractTests(unittest.TestCase):
         )
         self.assertIn("claims", schema["required"])
         self.assertIn("sources", schema["required"])
+        self.assertEqual(3, schema["properties"]["schema_version"]["const"])
+        self.assertIn(
+            "adversarial_tests",
+            schema["$defs"]["synthesis"]["required"],
+        )
         self.assertEqual(1, schema["properties"]["coverage"]["minItems"])
         self.assertEqual(1, schema["properties"]["sources"]["minItems"])
         self.assertEqual(1, schema["properties"]["claims"]["minItems"])

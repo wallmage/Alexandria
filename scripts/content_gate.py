@@ -12,10 +12,18 @@ from pathlib import Path
 
 try:
     from .validate_ledger import validate_references, validate_schema
-    from .validate_report import validate_report_against_ledger
+    from .validate_report import (
+        SOURCE_HEADINGS,
+        _h2_sections,
+        validate_report_against_ledger,
+    )
 except ImportError:
     from validate_ledger import validate_references, validate_schema
-    from validate_report import validate_report_against_ledger
+    from validate_report import (
+        SOURCE_HEADINGS,
+        _h2_sections,
+        validate_report_against_ledger,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,26 +60,67 @@ def _normalized(text):
     return re.sub(r"\s+", " ", str(text)).strip()
 
 
+def _normalized_heading(text):
+    return _normalized(text).casefold()
+
+
+def _section_review_errors(report_text, review):
+    report_headings = [
+        heading
+        for heading, _ in _h2_sections(report_text)
+        if heading.casefold() not in SOURCE_HEADINGS
+    ]
+    reviews = review.get("section_reviews", [])
+    if not isinstance(reviews, list):
+        return []
+    reviewed_headings = [
+        item.get("section_heading", "")
+        for item in reviews
+        if isinstance(item, dict)
+    ]
+    report_map = {
+        _normalized_heading(heading): heading for heading in report_headings
+    }
+    review_map = {}
+    errors = []
+    for heading in reviewed_headings:
+        normalized = _normalized_heading(heading)
+        if normalized in review_map:
+            errors.append(f"Duplicate section review: {heading}.")
+        review_map[normalized] = heading
+    for normalized, heading in report_map.items():
+        if normalized not in review_map:
+            errors.append(f"Section review is missing for {heading}.")
+    for normalized, heading in review_map.items():
+        if normalized not in report_map:
+            errors.append(
+                f"Section review {heading} is not in the final report."
+            )
+    return errors
+
+
 def _write_receipt(path, payload):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    )
+    temp_name = None
     try:
-        with handle:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_name = handle.name
             json.dump(payload, handle, indent=2, ensure_ascii=False)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        Path(handle.name).replace(path)
+        Path(temp_name).replace(path)
     except Exception:
-        Path(handle.name).unlink(missing_ok=True)
+        if temp_name:
+            Path(temp_name).unlink(missing_ok=True)
         raise
 
 
@@ -101,6 +150,7 @@ def run_content_gate(report_path, ledger_path, review_note_path, receipt_path):
     errors.extend(
         _schema_errors(review, CONTENT_REVIEW_SCHEMA, "Content review:")
     )
+    errors.extend(_section_review_errors(report_text, review))
     errors.extend(validate_report_against_ledger(report_text, ledger))
     ledger_language = (
         ledger.get("brief", {}).get("report_language")

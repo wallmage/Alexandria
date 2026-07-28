@@ -56,6 +56,10 @@ The right source depends on the claim. A filing may establish reported revenue, 
 
 Assign each source a family and one or more roles. Several pages from one publisher, syndicated stories, and studies built on the same underlying dataset do not create independent triangulation.
 
+The validator normalizes family names and source URLs before counting them. A
+key judgment may declare triangulation `met` only when at least two normalized
+families converge and at least one foundation is independent of the subject.
+
 ## Conflict handling
 
 When reliable sources disagree:
@@ -89,6 +93,7 @@ Stop only when:
 - every high-priority area is supported, disputed, or an explicit gap;
 - key analysis has met triangulation or carries a reduced-confidence limitation;
 - the strongest counterevidence and rival explanation have been tested;
+- the adversarial test and its effect on the conclusion are recorded;
 - current facts have been checked near the report date;
 - another search pass is repeating known evidence rather than changing the decision;
 - unresolved questions and their effect on the verdict are recorded.

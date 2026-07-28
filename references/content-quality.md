@@ -15,7 +15,7 @@ Before searching, state:
 
 For biography, history, or explanatory work, “decision” may mean the judgment or understanding the reader should leave with. Do not force a business recommendation onto a subject that calls for interpretation.
 
-Record the contract in the version-2 evidence ledger. Revisit it when new evidence changes the assignment.
+Record the contract in the version-3 evidence ledger. Revisit it when new evidence changes the assignment.
 
 ## 2. Build a question architecture
 
@@ -58,7 +58,10 @@ Do not let ordinary search results define the argument. For each plausible concl
 
 Search in the original language when it improves recall. For current subjects, include the runtime date, version, jurisdiction, and relevant time window.
 
-Write down the strongest rival explanation before drafting. If no evidence could change the conclusion, the conclusion is not being tested.
+Write down the strongest rival explanation before drafting. Record the
+hypothesis, test, evidence, outcome, and effect on the conclusion in
+`synthesis.adversarial_tests`. If no evidence could change the conclusion, the
+conclusion is not being tested.
 
 ## 4. Build the right source portfolio
 
@@ -157,11 +160,16 @@ The synthesis record identifies:
 
 - central judgment claim IDs;
 - material counterevidence;
+- the adversarial tests used to challenge the central judgment;
 - implications and their foundations;
 - decisions or takeaways, including trade-offs and success and failure signals;
 - conditional scenarios when the subject needs an outlook;
 - limitations;
 - why research stopped.
+
+Every implication, takeaway, and scenario must cite at least one central
+judgment directly. Supporting evidence may also be cited, but the decision
+logic must never become detached from the report's actual conclusion.
 
 ## 9. Design a report worth 30 minutes
 
@@ -187,6 +195,10 @@ Every substantial section should:
 2. explain the evidence, mechanism, or history;
 3. test a credible alternative, limit, or trade-off when material;
 4. state why the answer matters to the report’s governing question.
+
+The final content review records those four answers for every non-Sources H2
+section. The gate rejects missing, duplicate, extra, or unfinished section
+reviews; a section survives only when its final disposition is `keep`.
 
 This is a reasoning contract, not a mandatory paragraph template. Narrative passages may establish the evidence through a documented scene; technical passages may need a worked example; comparisons may need a table.
 

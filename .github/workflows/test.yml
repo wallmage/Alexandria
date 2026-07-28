@@ -27,6 +27,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes fonts-noto-cjk
           python -m pip install -r requirements.txt
+          python -m pip install pip-audit
+
+      - name: Audit Python dependencies
+        if: matrix.python-version == '3.12'
+        run: python -m pip_audit -r requirements.txt --vulnerability-service osv
 
       - name: Run unit tests
         run: python -m unittest discover -v
@@ -63,6 +68,35 @@ jobs:
             --min-pages 3 \
             --min-text-chars 300 \
             --min-links 1
+
+      - name: Render and validate all eleven templates
+        if: matrix.python-version == '3.12'
+        run: |
+          for template in executive spectrum atlas horizon maison blueprint terrain orbit sunbeam current apricot; do
+            output="/tmp/alexandria-${template}.pdf"
+            python scripts/md_to_pdf.py \
+              /tmp/alexandria-fixtures/en/report.md \
+              "$output" \
+              --lang en \
+              --template "$template" \
+              --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
+              --ledger /tmp/alexandria-fixtures/en/ledger.json \
+              --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json
+            python scripts/validate_report.py \
+              /tmp/alexandria-fixtures/en/report.md \
+              --ledger /tmp/alexandria-fixtures/en/ledger.json \
+              --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
+              --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json \
+              --pdf "$output" \
+              --expected-lang en \
+              --min-words 7500 \
+              --max-words 15000 \
+              --min-sources 1 \
+              --min-sections 4 \
+              --min-pages 3 \
+              --min-text-chars 300 \
+              --min-links 1
+          done
 
       - name: Render and validate Hong Kong PDF
         run: |

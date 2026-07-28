@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "validate_report.py"
 SPEC = importlib.util.spec_from_file_location("validate_report", MODULE_PATH)
 validate_report = importlib.util.module_from_spec(SPEC)
@@ -235,20 +234,53 @@ Words after the sources section.
                 return {"/Subtype": "/Link", "/A": {"/URI": "https://example.com"}}
 
         class Page:
+            mediabox = SimpleNamespace(width=595.28, height=841.89)
+
             def extract_text(self):
                 return "enough report text"
 
             def get(self, key, default):
                 return [Annotation()] if key == "/Annots" else default
 
-        fake_pypdf = SimpleNamespace(
-            PdfReader=lambda path: SimpleNamespace(pages=[Page()])
-        )
+        fake_pypdf = SimpleNamespace(PdfReader=lambda path: SimpleNamespace(
+            pages=[Page()],
+            metadata={"/Title": "Report", "/Author": "Alexandria"},
+            root_object={
+                "/Lang": "en",
+                "/MarkInfo": {"/Marked": True},
+                "/StructTreeRoot": {},
+                "/Outlines": {},
+            },
+        ))
         with mock.patch.dict("sys.modules", {"pypdf": fake_pypdf}):
             errors = validate_report.validate_pdf(
                 Path("report.pdf"), min_pages=1, min_text_chars=5, min_links=2
             )
         self.assertTrue(any("clickable links" in error for error in errors))
+
+    def test_pdf_validation_rejects_missing_production_semantics(self):
+        class Page:
+            mediabox = SimpleNamespace(width=600, height=800)
+
+            def extract_text(self):
+                return "report text"
+
+            def get(self, key, default):
+                return default
+
+        fake_pypdf = SimpleNamespace(PdfReader=lambda path: SimpleNamespace(
+            pages=[Page()],
+            metadata={},
+            root_object={},
+        ))
+        with mock.patch.dict("sys.modules", {"pypdf": fake_pypdf}):
+            errors = validate_report.validate_pdf(
+                Path("report.pdf"),
+                expected_lang="en",
+            )
+        joined = " ".join(errors)
+        for phrase in ("title metadata", "author metadata", "tagged", "language", "A4", "bookmarks"):
+            self.assertIn(phrase, joined)
 
     def test_report_ledger_check_requires_known_urls_and_claim_locations(self):
         report = GOOD_REPORT

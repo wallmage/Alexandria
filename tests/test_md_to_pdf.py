@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -6,7 +7,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "md_to_pdf.py"
@@ -162,15 +162,14 @@ class ConverterUnitTests(unittest.TestCase):
             source.write_text("# Report\n", encoding="utf-8")
             with mock.patch.object(
                 self.converter, "validate_rewild_for_render", return_value=None
-            ):
-                with self.assertRaisesRegex(ValueError, "Content quality"):
-                    self.converter.render_pdf(
-                        source,
-                        output,
-                        rewild_receipt=Path(temp_dir) / "rewild.json",
-                        ledger=Path(temp_dir) / "ledger.json",
-                        content_receipt=None,
-                    )
+            ), self.assertRaisesRegex(ValueError, "Content quality"):
+                self.converter.render_pdf(
+                    source,
+                    output,
+                    rewild_receipt=Path(temp_dir) / "rewild.json",
+                    ledger=Path(temp_dir) / "ledger.json",
+                    content_receipt=None,
+                )
 
     def test_detects_english_simplified_and_traditional_chinese(self):
         self.assertEqual(self.converter.detect_language("A report about markets."), "en")
@@ -246,6 +245,23 @@ class ConverterUnitTests(unittest.TestCase):
         self.assertIn("#ff6b35", sunbeam)
         self.assertIn("#ff5c00", current)
         self.assertIn("#ff9800", apricot)
+
+    def test_every_small_text_palette_token_meets_wcag_aa_on_white(self):
+        def luminance(color):
+            channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+            linear = [
+                channel / 12.92
+                if channel <= 0.04045
+                else ((channel + 0.055) / 1.055) ** 2.4
+                for channel in channels
+            ]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        for name, spec in self.converter.TEMPLATES.items():
+            with self.subTest(template=name):
+                for token in (spec.accent_text, spec.muted):
+                    ratio = (1.0 + 0.05) / (luminance(token) + 0.05)
+                    self.assertGreaterEqual(ratio, 4.5)
 
     def test_new_templates_build_distinct_reference_compositions(self):
         expected_markers = {
@@ -590,7 +606,8 @@ class ConverterUnitTests(unittest.TestCase):
                 calls["base_url"] = Path(base_url)
                 calls["url_fetcher"] = url_fetcher
 
-            def write_pdf(self, target):
+            def write_pdf(self, target, **options):
+                calls.update(options)
                 Path(target).write_bytes(b"%PDF-1.7\n")
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -607,14 +624,16 @@ class ConverterUnitTests(unittest.TestCase):
                 self.render_pdf(source, output)
 
             self.assertEqual(calls["base_url"], source.parent.resolve())
+            self.assertIs(calls["pdf_tags"], True)
             self.assertTrue(output.exists())
+            self.assertEqual(0o644, os.stat(output).st_mode & 0o777)
 
     def test_failed_render_preserves_existing_pdf(self):
         class FailingHTML:
             def __init__(self, **kwargs):
                 pass
 
-            def write_pdf(self, target):
+            def write_pdf(self, target, **options):
                 Path(target).write_bytes(b"partial")
                 raise RuntimeError("render failed")
 
@@ -670,11 +689,33 @@ class ConverterUnitTests(unittest.TestCase):
 
             with mock.patch.object(
                 self.converter, "md_to_html", return_value="<html></html>"
-            ):
-                with self.assertRaisesRegex(ValueError, "already exists"):
-                    self.render_pdf(source, output, keep_html=True)
+            ), self.assertRaisesRegex(ValueError, "already exists"):
+                self.render_pdf(source, output, keep_html=True)
 
             self.assertEqual("mine", sidecar.read_text(encoding="utf-8"))
+
+    def test_html_contains_document_metadata(self):
+        rendered = self.render_html(
+            "# Research title\n\n## Finding\n\nEvidence.",
+            prepared_by="Alexandria Research",
+        )
+        self.assertIn("<title>Research title</title>", rendered)
+        self.assertIn('<meta name="author" content="Alexandria Research">', rendered)
+        self.assertIn('<meta name="description"', rendered)
+
+    def test_cover_image_rejects_low_resolution_raster(self):
+        tiny_png = bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+            "0000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report = root / "report.md"
+            image = root / "tiny.png"
+            report.write_text("# Report\n", encoding="utf-8")
+            image.write_bytes(tiny_png)
+            with self.assertRaisesRegex(ValueError, "resolution"):
+                self.converter.validate_cover_image(report, image)
 
 
 if __name__ == "__main__":

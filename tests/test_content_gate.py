@@ -6,7 +6,6 @@ from pathlib import Path
 
 from scripts.content_gate import run_content_gate, validate_content_receipt
 
-
 ROOT = Path(__file__).parents[1]
 SCORES = (
     "question_answered",
@@ -40,7 +39,7 @@ def file_sha256(path):
 
 def write_review(path, report, ledger, *, report_lang="en"):
     review = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "completed",
         "report_path": str(report.resolve()),
         "report_sha256": file_sha256(report),
@@ -57,6 +56,18 @@ def write_review(path, report, ledger, *, report_lang="en"):
             for name in SCORES
         },
         "checks": {name: True for name in CHECKS},
+        "section_reviews": [
+            {
+                "section_heading": heading,
+                "purpose": "Advance the report's governing question.",
+                "new_value": "Adds distinct evidence, explanation, or decision value.",
+                "evidence_or_reasoning": "The section is supported by the bound ledger.",
+                "limitation_or_tradeoff": "Its scope is limited to the fixture contract.",
+                "contribution_to_governing_question": "Moves the reader toward the central judgment.",
+                "disposition": "keep",
+            }
+            for heading in ("Executive summary", "Key process", "Outlook")
+        ],
         "findings": [],
         "evidence_limitations": [
             "The fixture tests production behavior rather than real-world research."
@@ -239,6 +250,32 @@ class ContentGateTests(unittest.TestCase):
             )
             errors = validate_content_receipt(report, ledger, result)
             self.assertTrue(any("current ledger" in error for error in errors), errors)
+
+    def test_every_substantive_section_needs_one_matching_value_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt = self.make_case(directory)
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["section_reviews"].pop()
+            note["section_reviews"].append(
+                {
+                    **note["section_reviews"][0],
+                    "section_heading": "A section that is not in the report",
+                }
+            )
+            review.write_text(json.dumps(note), encoding="utf-8")
+            errors = run_content_gate(report, ledger, review, receipt)
+            joined = " ".join(errors)
+            self.assertIn("Outlook", joined)
+            self.assertIn("not in the final report", joined)
+
+    def test_section_review_must_end_in_keep(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt = self.make_case(directory)
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["section_reviews"][0]["disposition"] = "revise"
+            review.write_text(json.dumps(note), encoding="utf-8")
+            errors = run_content_gate(report, ledger, review, receipt)
+            self.assertTrue(any("section_reviews" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "subject": "Alexandria render pipeline",
   "research_question": "Does the sample pipeline satisfy its basic output contract?",
   "brief": {
@@ -89,6 +89,18 @@
       "C1"
     ],
     "counterevidence_claim_ids": [],
+    "adversarial_tests": [
+      {
+        "hypothesis": "The link appears in Markdown but is lost during PDF conversion.",
+        "test": "Inspect the rendered PDF for an external link annotation.",
+        "claim_ids": [
+          "C1"
+        ],
+        "outcome": "rejected",
+        "result": "The rendered fixture retains the external link annotation.",
+        "effect_on_conclusion": "The pipeline claim remains supported within the fixture scope."
+      }
+    ],
     "implications": [
       {
         "statement": "The render fixture can test link preservation.",

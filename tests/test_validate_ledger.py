@@ -3,7 +3,6 @@ import json
 import unittest
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "validate_ledger.py"
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location("validate_ledger", MODULE_PATH)
@@ -13,7 +12,7 @@ SPEC.loader.exec_module(validate_ledger)
 
 def valid_quality_ledger():
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "report_date": "2026-07-28",
         "coverage": [
             {
@@ -27,13 +26,17 @@ def valid_quality_ledger():
         "sources": [
             {
                 "source_id": "S1",
+                "url": "https://records.example.org/result",
                 "source_family": "official-record",
+                "provenance": "primary_interested",
                 "published": "2026-07-20",
                 "accessed": "2026-07-28",
             },
             {
                 "source_id": "S2",
+                "url": "https://tests.example.net/result",
                 "source_family": "independent-test",
+                "provenance": "primary_independent",
                 "published": "2026-07-21",
                 "accessed": "2026-07-28",
             },
@@ -63,6 +66,16 @@ def valid_quality_ledger():
         "synthesis": {
             "central_judgment_claim_ids": ["C1"],
             "counterevidence_claim_ids": [],
+            "adversarial_tests": [
+                {
+                    "hypothesis": "The apparent result is only a fixture artifact.",
+                    "test": "Compare the result against an independent implementation.",
+                    "claim_ids": ["C1"],
+                    "outcome": "rejected",
+                    "result": "The independent implementation produced the same result.",
+                    "effect_on_conclusion": "The central judgment remains unchanged.",
+                }
+            ],
             "implications": [
                 {
                     "statement": "Use the result as a decision gate.",
@@ -210,7 +223,7 @@ class LedgerReferenceTests(unittest.TestCase):
         data["claims"][0]["source_ids"] = ["S1"]
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
-            any("declares triangulation met but has 1 source family" in error for error in errors),
+            any("declares triangulation met but has 1 normalized source family" in error for error in errors),
             errors,
         )
 
@@ -224,6 +237,30 @@ class LedgerReferenceTests(unittest.TestCase):
             any("high-confidence key judgment cannot use limited triangulation" in error for error in errors),
             errors,
         )
+
+    def test_triangulation_normalizes_families_and_requires_independent_evidence(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["source_family"] = " Same-Family "
+        data["sources"][1]["source_family"] = "same family"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("1 normalized source family" in error for error in errors),
+            errors,
+        )
+
+        data = valid_quality_ledger()
+        data["sources"][1]["provenance"] = "secondary_dependent"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("no independent source" in error for error in errors),
+            errors,
+        )
+
+    def test_duplicate_source_urls_are_rejected_after_normalization(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["url"] = "HTTPS://records.example.org/result/"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("Duplicate source URL" in error for error in errors), errors)
 
     def test_disputed_claims_need_reciprocal_contradictions_and_resolution(self):
         data = valid_quality_ledger()
@@ -279,6 +316,66 @@ class LedgerReferenceTests(unittest.TestCase):
         errors = validate_ledger.validate_references(data)
         self.assertTrue(any("S1 is published after the report date" in error for error in errors), errors)
         self.assertTrue(any("S2 is published after it was accessed" in error for error in errors), errors)
+
+        data = valid_quality_ledger()
+        data["sources"][0]["accessed"] = "2026-07-29"
+        data["claims"][0]["as_of"] = "2026-07-30"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("S1 is accessed after the report date" in error for error in errors), errors)
+        self.assertTrue(any("C1 is dated after the report date" in error for error in errors), errors)
+
+    def test_gap_coverage_cannot_hide_claims(self):
+        data = valid_quality_ledger()
+        data["coverage"][0]["status"] = "gap"
+        data["coverage"][0]["gap_impact"] = "The decision remains uncertain."
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("gap but still references claims" in error for error in errors), errors)
+
+    def test_coverage_status_must_match_the_referenced_claims(self):
+        data = valid_quality_ledger()
+        data["coverage"][0]["status"] = "supported"
+        data["claims"][0]["status"] = "disputed"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("supported but references no supported claim" in error for error in errors),
+            errors,
+        )
+
+    def test_implications_and_takeaways_must_connect_to_the_central_judgment(self):
+        data = valid_quality_ledger()
+        data["claims"].append(
+            {
+                "claim_id": "C2",
+                "kind": "fact",
+                "importance": "supporting",
+                "source_ids": ["S2"],
+                "supports": [],
+                "contradicts": [],
+                "confidence": "medium",
+                "status": "supported",
+                "include_in_report": False,
+            }
+        )
+        data["synthesis"]["implications"][0]["claim_ids"] = ["C2"]
+        data["synthesis"]["decisions_or_takeaways"][0]["rationale_claim_ids"] = ["C2"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("Implication is not linked" in error for error in errors), errors)
+        self.assertTrue(any("Takeaway is not linked" in error for error in errors), errors)
+
+    def test_adversarial_tests_are_required_and_reference_known_claims(self):
+        data = valid_quality_ledger()
+        data["synthesis"]["adversarial_tests"] = []
+        schema = json.loads(
+            (ROOT / "references" / "evidence-ledger.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertTrue(validate_ledger.validate_schema(data, schema))
+
+        data = valid_quality_ledger()
+        data["synthesis"]["adversarial_tests"][0]["claim_ids"] = ["C9"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("unknown adversarial-test claim C9" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

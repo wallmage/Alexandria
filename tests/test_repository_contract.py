@@ -79,7 +79,7 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertIn(f'$SKILL_ROOT/scripts/{script}', production)
         self.assertNotIn("python3 scripts/", production)
 
-    def test_pdf_intake_is_non_blocking_and_offers_all_four_templates(self):
+    def test_pdf_intake_is_non_blocking_and_offers_all_eight_templates(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         templates = (ROOT / "references" / "pdf-templates.md").read_text(
             encoding="utf-8"
@@ -87,16 +87,22 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertIn("Begin research in the same turn", skill)
         self.assertIn("Never wait for an answer", skill)
-        self.assertIn("full two-sentence", skill)
+        self.assertIn("complete one-sentence", skill)
         for label in (
             "A — Executive (Default)",
             "B — Spectrum",
             "C — Atlas",
             "D — Horizon",
+            "E — Maison",
+            "F — Blueprint",
+            "G — Terrain",
+            "H — Orbit",
         ):
             self.assertIn(label, templates)
         self.assertIn("Default: Off", templates)
         self.assertIn("if an answer arrives after a draft PDF was rendered", templates)
+        self.assertIn("two PDFs", templates)
+        self.assertIn("same report content", templates)
 
     def test_rewild_is_a_bundled_hard_gate_for_every_report_language(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")

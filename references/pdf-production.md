@@ -30,7 +30,7 @@ On Debian/Ubuntu CI, install `fonts-noto-cjk`. A PDF that extracts the right Uni
 
 ## Render
 
-Read `references/pdf-templates.md` and resolve the intake values before rendering. Set `REPORT_TEMPLATE` to `executive`, `spectrum`, `atlas`, or `horizon`; use `auto` only when deterministic topic adaptation is intended.
+Read `references/pdf-templates.md` and resolve the intake values before rendering. Set `REPORT_TEMPLATE` to `executive`, `spectrum`, `atlas`, `horizon`, `maison`, `blueprint`, `terrain`, or `orbit`; use `auto` only when deterministic topic adaptation is intended.
 
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
@@ -46,7 +46,9 @@ Optional metadata and imagery:
 - `--client "$CLIENT_NAME"`: show a client field only when the value is non-empty.
 - `--confidential`: add “Strictly Confidential” and controlled-copy footer wording. Omit the flag when confidentiality is Off.
 - `--date "$REPORT_DATE"`: override the Markdown metadata date and today's fallback.
-- `--cover-image "$COVER_IMAGE"`: use a local raster image inside the report directory, especially with Atlas or Horizon.
+- `--cover-image "$COVER_IMAGE"`: use a verified local raster image inside the report directory when the selected visual system benefits from subject-specific imagery, especially Maison, Atlas, Horizon, or Terrain.
+
+When the user did not choose a template, render Executive first, then render the non-Executive result from `select_adaptive_companion()` in `scripts/pdf_templates.py` to a second filename. Both PDFs must use the same Markdown, evidence, and Rewild receipt.
 
 The contents page includes only the report structure: section titles, short section descriptions, and page numbers. Do not add document-control or engagement panels.
 

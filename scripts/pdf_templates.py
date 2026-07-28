@@ -1,13 +1,24 @@
 """Visual systems and deterministic template selection for Alexandria PDFs."""
 
 import base64
+import hashlib
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 
-TEMPLATE_CHOICES = ("auto", "executive", "spectrum", "atlas", "horizon")
+TEMPLATE_CHOICES = (
+    "auto",
+    "executive",
+    "spectrum",
+    "atlas",
+    "horizon",
+    "maison",
+    "blueprint",
+    "terrain",
+    "orbit",
+)
 
 
 @dataclass(frozen=True)
@@ -58,21 +69,58 @@ TEMPLATES = {
         pale="#eef4ff",
         display_serif=False,
     ),
+    "maison": TemplateSpec(
+        name="maison",
+        display_name="Maison",
+        accent="#b39a61",
+        dark="#1a1a1a",
+        muted="#55514b",
+        pale="#f4f2ef",
+        display_serif=True,
+    ),
+    "blueprint": TemplateSpec(
+        name="blueprint",
+        display_name="Blueprint",
+        accent="#4a9fd8",
+        dark="#1a1a1a",
+        muted="#666666",
+        pale="#f7f8fa",
+        display_serif=False,
+    ),
+    "terrain": TemplateSpec(
+        name="terrain",
+        display_name="Terrain",
+        accent="#2d5e3a",
+        dark="#1b3a28",
+        muted="#4a6b52",
+        pale="#f5f3ee",
+        display_serif=False,
+    ),
+    "orbit": TemplateSpec(
+        name="orbit",
+        display_name="Orbit",
+        accent="#0062ff",
+        dark="#1a1a1a",
+        muted="#4b5563",
+        pale="#f7f8fa",
+        display_serif=False,
+    ),
 }
 
 
 SPECTRUM_TERMS = {
-    "ai", "artificial intelligence", "automation", "biotech", "blockchain",
-    "cloud", "crypto", "cyber", "digital", "future", "innovation",
-    "internet", "product", "robot", "robotics", "semiconductor", "software",
-    "startup", "technology", "科技", "技术", "人工智能", "机器人", "機械人",
-    "軟件", "软件", "创新", "創新", "产品", "產品", "数字", "數碼", "未来",
-    "未來",
+    "app", "brand", "consumer tech", "creator", "digital", "ecommerce",
+    "entertainment", "future", "gaming", "innovation", "internet", "media",
+    "platform", "product", "social", "startup", "streaming", "web3",
+    "应用", "應用", "品牌", "消费科技", "消費科技", "创作者", "創作者",
+    "数字", "數碼", "电商", "電商", "娱乐", "娛樂", "游戏", "遊戲",
+    "创新", "創新", "互联网", "互聯網", "媒体", "媒體", "平台", "产品",
+    "產品", "社交", "初创", "初創", "未来", "未來",
 }
 
 ATLAS_TERMS = {
     "anthropology", "archaeology", "architecture", "art", "biography",
-    "climate", "culture", "ecology", "environment", "field", "geography",
+    "culture", "field", "geography",
     "heritage", "history", "landscape", "literature", "nature", "ocean",
     "person", "place", "psychology", "river", "science", "society",
     "人物", "传记", "傳記", "历史", "歷史", "文化", "艺术", "藝術", "地理",
@@ -95,6 +143,58 @@ HORIZON_TERMS = {
     "基础设施", "基礎設施", "气候", "氣候", "能源", "韧性", "韌性", "供应链",
     "供應鏈", "地缘政治", "地緣政治", "物流", "城市", "交通", "水资源",
     "水資源", "安全",
+}
+
+MAISON_TERMS = {
+    "beauty", "consumer brand", "fashion", "food", "hospitality", "hotel",
+    "interior", "luxury", "premium", "real estate", "restaurant", "retail",
+    "service design", "travel", "wellness", "美妆", "美妝", "消费品牌",
+    "消費品牌", "时尚", "時尚", "餐饮", "餐飲", "酒店", "室内", "室內",
+    "奢侈品", "高端", "房地产", "房地產", "零售", "服务设计", "服務設計",
+    "旅游", "旅遊", "健康生活",
+}
+
+BLUEPRINT_TERMS = {
+    "architecture", "capability", "delivery model", "engineering",
+    "enterprise transformation", "governance", "implementation",
+    "operating model", "operations", "organization design", "process",
+    "program management", "system design", "transformation", "workflow",
+    "架构", "架構", "能力建设", "能力建設", "交付模式", "工程",
+    "企业转型", "企業轉型", "治理", "实施", "實施", "运营模式", "營運模式",
+    "运营", "營運", "组织设计", "組織設計", "流程", "项目管理", "項目管理",
+    "系统设计", "系統設計", "转型", "轉型", "工作流",
+}
+
+TERRAIN_TERMS = {
+    "agriculture", "biodiversity", "conservation", "ecosystem", "ecology",
+    "environment", "forestry", "land use", "natural resources", "ocean",
+    "rural", "soil", "watershed", "wetland", "wildlife", "农业", "農業",
+    "生物多样性", "生物多樣性", "保育", "生态系统", "生態系統", "生态",
+    "生態", "环境", "環境", "林业", "林業", "土地利用", "自然资源",
+    "自然資源", "海洋", "乡村", "鄉村", "土壤", "流域", "湿地", "濕地",
+    "野生动物", "野生動物",
+}
+
+ORBIT_TERMS = {
+    "advanced computing", "aerospace", "ai", "artificial intelligence",
+    "automation", "biotech", "cloud", "cyber", "data science", "deep tech",
+    "machine learning", "quantum", "robot", "robotics", "semiconductor",
+    "software infrastructure", "space", "人工智能", "自动化", "自動化",
+    "生物科技", "云计算", "雲端運算", "网络安全", "網絡安全", "数据科学",
+    "數據科學", "深科技", "机器学习", "機器學習", "量子", "机器人",
+    "機械人", "半导体", "半導體", "软件基础设施", "軟件基礎設施", "航天",
+}
+
+
+TEMPLATE_TERM_SETS = {
+    "executive": EXECUTIVE_TERMS,
+    "spectrum": SPECTRUM_TERMS,
+    "atlas": ATLAS_TERMS,
+    "horizon": HORIZON_TERMS,
+    "maison": MAISON_TERMS,
+    "blueprint": BLUEPRINT_TERMS,
+    "terrain": TERRAIN_TERMS,
+    "orbit": ORBIT_TERMS,
 }
 
 
@@ -121,28 +221,57 @@ def select_template(subject_text, requested="auto"):
 
     normalized = subject_text.casefold()
     scores = {
-        "executive": topic_match_count(normalized, EXECUTIVE_TERMS),
-        "spectrum": topic_match_count(normalized, SPECTRUM_TERMS),
-        "atlas": topic_match_count(normalized, ATLAS_TERMS),
-        "horizon": topic_match_count(normalized, HORIZON_TERMS),
+        name: topic_match_count(normalized, terms)
+        for name, terms in TEMPLATE_TERM_SETS.items()
     }
     highest = max(scores.values())
     if highest == 0:
-        return "executive"
+        digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+        names = tuple(TEMPLATES)
+        return names[int.from_bytes(digest[:2], "big") % len(names)]
     winners = [name for name, score in scores.items() if score == highest]
-    return winners[0] if len(winners) == 1 else "executive"
+    if len(winners) == 1:
+        return winners[0]
+    digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+    return winners[int.from_bytes(digest[:2], "big") % len(winners)]
 
 
-@lru_cache(maxsize=1)
-def bundled_horizon_image_data_uri():
-    """Return the bundled Horizon landscape as a portable embedded image."""
-    image_path = (
-        Path(__file__).resolve().parent.parent
-        / "assets"
-        / "horizon-landscape.jpg"
-    )
+def select_adaptive_companion(subject_text):
+    """Choose a non-default companion for the default two-PDF workflow."""
+    selected = select_template(subject_text, "auto")
+    if selected != "executive":
+        return selected
+    normalized = subject_text.casefold()
+    candidates = tuple(name for name in TEMPLATES if name != "executive")
+    scores = {
+        name: topic_match_count(normalized, TEMPLATE_TERM_SETS[name])
+        for name in candidates
+    }
+    highest = max(scores.values())
+    winners = [name for name, score in scores.items() if score == highest]
+    digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+    return winners[int.from_bytes(digest[:2], "big") % len(winners)]
+
+
+@lru_cache(maxsize=8)
+def bundled_template_image_data_uri(template):
+    """Return a bundled editorial image as a portable embedded JPEG."""
+    filenames = {
+        "horizon": "horizon-landscape.jpg",
+        "maison": "maison-interior.jpeg",
+        "terrain": "terrain-aerial.jpeg",
+        "orbit": "orbit-scientific.jpeg",
+    }
+    if template not in filenames:
+        raise ValueError(f"Template '{template}' has no bundled image.")
+    image_path = Path(__file__).resolve().parent.parent / "assets" / filenames[template]
     payload = base64.b64encode(image_path.read_bytes()).decode("ascii")
     return f"data:image/jpeg;base64,{payload}"
+
+
+def bundled_horizon_image_data_uri():
+    """Compatibility wrapper for Horizon's bundled landscape."""
+    return bundled_template_image_data_uri("horizon")
 
 
 def cover_art_html(template, cover_image=None):
@@ -185,7 +314,56 @@ def cover_art_html(template, cover_image=None):
             <span class="atlas-axis axis-y"></span>
         </div>
         """
-    horizon_image = cover_image or bundled_horizon_image_data_uri()
+    if template == "maison":
+        photo = cover_image or bundled_template_image_data_uri("maison")
+        return f"""
+        <div class="cover-art maison-art" aria-hidden="true">
+            <img class="cover-photo maison-photo" src="{photo}" alt="">
+            <span class="maison-photo-shade"></span>
+            <span class="maison-sector">GLOBAL PERSPECTIVE · RESEARCH SERIES</span>
+            <span class="maison-folio">01</span>
+        </div>
+        """
+    if template == "blueprint":
+        return """
+        <div class="cover-art blueprint-art" aria-hidden="true">
+            <span class="blueprint-datum datum-a"></span>
+            <span class="blueprint-datum datum-b"></span>
+            <span class="blueprint-axis blueprint-axis-x"></span>
+            <span class="blueprint-axis blueprint-axis-y"></span>
+            <span class="blueprint-node node-a">A</span>
+            <span class="blueprint-node node-b">B</span>
+            <span class="blueprint-node node-c">C</span>
+            <span class="blueprint-ruler"></span>
+        </div>
+        """
+    if template == "terrain":
+        photo = cover_image or bundled_template_image_data_uri("terrain")
+        return f"""
+        <div class="cover-art terrain-art" aria-hidden="true">
+            <img class="cover-photo terrain-aerial" src="{photo}" alt="">
+            <span class="terrain-wash"></span>
+            <span class="terrain-grid"></span>
+            <span class="terrain-contour contour-a"></span>
+            <span class="terrain-contour contour-b"></span>
+            <span class="terrain-datum">DATUM WGS 84 / ELEV. 1,274 M</span>
+        </div>
+        """
+    if template == "orbit":
+        return """
+        <div class="cover-art orbit-art" aria-hidden="true">
+            <span class="orbit-field"></span>
+            <span class="orbit-ring ring-a"></span>
+            <span class="orbit-ring ring-b"></span>
+            <span class="orbit-ring ring-c"></span>
+            <span class="orbit-vector"></span>
+            <span class="orbit-node orbit-node-a">A</span>
+            <span class="orbit-node orbit-node-b">B</span>
+            <span class="orbit-node orbit-node-c">C</span>
+            <span class="orbit-ruler"></span>
+        </div>
+        """
+    horizon_image = cover_image or bundled_template_image_data_uri("horizon")
     return f"""
     <div class="cover-art horizon-art" aria-hidden="true">
         <img class="cover-photo" src="{horizon_image}" alt="">
@@ -888,6 +1066,143 @@ RESPONSIVE_COVER_CSS = """
 .cover.cover-title-very-long.cover-horizon.cover-meta-3 .cover-record,
 .cover.cover-title-very-long.cover-horizon.cover-meta-4 .cover-record {
     top: 136mm;
+}
+"""
+
+SHARED_REFERENCE_FEATURE_CSS = """
+.toc-special-cont {
+    page-break-before: always;
+}
+.horizon-feature-page {
+    page: horizonfeature;
+    position: relative;
+    min-height: 245mm;
+    page-break-after: always;
+    color: __TEXT__;
+}
+.horizon-feature-running,
+.horizon-feature-figure-label,
+.horizon-feature-insight > span,
+.horizon-feature-path > span {
+    font-family: __FONT_MONO__;
+    font-size: 6.8pt;
+    font-weight: 700;
+    letter-spacing: 1.1pt;
+    text-transform: uppercase;
+    color: __ACCENT__;
+}
+.horizon-feature-heading-row {
+    display: grid;
+    grid-template-columns: 1fr 48mm;
+    gap: 12mm;
+    align-items: end;
+    margin: 8mm 0 8mm;
+}
+.horizon-feature-heading-row h2 {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 31pt;
+    line-height: 1.04;
+}
+.horizon-feature-heading-row h2::before {
+    display: none;
+}
+.horizon-feature-heading-row p {
+    margin: 0;
+    font-size: 9.4pt;
+    line-height: 1.45;
+    color: __MUTED__;
+}
+.horizon-feature-figure-label {
+    margin: 0 0 2.5mm;
+    color: __MUTED__;
+}
+.horizon-feature-photo {
+    position: relative;
+    height: 85mm;
+    overflow: hidden;
+    background: __PALE__;
+}
+.horizon-feature-photo img {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    object-fit: cover;
+}
+.horizon-feature-datum {
+    position: absolute;
+    left: 9mm;
+    top: 0;
+    width: 2mm;
+    height: 22mm;
+    background: __ACCENT__;
+}
+.horizon-feature-insight {
+    position: relative;
+    z-index: 2;
+    width: 82mm;
+    min-height: 38mm;
+    box-sizing: border-box;
+    margin: -30mm 9mm 0 auto;
+    padding: 6mm 7mm;
+    background: __DARK__;
+    color: #fff;
+    box-shadow: 0 3mm 8mm rgba(0,0,0,0.22);
+}
+.horizon-feature-insight p {
+    margin: 3mm 0 0;
+    font-family: __FONT_DISPLAY__;
+    font-size: 16pt;
+    line-height: 1.18;
+}
+.horizon-feature-insight-long p {
+    font-size: 12.5pt;
+}
+.horizon-feature-caption {
+    width: 100mm;
+    margin: 3mm 0 0;
+    font-family: __FONT_MONO__;
+    font-size: 6.3pt;
+    line-height: 1.45;
+    color: __MUTED__;
+}
+.horizon-feature-lower {
+    display: grid;
+    grid-template-columns: 1fr 67mm;
+    gap: 14mm;
+    margin-top: 10mm;
+}
+.horizon-feature-narrative h3 {
+    margin: 0 0 4mm;
+    font-size: 17pt;
+}
+.horizon-feature-narrative p {
+    margin: 0;
+    font-size: 9.2pt;
+    line-height: 1.55;
+}
+.horizon-feature-path ol {
+    margin: 3mm 0 0;
+    padding: 0;
+    list-style: none;
+}
+.horizon-feature-path li {
+    display: grid;
+    grid-template-columns: 8mm 1fr;
+    gap: 2mm;
+    padding: 2.3mm 0;
+    border-bottom: 0.5pt solid __RULE__;
+}
+.horizon-feature-path li span {
+    font-family: __FONT_MONO__;
+    font-size: 6.5pt;
+    color: __ACCENT__;
+}
+.horizon-feature-path li strong {
+    font-size: 8.2pt;
+    line-height: 1.3;
 }
 """
 
@@ -1875,6 +2190,578 @@ TEMPLATE_CSS = {
     border-left: 2mm solid #0062ff;
 }
 """,
+    "maison": """
+@page toc {
+    margin: 17mm 17mm 18mm;
+    background: #f4f2ef;
+    @top-left { content: "ALEXANDRIA  /  EDITORIAL RESEARCH"; border: 0; }
+    @top-right { content: "MAISON"; border: 0; }
+}
+.template-maison .cover {
+    padding: 16mm 17mm;
+    background: #f4f2ef;
+}
+.template-maison .cover-topline {
+    color: #fff;
+    border-color: rgba(255,255,255,0.48);
+}
+.maison-art {
+    inset: 0 0 auto;
+    height: 96mm;
+}
+.maison-art .maison-photo {
+    opacity: 1;
+}
+.maison-photo-shade {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.28), transparent 58%, rgba(0,0,0,0.22));
+}
+.maison-sector,
+.maison-folio {
+    position: absolute;
+    bottom: 7mm;
+    z-index: 2;
+    font-family: __FONT_MONO__;
+    font-size: 6.5pt;
+    letter-spacing: 1.1pt;
+    color: #fff;
+}
+.maison-sector { left: 17mm; }
+.maison-folio { right: 17mm; font-size: 8pt; }
+.template-maison .cover-copy {
+    width: 176mm;
+    margin: 97mm auto 0;
+    text-align: center;
+}
+.template-maison .cover-kicker {
+    margin-bottom: 6mm;
+    color: #b39a61;
+}
+.template-maison .cover h1,
+.template-maison .cover-title-accent {
+    display: block;
+    padding: 0;
+    background: transparent;
+    color: #1a1a1a;
+    font-size: 42pt;
+    font-weight: 500;
+    line-height: 0.98;
+}
+.template-maison .cover .subtitle {
+    max-width: 128mm;
+    margin: 7mm auto 0;
+    font-size: 11pt;
+}
+.template-maison .cover-record {
+    left: 17mm;
+    right: 17mm;
+    bottom: 15mm;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-color: #c9c1b5;
+}
+.template-maison .cover-record .meta-cell {
+    min-width: 0;
+}
+.toc-maison {
+    position: relative;
+    background: #f4f2ef;
+}
+.toc-maison .toc-title {
+    margin: 0 0 10mm -2mm;
+    font-size: 63pt;
+    font-weight: 500;
+    letter-spacing: -2pt;
+}
+.toc-maison .toc-intro {
+    width: 44mm;
+    border: 0;
+    font-family: __FONT_DISPLAY__;
+    font-size: 12pt;
+}
+.maison-toc-note {
+    position: absolute;
+    left: 0;
+    top: 82mm;
+    width: 48mm;
+    min-height: 94mm;
+    padding-top: 5mm;
+    border-top: 0.7pt solid #b39a61;
+}
+.maison-toc-note span,
+.maison-toc-note strong {
+    display: block;
+}
+.maison-toc-note span {
+    font-family: __FONT_MONO__;
+    font-size: 6.5pt;
+    letter-spacing: 1pt;
+    text-transform: uppercase;
+    color: #b39a61;
+}
+.maison-toc-note strong {
+    margin-top: 5mm;
+    font-family: __FONT_DISPLAY__;
+    font-size: 16pt;
+    line-height: 1.25;
+}
+.toc-maison .toc-list {
+    margin: -18mm 0 0 62mm;
+}
+.toc-maison .toc-entry {
+    grid-template-columns: 10mm 1fr 10mm;
+}
+.toc-maison .toc-entry-title {
+    font-family: __FONT_DISPLAY__;
+    font-size: 15pt;
+    font-weight: 500;
+}
+.maison-feature-photo {
+    filter: saturate(0.78) contrast(0.95);
+}
+.maison-feature-insight {
+    background: #1a1a1a;
+}
+.template-maison h1,
+.template-maison h2,
+.template-maison h3 {
+    font-weight: 500;
+}
+.template-maison .insight-panel {
+    background: #1a1a1a;
+}
+""",
+    "blueprint": """
+@page toc {
+    margin: 17mm;
+    @top-left { content: "ALEXANDRIA  /  SYSTEM MAP"; border: 0; }
+    @top-right { content: "BLUEPRINT"; border: 0; }
+}
+.template-blueprint .cover {
+    padding: 15mm 17mm;
+    background:
+        linear-gradient(to right, rgba(74,159,216,0.10) 0.35pt, transparent 0.35pt),
+        linear-gradient(to bottom, rgba(74,159,216,0.08) 0.35pt, transparent 0.35pt),
+        #fff;
+    background-size: 24mm 24mm;
+}
+.template-blueprint .cover-copy {
+    width: 170mm;
+    margin-top: 26mm;
+}
+.template-blueprint .cover h1,
+.template-blueprint .cover-title-accent {
+    padding: 0;
+    background: transparent;
+    color: #1a1a1a;
+    font-size: 38pt;
+    font-weight: 760;
+    line-height: 1.02;
+}
+.template-blueprint .cover-title-accent {
+    display: inline-block;
+    margin-top: 3mm;
+    padding: 2mm 4mm;
+    background: #1a1a1a;
+    color: #fff;
+}
+.template-blueprint .cover .subtitle {
+    width: 116mm;
+}
+.blueprint-art {
+    inset: 105mm 17mm 42mm;
+    border: 0.7pt solid #4a9fd8;
+}
+.blueprint-datum {
+    position: absolute;
+    border: 0.7pt solid #4a9fd8;
+}
+.datum-a { left: 14mm; top: 18mm; width: 48mm; height: 42mm; }
+.datum-b { right: 14mm; bottom: 18mm; width: 54mm; height: 45mm; }
+.blueprint-axis {
+    position: absolute;
+    background: #4a9fd8;
+}
+.blueprint-axis-x { left: 0; top: 50%; width: 100%; height: 0.5pt; }
+.blueprint-axis-y { left: 50%; top: 0; width: 0.5pt; height: 100%; }
+.blueprint-node {
+    position: absolute;
+    width: 19mm;
+    height: 19mm;
+    padding-top: 5mm;
+    box-sizing: border-box;
+    border: 0.7pt solid #4a9fd8;
+    border-radius: 50%;
+    background: #fff;
+    text-align: center;
+    font-family: __FONT_MONO__;
+    font-size: 7pt;
+    color: #1a1a1a;
+}
+.node-a { left: 22mm; top: 29mm; }
+.node-b { left: 78mm; top: 63mm; }
+.node-c { right: 24mm; bottom: 31mm; }
+.blueprint-ruler,
+.orbit-ruler {
+    position: absolute;
+    left: 8mm;
+    right: 8mm;
+    bottom: 6mm;
+    height: 3mm;
+    border-top: 0.6pt solid #4a9fd8;
+    background: repeating-linear-gradient(to right, #4a9fd8 0 0.5pt, transparent 0.5pt 7mm);
+}
+.template-blueprint .cover-record {
+    background: #fff;
+}
+.toc-blueprint {
+    background:
+        linear-gradient(to right, rgba(74,159,216,0.08) 0.35pt, transparent 0.35pt),
+        linear-gradient(to bottom, rgba(74,159,216,0.07) 0.35pt, transparent 0.35pt);
+    background-size: 30mm 30mm;
+}
+.toc-blueprint .toc-title {
+    font-size: 43pt;
+    font-weight: 760;
+}
+.blueprint-toc-map {
+    display: grid;
+    grid-template-columns: auto 1fr auto 1fr auto;
+    gap: 3mm;
+    align-items: center;
+    margin: 0 0 8mm;
+    padding: 4mm;
+    border: 0.7pt solid #4a9fd8;
+    font-family: __FONT_MONO__;
+    font-size: 6.5pt;
+    letter-spacing: 0.8pt;
+}
+.blueprint-toc-map i {
+    height: 0.5pt;
+    background: #4a9fd8;
+}
+.blueprint-feature-page {
+    background:
+        linear-gradient(to right, rgba(74,159,216,0.07) 0.35pt, transparent 0.35pt),
+        #fff;
+    background-size: 30mm 30mm;
+}
+.blueprint-feature-photo {
+    border: 0.7pt solid #4a9fd8;
+    filter: grayscale(1) contrast(1.1);
+}
+.blueprint-feature-photo img {
+    width: 195%;
+    max-width: none;
+    object-position: left center;
+}
+.blueprint-feature-insight {
+    background: #1a1a1a;
+    border-radius: 0;
+}
+.template-blueprint h1,
+.template-blueprint h2,
+.template-blueprint h3 {
+    font-weight: 720;
+}
+""",
+    "terrain": """
+@page toc {
+    margin: 17mm;
+    background: #f5f3ee;
+    @top-left { content: "ALEXANDRIA  /  FIELD INDEX"; border: 0; }
+    @top-right { content: "TERRAIN"; border: 0; }
+}
+.template-terrain .cover {
+    padding: 16mm 17mm;
+    background: #f5f3ee;
+}
+.terrain-art {
+    inset: 0 0 auto;
+    height: 166mm;
+    background: #1b3a28;
+}
+.terrain-art .terrain-aerial {
+    opacity: 1;
+}
+.terrain-wash {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(15,45,28,0.12), rgba(15,45,28,0.64));
+}
+.terrain-grid {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(to right, rgba(255,255,255,0.22) 0.4pt, transparent 0.4pt),
+        linear-gradient(to bottom, rgba(255,255,255,0.18) 0.4pt, transparent 0.4pt);
+    background-size: 40mm 40mm;
+}
+.terrain-contour {
+    position: absolute;
+    border: 0.7pt solid rgba(255,255,255,0.55);
+    border-radius: 50%;
+}
+.contour-a { left: 18mm; bottom: 13mm; width: 68mm; height: 68mm; }
+.contour-b { left: 31mm; bottom: 26mm; width: 42mm; height: 42mm; }
+.terrain-datum {
+    position: absolute;
+    left: 17mm;
+    bottom: 8mm;
+    font-family: __FONT_MONO__;
+    font-size: 6.2pt;
+    letter-spacing: 0.9pt;
+    color: #fff;
+}
+.template-terrain .cover-topline {
+    color: #fff;
+    border-color: rgba(255,255,255,0.5);
+}
+.template-terrain .cover-copy {
+    width: 174mm;
+    margin-top: 28mm;
+}
+.template-terrain .cover h1,
+.template-terrain .cover-title-accent {
+    display: block;
+    padding: 0;
+    background: transparent;
+    color: #fff;
+    font-size: 39pt;
+    font-weight: 650;
+}
+.template-terrain .cover .subtitle {
+    max-width: 126mm;
+    color: #e6eee7;
+}
+.template-terrain .cover-record {
+    bottom: 17mm;
+    padding: 8mm;
+    border: 0;
+    background: #f5f3ee;
+}
+.toc-terrain .toc-title {
+    font-size: 42pt;
+    color: #1b3a28;
+}
+.terrain-toc-map {
+    position: relative;
+    height: 50mm;
+    margin: 0 0 7mm;
+    overflow: hidden;
+    background: #1b3a28;
+}
+.terrain-toc-map img {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    object-fit: cover;
+    opacity: 0.64;
+}
+.terrain-toc-map span {
+    position: absolute;
+    left: 5mm;
+    top: 5mm;
+    font-family: __FONT_MONO__;
+    font-size: 6.5pt;
+    letter-spacing: 1pt;
+    color: #fff;
+}
+.toc-terrain .toc-entry-title {
+    font-size: 12.5pt;
+    color: #1b3a28;
+}
+.terrain-feature-photo {
+    border-bottom: 3mm solid #1b3a28;
+}
+.terrain-feature-insight {
+    background: #1b3a28;
+}
+.template-terrain h1,
+.template-terrain h2,
+.template-terrain h3 {
+    color: #1b3a28;
+}
+""",
+    "orbit": """
+@page toc {
+    margin: 17mm;
+    @top-left { content: "ALEXANDRIA  /  ORIENTATION"; border: 0; }
+    @top-right { content: "ORBIT"; border: 0; }
+}
+.template-orbit .cover {
+    padding: 15mm 17mm;
+    background: #fff;
+}
+.template-orbit .cover-copy {
+    width: 176mm;
+    margin-top: 26mm;
+}
+.template-orbit .cover h1,
+.template-orbit .cover-title-accent {
+    display: block;
+    padding: 0;
+    background: transparent;
+    color: #1a1a1a;
+    font-size: 40pt;
+    font-weight: 760;
+    line-height: 1;
+}
+.template-orbit .cover .subtitle {
+    max-width: 122mm;
+    font-size: 11pt;
+}
+.orbit-art {
+    inset: 116mm 0 57mm;
+}
+.orbit-field {
+    position: absolute;
+    inset: 0;
+    background: #0062ff;
+}
+.orbit-ring {
+    position: absolute;
+    border: 0.65pt solid rgba(255,255,255,0.58);
+    border-radius: 50%;
+}
+.ring-a { left: 20mm; top: 12mm; width: 88mm; height: 88mm; }
+.ring-b { left: 39mm; top: 31mm; width: 50mm; height: 50mm; }
+.ring-c { right: 22mm; top: 14mm; width: 72mm; height: 72mm; }
+.orbit-vector {
+    position: absolute;
+    left: 15mm;
+    top: 50%;
+    width: 176mm;
+    height: 0.6pt;
+    background: rgba(255,255,255,0.62);
+    transform: rotate(-13deg);
+}
+.orbit-node {
+    position: absolute;
+    width: 8mm;
+    height: 8mm;
+    padding-top: 2mm;
+    box-sizing: border-box;
+    border-radius: 50%;
+    background: #fff;
+    text-align: center;
+    font-family: __FONT_MONO__;
+    font-size: 6pt;
+    color: #0062ff;
+}
+.orbit-node-a { left: 32mm; top: 26mm; }
+.orbit-node-b { left: 91mm; top: 61mm; }
+.orbit-node-c { right: 39mm; top: 32mm; }
+.orbit-art .orbit-ruler {
+    border-color: rgba(255,255,255,0.74);
+    background: repeating-linear-gradient(to right, #fff 0 0.5pt, transparent 0.5pt 8mm);
+}
+.template-orbit .cover-record {
+    bottom: 14mm;
+}
+.toc-orbit {
+    position: relative;
+    background: #0062ff;
+}
+.toc-orbit::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 37%;
+    background: #fff;
+}
+.toc-orbit::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    right: 14mm;
+    bottom: 20mm;
+    width: 78mm;
+    height: 78mm;
+    border: 0.6pt solid rgba(255,255,255,0.46);
+    border-radius: 50%;
+}
+.toc-orbit > * {
+    position: relative;
+    z-index: 1;
+}
+.toc-orbit .toc-kicker,
+.toc-orbit .toc-title,
+.toc-orbit .toc-intro {
+    width: 55mm;
+}
+.toc-orbit .toc-title {
+    font-size: 40pt;
+}
+.orbit-toc-field {
+    position: absolute;
+    right: 8mm;
+    top: 24mm;
+    width: 91mm;
+    height: 49mm;
+    color: #fff;
+}
+.orbit-toc-field strong {
+    position: relative;
+    z-index: 2;
+    font-family: __FONT_MONO__;
+    font-size: 7pt;
+    letter-spacing: 1pt;
+}
+.orbit-toc-ring {
+    position: absolute;
+    right: 0;
+    top: -11mm;
+    width: 50mm;
+    height: 50mm;
+    border: 0.6pt solid rgba(255,255,255,0.6);
+    border-radius: 50%;
+}
+.toc-orbit .toc-list {
+    margin-left: 61mm;
+    color: #fff;
+}
+.toc-orbit .toc-entry {
+    border-color: rgba(255,255,255,0.38);
+    padding: 2.5mm 0 2mm;
+}
+.toc-orbit .toc-entry-title,
+.toc-orbit .toc-page-number {
+    color: #fff;
+}
+.toc-orbit .toc-summary {
+    margin-top: 0.6mm;
+    font-size: 7.5pt;
+    line-height: 1.25;
+    color: #dbe7ff;
+}
+.orbit-feature-photo {
+    border: 0;
+}
+.orbit-feature-photo img {
+    width: 195%;
+    max-width: none;
+    object-position: left center;
+}
+.orbit-feature-insight {
+    background: #0062ff;
+    border-radius: 1.5mm;
+}
+.template-orbit h1,
+.template-orbit h2,
+.template-orbit h3 {
+    font-weight: 720;
+}
+.template-orbit .insight-panel,
+.template-orbit .takeaway-band {
+    background: #0062ff;
+}
+""",
 }
 
 
@@ -1906,21 +2793,39 @@ def build_css(
         "__DARK__": spec.dark,
         "__MUTED__": spec.muted,
         "__PALE__": spec.pale,
-        "__TEXT__": "#233a2b" if template == "atlas" else "#172330",
+        "__TEXT__": {
+            "atlas": "#233a2b",
+            "terrain": "#233a2b",
+            "maison": "#2b2926",
+        }.get(template, "#172330"),
         "__LINK__": spec.accent,
         "__RULE__": {
             "executive": "#c8d3d8",
             "spectrum": "#d9dce5",
             "atlas": "#cad4c8",
             "horizon": "#d7dee8",
+            "maison": "#d8d2c8",
+            "blueprint": "#d8e7f0",
+            "terrain": "#d6ddd0",
+            "orbit": "#d8e2f2",
         }[template],
-        "__ROW__": "#f6f8f9" if template != "atlas" else "#f5f7f3",
+        "__ROW__": {
+            "atlas": "#f5f7f3",
+            "terrain": "#f5f3ee",
+            "maison": "#f4f2ef",
+            "blueprint": "#f7f8fa",
+            "orbit": "#f7f8fa",
+        }.get(template, "#f6f8f9"),
         "__INSIGHT_LABEL__": insight_label,
         "__INSIGHT_ACCENT__": {
             "executive": "#7fd6cf",
             "spectrum": "#c9ff17",
             "atlas": "#b9d5bf",
             "horizon": "#dbeaff",
+            "maison": "#e6d9bc",
+            "blueprint": "#d9effc",
+            "terrain": "#a8ccaf",
+            "orbit": "#dbe7ff",
         }[template],
         "__TAKEAWAY_LABEL__": takeaway_label,
         "__TAKEAWAY__": spec.accent,
@@ -1929,9 +2834,18 @@ def build_css(
             "spectrum": "#d9ff39",
             "atlas": "#d9eadc",
             "horizon": "#dbeaff",
+            "maison": "#f2e8d2",
+            "blueprint": "#d9effc",
+            "terrain": "#d6e4d8",
+            "orbit": "#dbe7ff",
         }[template],
     }
     css = COMMON_CSS
     for placeholder, value in values.items():
         css = css.replace(placeholder, value)
-    return css + TEMPLATE_CSS[template] + RESPONSIVE_COVER_CSS
+    shared_feature = (
+        SHARED_REFERENCE_FEATURE_CSS
+        if template in {"maison", "blueprint", "terrain", "orbit"}
+        else ""
+    )
+    return css + shared_feature + TEMPLATE_CSS[template] + RESPONSIVE_COVER_CSS

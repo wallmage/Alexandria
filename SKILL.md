@@ -5,7 +5,7 @@ description: Use when a user asks for deep research, a deep dive, investigation,
 
 # Alexandria
 
-Produce a source-backed research report that is useful to a decision-maker and pleasant to read. The normal deliverables are one Markdown source file and one visually checked PDF.
+Produce a source-backed research report that is useful to a decision-maker and pleasant to read. The normal deliverables are one Markdown source file and one or two visually checked PDFs, according to the template-choice rule below.
 
 Resolve `SKILL_ROOT` to the absolute directory containing this `SKILL.md` before running bundled scripts. Never assume the current working directory is the skill directory, and never install dependencies into the user's project.
 
@@ -25,9 +25,9 @@ Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar
 
 ## 1. Frame the assignment
 
-Infer what you safely can from the request and conversation. Immediately after the user's first research request, acknowledge the topic, then read `references/pdf-templates.md` and ask its four intake questions together in one non-blocking commentary update: template, prepared by, client name, and confidentiality. Present all four named templates and retain the full two-sentence look, color, and topic-fit description for each; do not compress them into labels. This is the normal intake, not four separate turns.
+Infer what you safely can from the request and conversation. Immediately after the user's first research request, acknowledge the topic, then read `references/pdf-templates.md` and ask its four intake questions together in one non-blocking commentary update: template, prepared by, client name, and confidentiality. Present all eight named templates with their complete one-sentence look, color, and topic-fit descriptions; do not compress them into labels. This is the normal intake, not four separate turns.
 
-Begin research in the same turn immediately after sending the questions. Never wait for an answer or make the intake a gate. If the user answers while research is underway, incorporate the supplied preferences into final production and keep the stated defaults for everything else. Resolve the final values immediately before rendering. If no answer arrives, finish normally: adapt the template to the topic, fall back to Executive when ambiguous, use Alexandria under “Prepared by,” omit the client field, use today's date, and leave confidentiality Off.
+Begin research in the same turn immediately after sending the questions. Never wait for an answer or make the intake a gate. If the user answers while research is underway, incorporate the supplied preferences into final production and keep the stated defaults for everything else. Resolve the final values immediately before rendering. If no answer arrives, finish normally with two PDFs containing identical report content: Executive plus the non-Executive template selected for the topic. Use Alexandria under “Prepared by,” omit the client field, use today's date, and leave confidentiality Off. An explicit template choice produces one PDF.
 
 Determine:
 
@@ -275,13 +275,15 @@ Repeat the language-specific hard length flags from Step 7 in the PDF validation
 
 Add `--client "$CLIENT_NAME"` only when the user supplied a non-empty client. Add `--confidential` only when the user turned confidentiality On. Add `--cover-image "$COVER_IMAGE"` only for a verified local raster image inside the report directory.
 
+When the user did not choose a template, render `REPORT_PDF_DEFAULT` with `--template executive`, call `select_adaptive_companion()` from `scripts/pdf_templates.py` on the report title and opening text, then render `REPORT_PDF_ADAPTIVE` with that returned template. Reuse the exact Markdown and Rewild receipt; do not research, redraft, or rerun Rewild merely to change the layout. The second PDF is permitted because it adds no model-writing tokens and normally costs only one extra local render; abandon it only if that extra render actually exceeds five minutes or the runtime cannot complete it.
+
 Render the PDF to images and inspect every page or a complete contact sheet. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean.
 
 Do not use file size as a content or quality signal.
 
 ## 9. Deliver
 
-Provide clickable links to the PDF and Markdown source. Summarize the central conclusion in one or two sentences and note any material evidence limitation. Do not paste the whole report into chat unless the user asks.
+Provide clickable links to every final PDF and the Markdown source. Summarize the central conclusion in one or two sentences and note any material evidence limitation. Do not paste the whole report into chat unless the user asks.
 
 The task is complete only when:
 
@@ -289,4 +291,4 @@ The task is complete only when:
 - the evidence ledger and report agree;
 - deterministic checks pass;
 - the final PDF was reopened and visually inspected;
-- both deliverables exist at the reported paths.
+- every promised deliverable exists at the reported paths.

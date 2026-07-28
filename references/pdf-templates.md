@@ -7,29 +7,37 @@ Use this reference when acknowledging a new Alexandria assignment and again befo
 Immediately after the user's first Deep Research request, acknowledge the topic and ask all four questions together in a commentary update. Put the template question first and write in the user's language.
 
 1. **What look and feel do you want?**
-   - **A — Executive (Default).** A restrained consulting style built from ivory, navy, and teal, with editorial headings, precise rules, and evidence-led page layouts. It suits strategy, companies, finance, policy, organizations, and general business research.
-   - **B — Spectrum.** A contemporary system of white, cobalt, violet, electric lime, and black, with flowing bands and bold signal panels. It suits technology, innovation, products, startups, and future-facing subjects.
-   - **C — Atlas.** A field-journal style built from white, forest green, sage, quiet typography, and subject-relevant editorial imagery. It suits people, biography, history, culture, art, society, natural science, and geography.
-   - **D — Horizon.** A sharp black, white, and cobalt-blue system with panoramic photography, floating observation cards, and strong editorial contrast. It suits infrastructure, climate and energy, geopolitics, supply chains, resilience, cities, and place-based market signals.
+   - **A — Executive (Default).** Restrained ivory, navy, and teal consulting pages with editorial hierarchy and precise evidence layouts, best for strategy, finance, policy, companies, and general business research.
+   - **B — Spectrum.** White, cobalt, violet, lime, and black form a bold contemporary signal system, best for digital products, media, consumer technology, startups, and future-facing subjects.
+   - **C — Atlas.** Forest green, sage, quiet serif typography, and field-journal imagery create an editorial record, best for people, history, culture, art, society, and geography.
+   - **D — Horizon.** Black, white, cobalt blue, panoramic photography, and floating observation cards create a decisive field-note aesthetic, best for infrastructure, energy, geopolitics, supply chains, resilience, and cities.
+   - **E — Maison.** Warm ivory, monumental serif typography, refined photography, and generous editorial space create a premium magazine feel, best for luxury, hospitality, retail, travel, real estate, food, and consumer brands.
+   - **F — Blueprint.** Black, white, and technical cyan combine with grids, datums, nodes, and process maps, best for operating models, organization design, engineering, governance, implementation, and transformation.
+   - **G — Terrain.** Forest green, cream, aerial imagery, contour lines, and cartographic notation create a place-based field atlas, best for ecology, conservation, agriculture, water, land use, and natural resources.
+   - **H — Orbit.** Electric cobalt, black, white, orbital geometry, scientific imagery, and measured typography create a precision research system, best for AI, semiconductors, robotics, advanced science, and deep technology.
 2. **Who should appear under “Prepared by”?** Default: Alexandria.
 3. **Do you want a client name in the report?** Default: blank; omit the client field entirely.
 4. **Do you want confidentiality wording and stamps on the report?** Default: Off. Explain that turning it on adds “Strictly Confidential” and the footer “Controlled copy · Not for external distribution.”
 
 Do not ask these as four separate turns, and do not wait for an answer. Start framing and researching the topic immediately after sending the questions. Treat the questions as optional production preferences, never as permission to begin.
 
-Keep the adaptive/default values active while research continues. If the user replies during the work, apply every supplied answer to the final production and keep the defaults for unanswered items. Resolve the final values immediately before rendering; if an answer arrives after a draft PDF was rendered but before delivery, rerender it. If no answer arrives, finish and deliver with the adaptive/default values.
+Keep the adaptive/default values active while research continues. If the user replies during the work, apply every supplied answer to the final production and keep the defaults for unanswered items. Resolve the final values immediately before rendering; if an answer arrives after a draft PDF was rendered but before delivery, rerender it. If no answer arrives, finish and deliver two PDFs containing the same report content: Executive as the default version and one topic-adaptive companion.
 
 ## Select the template
 
 An explicit template choice always wins. Without one, adapt from the topic:
 
 - **Executive:** business, organizations, finance, policy, law, regulation, competition, industry, investment, leadership, or strategy.
-- **Spectrum:** technology, AI, software, digital products, startups, innovation, automation, robotics, cyber, biotech, or future scenarios.
+- **Spectrum:** digital products, media, entertainment, consumer technology, platforms, startups, creator businesses, gaming, or future scenarios.
 - **Atlas:** people, biography, history, culture, art, society, natural science, or geography.
 - **Horizon:** infrastructure, climate risk, energy, geopolitics, supply chains, logistics, resilience, security, cities, transport, water, or place-based market signals.
-- **Ambiguous or evenly mixed:** Executive.
+- **Maison:** luxury, hospitality, retail, travel, service design, premium consumer brands, food, wellness, or real estate.
+- **Blueprint:** operating models, organization design, operations, process, governance, implementation, engineering, workflow, or enterprise transformation.
+- **Terrain:** ecology, conservation, agriculture, biodiversity, land use, forestry, watersheds, wetlands, oceans, or natural resources.
+- **Orbit:** AI, machine learning, semiconductors, robotics, automation, cyber, data science, biotech, aerospace, quantum, or deep technology.
+- **Ambiguous or evenly mixed:** use a stable topic hash to distribute the adaptive version across the portfolio instead of repeatedly choosing the same design.
 
-Pass `--template auto` when the renderer should make the same deterministic selection. Pass the exact named template when the user chose one.
+An explicit template choice produces one PDF and always wins. Without a choice, render Executive plus the deterministic non-Executive companion selected for the topic; both use the already-approved Markdown, sources, citations, and Rewild receipt, so the second version adds no research or writing tokens and only one additional local rendering pass. If that second pass actually exceeds five minutes or cannot complete within the available runtime, deliver Executive alone and say so.
 
 ## Metadata contract
 
@@ -59,6 +67,6 @@ The renderer turns them into a metric card, a dark contrast panel, and a full-wi
 
 ## Imagery
 
-Atlas and Horizon benefit most from a subject-relevant cover image. When image generation or image search is available, create or obtain one useful editorial raster image, verify its relevance and usage rights, save it beside the report Markdown, and pass `--cover-image`. The renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files.
+Use subject-relevant imagery when it materially improves the selected template. Prefer the assistant's built-in image generator: ask for a high-resolution, on-topic, positive, visually striking editorial image with professional art direction, clean composition, useful negative space for report typography, and no embedded words, logos, watermarks, or fabricated data. If generation is unavailable, use Google Images first and Bing Images as the fallback; verify the original source, resolution, relevance, and usage rights before downloading anything.
 
-Do not delay delivery merely to obtain an image. Atlas includes a composed cartographic fallback, while Horizon ships with a bundled panoramic photograph so its cover and opening feature page never collapse into a flat gradient. Executive and Spectrum are designed to work without imagery.
+Save the verified raster beside the report Markdown and pass `--cover-image`; the renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files. Never use a search thumbnail, an unclear license, a negative or alarming image merely for drama, or an image that implies evidence the report does not contain. Do not delay delivery merely to obtain artwork: Maison, Horizon, Terrain, and Orbit include high-definition fallbacks, while Executive, Spectrum, Atlas, and Blueprint remain complete without one.

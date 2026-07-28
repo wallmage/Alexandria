@@ -29,8 +29,10 @@ from pdf_templates import (  # noqa: E402
     TEMPLATE_CHOICES,
     TEMPLATES,
     bundled_horizon_image_data_uri,
+    bundled_template_image_data_uri,
     build_css,
     cover_art_html,
+    select_adaptive_companion,
     select_template,
 )
 from validate_report import validate_markdown, validate_rewild_receipt  # noqa: E402
@@ -283,6 +285,107 @@ def build_toc_html(html_body, lang="en", template="executive"):
             f"{page_html}</div>"
         )
 
+    if template in {"maison", "blueprint", "terrain", "orbit"}:
+        chrome = {
+            "en": {
+                "register": "Editorial register",
+                "maison_statement": "Context, evidence, character, and choice.",
+                "input": "Input",
+                "structure": "Structure",
+                "decision": "Decision",
+                "field_index": "Field index / evidence terrain",
+                "orientation": "Orientation / evidence to action",
+            },
+            "zh-CN": {
+                "register": "编辑脉络",
+                "maison_statement": "背景、证据、特征与选择。",
+                "input": "输入",
+                "structure": "结构",
+                "decision": "决策",
+                "field_index": "田野索引 / 证据地形",
+                "orientation": "阅读方位 / 从证据到行动",
+            },
+            "zh-HK": {
+                "register": "編輯脈絡",
+                "maison_statement": "背景、證據、特徵與選擇。",
+                "input": "輸入",
+                "structure": "結構",
+                "decision": "決策",
+                "field_index": "田野索引 / 證據地形",
+                "orientation": "閱讀方位 / 由證據到行動",
+            },
+        }[lang]
+        special = {
+            "maison": {
+                "class": "toc-maison maison-toc-editorial",
+                "marker": (
+                    '<div class="maison-toc-note">'
+                    f'<span>{html.escape(chrome["register"])}</span>'
+                    f'<strong>{html.escape(chrome["maison_statement"])}</strong>'
+                    "</div>"
+                ),
+            },
+            "blueprint": {
+                "class": "toc-blueprint",
+                "marker": (
+                    '<div class="blueprint-toc-map">'
+                    f'<span>{html.escape(chrome["input"])}</span><i></i>'
+                    f'<span>{html.escape(chrome["structure"])}</span><i></i>'
+                    f'<span>{html.escape(chrome["decision"])}</span>'
+                    "</div>"
+                ),
+            },
+            "terrain": {
+                "class": "toc-terrain",
+                "marker": (
+                    '<div class="terrain-toc-map">'
+                    '<img src="'
+                    + html.escape(
+                        bundled_template_image_data_uri("terrain"), quote=True
+                    )
+                    + f'" alt=""><span>{html.escape(chrome["field_index"])}</span></div>'
+                ),
+            },
+            "orbit": {
+                "class": "toc-orbit",
+                "marker": (
+                    '<div class="orbit-toc-field">'
+                    '<span class="orbit-toc-ring"></span>'
+                    f'<strong>{html.escape(chrome["orientation"])}</strong>'
+                    "</div>"
+                ),
+            },
+        }[template]
+        pages = []
+        chunk_size = {
+            "maison": 6,
+            "blueprint": 8,
+            "terrain": 6,
+            "orbit": 8,
+        }[template]
+        chunks = [
+            items[index : index + chunk_size]
+            for index in range(0, len(items), chunk_size)
+        ]
+        for page_index, chunk in enumerate(chunks):
+            is_first = page_index == 0
+            pages.append(
+                f'<section class="toc-page {special["class"]}'
+                + ("" if is_first else " toc-special-cont")
+                + '">'
+                f'<div class="toc-kicker">{html.escape(kicker)} / {page_index + 1:02d}</div>'
+                f'<h2 class="toc-title">{html.escape(toc_title)}</h2>'
+                + (
+                    f'<p class="toc-intro">{html.escape(toc_intro)}</p>'
+                    if is_first
+                    else ""
+                )
+                + special["marker"]
+                + f'<div class="toc-list">{"".join(chunk)}</div>'
+                + "</section>"
+            )
+        return "".join(pages)
+
     if template == "horizon":
         horizon_labels = {
             "en": {
@@ -360,7 +463,7 @@ def build_toc_html(html_body, lang="en", template="executive"):
     )
 
 
-def build_horizon_feature_html(html_body, lang, image_src):
+def build_horizon_feature_html(html_body, lang, image_src, label_overrides=None):
     """Move the opening section into Horizon's photographic feature page."""
     heading = re.search(
         r'<h2\s+id="([^"]+)"[^>]*>(.*?)</h2>',
@@ -438,6 +541,8 @@ def build_horizon_feature_html(html_body, lang, image_src):
             "path": "報告路徑",
         },
     }[lang]
+    if label_overrides:
+        labels.update(label_overrides)
 
     later_headings = [
         plain_text(item)
@@ -488,6 +593,133 @@ def build_horizon_feature_html(html_body, lang, image_src):
         html_body[: heading.start()]
         + remaining_section
         + html_body[section_end:]
+    )
+    return feature_html, remaining_html
+
+
+def build_reference_feature_html(html_body, lang, template, image_src):
+    """Build the supplied editorial opener while preserving report content."""
+    overrides = {
+        "maison": {
+            "en": {
+                "running": "Editorial note 03 / market character",
+                "descriptor": "An editorial synthesis of context, evidence, and choice.",
+                "figure": "Plate 03A / category landscape",
+                "caption": "The image establishes the lived setting in which the evidence must work.",
+                "terrain": "Reading the character",
+                "path": "Decision agenda",
+            },
+            "zh-CN": {
+                "running": "编辑观察 03 / 市场特征",
+                "descriptor": "把背景、证据与选择放在同一个编辑视角下。",
+                "figure": "图版 03A / 品类现场",
+                "caption": "图像呈现证据真正发挥作用的现实场景。",
+                "terrain": "理解市场特征",
+                "path": "决策议程",
+            },
+            "zh-HK": {
+                "running": "編輯觀察 03 / 市場特徵",
+                "descriptor": "把背景、證據與選擇放在同一個編輯視角下。",
+                "figure": "圖版 03A / 品類現場",
+                "caption": "圖像呈現證據真正發揮作用的現實場景。",
+                "terrain": "理解市場特徵",
+                "path": "決策議程",
+            },
+        },
+        "blueprint": {
+            "en": {
+                "running": "System note 03 / decision architecture",
+                "descriptor": "A structural view of inputs, mechanisms, and decisions.",
+                "figure": "Datum 03A / operating system",
+                "caption": "The blueprint makes the route from evidence to action inspectable.",
+                "terrain": "How the system works",
+                "path": "Control points",
+            },
+            "zh-CN": {
+                "running": "系统记录 03 / 决策架构",
+                "descriptor": "拆开来看输入、机制与决策如何相互作用。",
+                "figure": "基准 03A / 运营系统",
+                "caption": "蓝图让证据如何走向行动变得清晰可查。",
+                "terrain": "系统如何运作",
+                "path": "关键控制点",
+            },
+            "zh-HK": {
+                "running": "系統記錄 03 / 決策架構",
+                "descriptor": "拆開來看輸入、機制與決策如何互相作用。",
+                "figure": "基準 03A / 營運系統",
+                "caption": "藍圖讓證據如何走向行動變得清晰可查。",
+                "terrain": "系統如何運作",
+                "path": "關鍵控制點",
+            },
+        },
+        "terrain": {
+            "en": {
+                "running": "Field note 03 / evidence terrain",
+                "descriptor": "A place-based synthesis of the evidence shaping the report.",
+                "figure": "Plate 03A / surveyed terrain",
+                "caption": "The field view connects verified evidence to the place it describes.",
+                "terrain": "Reading the terrain",
+                "path": "Field bearings",
+            },
+            "zh-CN": {
+                "running": "田野记录 03 / 证据地形",
+                "descriptor": "从具体地点出发，整理影响本报告的证据。",
+                "figure": "图版 03A / 调研地形",
+                "caption": "现场视角把核实过的证据与它所描述的地方连在一起。",
+                "terrain": "读懂地形",
+                "path": "研究方位",
+            },
+            "zh-HK": {
+                "running": "田野記錄 03 / 證據地形",
+                "descriptor": "由具體地點出發，整理影響本報告的證據。",
+                "figure": "圖版 03A / 調研地形",
+                "caption": "現場視角把核實過的證據與它所描述的地方連在一起。",
+                "terrain": "讀懂地形",
+                "path": "研究方位",
+            },
+        },
+        "orbit": {
+            "en": {
+                "running": "Synthesis 03 / system signals",
+                "descriptor": "A scientific view of interacting signals and decision effects.",
+                "figure": "Figure 03A / signal field",
+                "caption": "The field model shows how evidence, incentives, and authority interact.",
+                "terrain": "Reading the system",
+                "path": "Action sequence",
+            },
+            "zh-CN": {
+                "running": "综合分析 03 / 系统信号",
+                "descriptor": "从科学视角观察信号如何互动并影响决策。",
+                "figure": "图 03A / 信号场",
+                "caption": "场模型展示证据、激励与权限如何相互作用。",
+                "terrain": "读懂系统",
+                "path": "行动顺序",
+            },
+            "zh-HK": {
+                "running": "綜合分析 03 / 系統訊號",
+                "descriptor": "從科學視角觀察訊號如何互動並影響決策。",
+                "figure": "圖 03A / 訊號場",
+                "caption": "場模型展示證據、誘因與權限如何互相作用。",
+                "terrain": "讀懂系統",
+                "path": "行動次序",
+            },
+        },
+    }[template][lang]
+    feature_html, remaining_html = build_horizon_feature_html(
+        html_body,
+        lang,
+        image_src,
+        label_overrides=overrides,
+    )
+
+    def add_template_class(match):
+        class_name = match.group(1)
+        return f'class="horizon-{class_name} {template}-{class_name}"'
+
+    feature_html = re.sub(
+        r'class="horizon-([^"]+)"',
+        add_template_class,
+        feature_html,
     )
     return feature_html, remaining_html
 
@@ -600,8 +832,9 @@ def localized_today(lang, today=None):
 def extract_report_meta(md_text):
     """Extract the first H1 and an optional immediate blockquote metadata line."""
     title = ""
-    meta_line = ""
+    metadata_lines = []
     found_h1 = False
+    collecting_metadata = False
     for line in md_text.splitlines():
         stripped = line.strip()
         if stripped.startswith("# ") and not found_h1:
@@ -609,11 +842,26 @@ def extract_report_meta(md_text):
             found_h1 = True
             continue
         if found_h1 and stripped.startswith(">"):
-            meta_line = stripped.lstrip(">").strip()
+            collecting_metadata = True
+            metadata_lines.append(stripped.lstrip(">").strip().rstrip())
+            continue
+        if collecting_metadata and stripped:
             break
-        if found_h1 and stripped:
+        if found_h1 and stripped and not collecting_metadata:
             break
-    return title, meta_line
+    date_pattern = re.compile(
+        r"^(?:"
+        r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|"
+        r"\d{4}年\d{1,2}月\d{1,2}日|"
+        r"\d{1,2}\s+[A-Za-z]+\s+\d{4}|"
+        r"[A-Za-z]+\s+\d{1,2},?\s+\d{4}"
+        r")$"
+    )
+    report_date = next(
+        (value for value in metadata_lines if date_pattern.match(value)),
+        metadata_lines[0] if metadata_lines else "",
+    )
+    return title, report_date
 
 
 def split_cover_title(title, subtitle):
@@ -746,9 +994,9 @@ def md_to_html(
     if meta_line:
         meta_line_html = html.escape(meta_line)
         meta_bq_pattern = re.compile(
-            r"<blockquote>\s*<p>"
+            r"<blockquote>(?:(?!</blockquote>).)*"
             + re.escape(meta_line_html)
-            + r"</p>\s*</blockquote>",
+            + r"(?:(?!</blockquote>).)*</blockquote>",
             re.DOTALL,
         )
         html_body = meta_bq_pattern.sub("", html_body, count=1)
@@ -786,6 +1034,19 @@ def md_to_html(
             html_body,
             lang,
             horizon_image,
+        )
+    elif selected_template in {"maison", "blueprint", "terrain", "orbit"}:
+        feature_image = (
+            safe_cover_image
+            or bundled_template_image_data_uri(
+                "orbit" if selected_template == "blueprint" else selected_template
+            )
+        )
+        feature_html, html_body = build_reference_feature_html(
+            html_body,
+            lang,
+            selected_template,
+            feature_image,
         )
 
     metadata = []

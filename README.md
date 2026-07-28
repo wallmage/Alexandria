@@ -12,7 +12,7 @@ Alexandria is named after the Library of Alexandria (the great library of the an
 
 You spend less time directing the research and sorting links. What comes back is a coherent argument with sources you can inspect.
 
-As soon as you send a topic, Alexandria acknowledges it and asks one short, optional batch of production questions: template, “Prepared by,” client name, and whether to add confidentiality wording and stamps. It starts researching immediately instead of waiting for your reply. You can answer later and the choices will be incorporated before the final PDF; if you do not answer, Alexandria simply uses the defaults and finishes the work.
+As soon as you send a topic, Alexandria acknowledges it and asks one short, optional batch of production questions: template, “Prepared by,” client name, and whether to add confidentiality wording and stamps. It starts researching immediately instead of waiting for your reply. You can answer later; if you do not choose a template, Alexandria delivers two PDFs with identical content—Executive by default and one design adapted to the topic.
 
 ## What you can research
 
@@ -24,14 +24,18 @@ It is designed for questions that deserve more than a quick summary: How did thi
 
 You receive a professionally crafted, beautiful PDF—not a rough text export. It has a considered cover, table of contents, topic-specific chapters, clear judgments, careful typography, and citations beside the claims they support. The finished report is designed to be genuinely beautiful.
 
-There are four complete visual systems:
+There are eight complete visual systems:
 
 - **A — Executive (Default):** ivory, navy, and teal with a restrained consulting-firm feel. Best for business, strategy, finance, policy, and organizations.
-- **B — Spectrum:** white, cobalt, violet, electric lime, and black with bold, contemporary signal panels. Best for technology, innovation, products, startups, and future-facing subjects.
+- **B — Spectrum:** white, cobalt, violet, electric lime, and black with bold, contemporary signal panels. Best for digital products, media, consumer technology, startups, and future-facing subjects.
 - **C — Atlas:** white, forest green, sage, and editorial imagery with a field-journal character. Best for people, history, culture, art, society, natural science, and geography.
 - **D — Horizon:** black, white, and cobalt blue with panoramic photography and floating observation cards. Best for infrastructure, climate and energy, geopolitics, supply chains, resilience, cities, and place-based market signals.
+- **E — Maison:** warm ivory, monumental serif typography, refined photography, and generous editorial space with a premium magazine feel. Best for luxury, hospitality, retail, travel, real estate, food, and consumer brands.
+- **F — Blueprint:** black, white, and technical cyan with grids, datums, nodes, and process maps. Best for operating models, organization design, engineering, governance, implementation, and transformation.
+- **G — Terrain:** forest green, cream, aerial imagery, contour lines, and cartographic notation with a place-based field-atlas feel. Best for ecology, conservation, agriculture, water, land use, and natural resources.
+- **H — Orbit:** electric cobalt, black, white, orbital geometry, and scientific imagery with a precise research-lab feel. Best for AI, semiconductors, robotics, advanced science, and deep technology.
 
-Choose one yourself, or let Alexandria adapt it to the topic. “Prepared by” defaults to Alexandria, the client field stays hidden unless supplied, and confidentiality is Off unless requested. Turning it On adds a “Strictly Confidential” stamp and a “Controlled copy · Not for external distribution” footer.
+Choose one and Alexandria produces that version. If you do not choose, it produces Executive plus a deterministic topic-adaptive version from the other seven designs; the second PDF reuses the same finished report, sources, and citations, so it adds no research or writing tokens and only one local rendering pass. “Prepared by” defaults to Alexandria, the client field stays hidden unless supplied, and confidentiality is Off unless requested. Turning it On adds a “Strictly Confidential” stamp and a “Controlled copy · Not for external distribution” footer.
 
 Length is deliberately substantial: every English report must stay between 7,500 and 15,000 words; every Chinese report must stay between 5,000 and 10,000 non-whitespace characters. The subject determines where it lands inside that range, with roughly ten or more finished PDF pages as the production target.
 

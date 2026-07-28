@@ -153,12 +153,14 @@ class ConverterUnitTests(unittest.TestCase):
     def test_explicit_template_wins_and_auto_selection_adapts_to_subject(self):
         cases = (
             ("A strategy review for a global bank", "auto", "executive"),
-            ("How AI software and robotics will reshape product design", "auto", "spectrum"),
-            ("Artificial intelligence in medicine", "auto", "spectrum"),
+            ("A digital media product for a consumer startup", "auto", "spectrum"),
             ("A cultural history of river landscapes and field ecology", "auto", "atlas"),
             ("Climate-ready infrastructure, energy resilience, and supply chains", "auto", "horizon"),
+            ("Luxury hospitality and service design in premium retail", "auto", "maison"),
+            ("Operating model, process governance, and organizational design", "auto", "blueprint"),
+            ("Wetland conservation, agriculture, and land-use ecology", "auto", "terrain"),
+            ("Artificial intelligence, semiconductors, and advanced robotics", "auto", "orbit"),
             ("A cultural history of river landscapes", "spectrum", "spectrum"),
-            ("An unfamiliar cross-disciplinary question", "auto", "executive"),
         )
 
         for subject, requested, expected in cases:
@@ -168,7 +170,16 @@ class ConverterUnitTests(unittest.TestCase):
                 )
 
     def test_each_template_has_a_distinct_cover_and_visual_system(self):
-        for template in ("executive", "spectrum", "atlas", "horizon"):
+        for template in (
+            "executive",
+            "spectrum",
+            "atlas",
+            "horizon",
+            "maison",
+            "blueprint",
+            "terrain",
+            "orbit",
+        ):
             rendered = self.render_html(
                 "# Research title\n\n## Finding\n\nEvidence and implications.",
                 template=template,
@@ -183,10 +194,69 @@ class ConverterUnitTests(unittest.TestCase):
         spectrum = self.render_html("# T\n\n## F\n\nBody.", template="spectrum")
         atlas = self.render_html("# T\n\n## F\n\nBody.", template="atlas")
         horizon = self.render_html("# T\n\n## F\n\nBody.", template="horizon")
+        maison = self.render_html("# T\n\n## F\n\nBody.", template="maison")
+        blueprint = self.render_html("# T\n\n## F\n\nBody.", template="blueprint")
+        terrain = self.render_html("# T\n\n## F\n\nBody.", template="terrain")
+        orbit = self.render_html("# T\n\n## F\n\nBody.", template="orbit")
         self.assertIn("#123047", executive)
         self.assertIn("#4f46e5", spectrum)
         self.assertIn("#173d2a", atlas)
         self.assertIn("#0b63f6", horizon)
+        self.assertIn("#b39a61", maison)
+        self.assertIn("#4a9fd8", blueprint)
+        self.assertIn("#2d5e3a", terrain)
+        self.assertIn("#0062ff", orbit)
+
+    def test_new_templates_build_distinct_reference_compositions(self):
+        expected_markers = {
+            "maison": (
+                "maison-photo",
+                "maison-toc-editorial",
+                "maison-feature-page",
+            ),
+            "blueprint": (
+                "blueprint-datum",
+                "blueprint-toc-map",
+                "blueprint-feature-page",
+            ),
+            "terrain": (
+                "terrain-aerial",
+                "terrain-toc-map",
+                "terrain-feature-page",
+            ),
+            "orbit": (
+                "orbit-field",
+                "orbit-toc-field",
+                "orbit-feature-page",
+            ),
+        }
+        source = (
+            "# Research title\n\n"
+            "## Executive brief\n\n"
+            "A decision-grade view of the forces changing the market.\n\n"
+            "> [!INSIGHT]\n"
+            "> Evidence becomes useful when its route to judgment is visible.\n\n"
+            "## Market structure\n\n"
+            "How economics and competitive pressure are changing."
+        )
+
+        for template, markers in expected_markers.items():
+            rendered = self.render_html(source, template=template)
+            with self.subTest(template=template):
+                for marker in markers:
+                    self.assertIn(marker, rendered)
+
+    def test_default_and_adaptive_companion_are_distinct_and_deterministic(self):
+        subject = "Artificial intelligence, semiconductors, and robotics"
+
+        self.assertEqual(
+            self.converter.select_adaptive_companion(subject),
+            self.converter.select_adaptive_companion(subject),
+        )
+        self.assertNotEqual(
+            "executive",
+            self.converter.select_adaptive_companion(subject),
+        )
 
     def test_horizon_builds_the_reference_editorial_composition(self):
         rendered = self.render_html(
@@ -261,6 +331,17 @@ class ConverterUnitTests(unittest.TestCase):
         self.assertNotIn("Strictly Confidential", rendered)
         self.assertNotIn("Controlled copy", rendered)
         self.assertNotIn("Not for external distribution", rendered)
+
+    def test_report_metadata_uses_date_line_not_blockquote_deck(self):
+        title, report_date = self.converter.extract_report_meta(
+            "# Research title\n\n"
+            "> A decision-grade comparison of two systems  \n"
+            "> 28 July 2026\n\n"
+            "## Finding\n\nBody."
+        )
+
+        self.assertEqual(title, "Research title")
+        self.assertEqual(report_date, "28 July 2026")
 
     def test_confidential_client_metadata_is_opt_in(self):
         rendered = self.render_html(
@@ -374,6 +455,15 @@ class ConverterUnitTests(unittest.TestCase):
 
         self.assertIn("目錄", toc)
         self.assertNotIn("目录", toc)
+
+    def test_new_template_chrome_follows_report_language(self):
+        body = '<h2 id="one">第一章</h2><p>本章说明主要证据。</p>'
+
+        maison = self.converter.build_toc_html(body, "zh-CN", "maison")
+        orbit = self.converter.build_toc_html(body, "zh-HK", "orbit")
+
+        self.assertIn("编辑脉络", maison)
+        self.assertIn("閱讀方位", orbit)
 
     def test_generated_html_drops_active_or_embedded_raw_html(self):
         fake_markdown = mock.Mock()

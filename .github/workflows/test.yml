@@ -46,11 +46,14 @@ jobs:
             /tmp/alexandria-fixtures/en/report.md \
             /tmp/alexandria-sample.pdf \
             --lang en \
-            --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json
+            --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
+            --ledger /tmp/alexandria-fixtures/en/ledger.json \
+            --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json
           python scripts/validate_report.py \
             /tmp/alexandria-fixtures/en/report.md \
-            --ledger tests/fixtures/evidence-ledger.json \
+            --ledger /tmp/alexandria-fixtures/en/ledger.json \
             --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
+            --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json \
             --pdf /tmp/alexandria-sample.pdf \
             --expected-lang en \
             --min-words 7500 \
@@ -67,10 +70,14 @@ jobs:
             /tmp/alexandria-fixtures/zh-HK/report.md \
             /tmp/alexandria-sample.zh-HK.pdf \
             --lang zh-HK \
-            --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json
+            --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json \
+            --ledger /tmp/alexandria-fixtures/zh-HK/ledger.json \
+            --content-receipt /tmp/alexandria-fixtures/zh-HK/content-receipt.json
           python scripts/validate_report.py \
             /tmp/alexandria-fixtures/zh-HK/report.md \
+            --ledger /tmp/alexandria-fixtures/zh-HK/ledger.json \
             --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json \
+            --content-receipt /tmp/alexandria-fixtures/zh-HK/content-receipt.json \
             --pdf /tmp/alexandria-sample.zh-HK.pdf \
             --expected-lang zh-HK \
             --min-chars 5000 \
@@ -87,10 +94,14 @@ jobs:
             /tmp/alexandria-fixtures/zh-CN/report.md \
             /tmp/alexandria-sample.zh-CN.pdf \
             --lang zh-CN \
-            --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json
+            --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json \
+            --ledger /tmp/alexandria-fixtures/zh-CN/ledger.json \
+            --content-receipt /tmp/alexandria-fixtures/zh-CN/content-receipt.json
           python scripts/validate_report.py \
             /tmp/alexandria-fixtures/zh-CN/report.md \
+            --ledger /tmp/alexandria-fixtures/zh-CN/ledger.json \
             --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json \
+            --content-receipt /tmp/alexandria-fixtures/zh-CN/content-receipt.json \
             --pdf /tmp/alexandria-sample.zh-CN.pdf \
             --expected-lang zh-CN \
             --min-chars 5000 \

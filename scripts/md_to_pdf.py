@@ -4,7 +4,8 @@ Alexandria Report: Markdown -> consulting-grade PDF (WeasyPrint)
 
 Usage:
     python3 md_to_pdf.py input.md output.pdf --template executive \
-        --rewild-receipt receipt.json
+        --rewild-receipt receipt.json --ledger ledger.json \
+        --content-receipt content-receipt.json
 
 Dependencies: install from requirements.txt
 """
@@ -35,6 +36,7 @@ from pdf_templates import (  # noqa: E402
     select_adaptive_companion,
     select_template,
 )
+from content_gate import validate_content_receipt  # noqa: E402
 from validate_report import validate_markdown, validate_rewild_receipt  # noqa: E402
 
 
@@ -1364,6 +1366,33 @@ def validate_rewild_for_render(input_path, receipt_path, lang):
         raise ValueError("Rewild production gate failed: " + " ".join(errors))
 
 
+def validate_content_for_render(input_path, ledger_path, receipt_path, lang):
+    """Reject rendering unless the exact report and ledger passed content review."""
+    if not ledger_path:
+        raise ValueError(
+            "An evidence ledger is required for the Content quality gate."
+        )
+    if not receipt_path:
+        raise ValueError(
+            "A Content quality gate receipt is required. "
+            "Run scripts/content_gate.py first."
+        )
+    receipt_path = Path(receipt_path)
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Content quality receipt could not be read: {exc}") from exc
+    expected_lang = receipt.get("report_lang") if lang == "auto" else lang
+    errors = validate_content_receipt(
+        input_path,
+        ledger_path,
+        receipt,
+        expected_lang=expected_lang,
+    )
+    if errors:
+        raise ValueError("Content quality production gate failed: " + " ".join(errors))
+
+
 def render_pdf(
     input_path,
     output_path,
@@ -1378,12 +1407,15 @@ def render_pdf(
     report_date=None,
     cover_image=None,
     rewild_receipt=None,
+    ledger=None,
+    content_receipt=None,
     keep_html=False,
     force=False,
 ):
     """Render one Markdown file and return the output PDF path."""
     input_path, output_path = validate_paths(input_path, output_path, force=force)
     validate_rewild_for_render(input_path, rewild_receipt, lang)
+    validate_content_for_render(input_path, ledger, content_receipt, lang)
     safe_cover_image = validate_cover_image(input_path, cover_image)
     md_text = input_path.read_text(encoding="utf-8")
     rendered_html = md_to_html(
@@ -1488,6 +1520,16 @@ def main():
         help="passing Rewild receipt bound to the exact input Markdown",
     )
     parser.add_argument(
+        "--ledger",
+        required=True,
+        help="evidence ledger bound to the exact final report",
+    )
+    parser.add_argument(
+        "--content-receipt",
+        required=True,
+        help="passing Content quality receipt bound to the report and ledger",
+    )
+    parser.add_argument(
         "--keep-html",
         action="store_true",
         help="Keep the intermediate HTML file beside the PDF",
@@ -1513,6 +1555,8 @@ def main():
             report_date=args.report_date,
             cover_image=args.cover_image,
             rewild_receipt=args.rewild_receipt,
+            ledger=args.ledger,
+            content_receipt=args.content_receipt,
             keep_html=args.keep_html,
             force=args.force,
         )

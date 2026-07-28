@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wallmage/Alexandria/references/content-review.schema.json",
+  "title": "Alexandria Content Review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "report_path",
+    "report_sha256",
+    "ledger_path",
+    "ledger_sha256",
+    "report_lang",
+    "reviewed_at",
+    "reviewer_mode",
+    "scores",
+    "checks",
+    "findings",
+    "evidence_limitations",
+    "completion_note"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "const": "completed"
+    },
+    "report_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "report_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "ledger_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ledger_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "report_lang": {
+      "enum": ["en", "zh-CN", "zh-HK"]
+    },
+    "reviewed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reviewer_mode": {
+      "enum": ["independent", "fresh_eyes"]
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_answered",
+        "evidence_strength",
+        "evidence_coverage",
+        "reasoning_integrity",
+        "counterevidence",
+        "explanatory_depth",
+        "decision_value",
+        "writing_clarity"
+      ],
+      "properties": {
+        "question_answered": {
+          "$ref": "#/$defs/score"
+        },
+        "evidence_strength": {
+          "$ref": "#/$defs/score"
+        },
+        "evidence_coverage": {
+          "$ref": "#/$defs/score"
+        },
+        "reasoning_integrity": {
+          "$ref": "#/$defs/score"
+        },
+        "counterevidence": {
+          "$ref": "#/$defs/score"
+        },
+        "explanatory_depth": {
+          "$ref": "#/$defs/score"
+        },
+        "decision_value": {
+          "$ref": "#/$defs/score"
+        },
+        "writing_clarity": {
+          "$ref": "#/$defs/score"
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "central_judgment_answers_question",
+        "priority_coverage_resolved",
+        "key_claims_traceable",
+        "source_independence_calibrated",
+        "counterevidence_tested",
+        "uncertainty_visible",
+        "recommendations_or_implications_supported",
+        "forecasts_conditional",
+        "section_value_density_reviewed",
+        "length_is_substantive_not_padded"
+      ],
+      "properties": {
+        "central_judgment_answers_question": {
+          "const": true
+        },
+        "priority_coverage_resolved": {
+          "const": true
+        },
+        "key_claims_traceable": {
+          "const": true
+        },
+        "source_independence_calibrated": {
+          "const": true
+        },
+        "counterevidence_tested": {
+          "const": true
+        },
+        "uncertainty_visible": {
+          "const": true
+        },
+        "recommendations_or_implications_supported": {
+          "const": true
+        },
+        "forecasts_conditional": {
+          "const": true
+        },
+        "section_value_density_reviewed": {
+          "const": true
+        },
+        "length_is_substantive_not_padded": {
+          "const": true
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "evidence_limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "completion_note": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "rationale"],
+      "properties": {
+        "score": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 5
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 20
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "severity",
+        "category",
+        "location",
+        "finding",
+        "disposition",
+        "rationale",
+        "report_disclosure_excerpt"
+      ],
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "pattern": "^F[0-9]+$"
+        },
+        "severity": {
+          "enum": ["critical", "major", "minor"]
+        },
+        "category": {
+          "enum": [
+            "scope",
+            "evidence",
+            "reasoning",
+            "counterevidence",
+            "depth",
+            "decision_value",
+            "forecast",
+            "structure",
+            "writing"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1
+        },
+        "finding": {
+          "type": "string",
+          "minLength": 1
+        },
+        "disposition": {
+          "enum": ["fixed", "accepted_limitation", "rejected"]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "report_disclosure_excerpt": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

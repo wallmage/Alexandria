@@ -1,5 +1,7 @@
 import json
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -71,6 +73,7 @@ class RepositoryContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         for script in (
+            "content_gate.py",
             "md_to_pdf.py",
             "validate_ledger.py",
             "validate_report.py",
@@ -145,6 +148,37 @@ class RepositoryContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("tests/build_gated_fixtures.py", workflow)
         self.assertGreaterEqual(workflow.count("--rewild-receipt"), 6)
+
+    def test_content_quality_gate_is_bundled_required_and_ci_exercised(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (ROOT / "references" / "research-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        quality = ROOT / "references" / "content-quality.md"
+        schema_path = ROOT / "references" / "content-review.schema.json"
+        workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertTrue(quality.is_file())
+        self.assertTrue(schema_path.is_file())
+        self.assertIn("Content quality hard gate", skill)
+        self.assertIn("scripts/content_gate.py", skill)
+        self.assertIn("--content-receipt", skill)
+        self.assertIn("counterevidence", protocol.casefold())
+        self.assertIn("research stop", protocol.casefold())
+        self.assertGreaterEqual(workflow.count("--content-receipt"), 3)
+
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertEqual(4, schema["$defs"]["score"]["properties"]["score"]["minimum"])
+        result = subprocess.run(
+            [sys.executable, "-S", str(ROOT / "scripts" / "content_gate.py"), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--review-note", result.stdout)
 
     def test_evidence_schema_declares_real_json_schema(self):
         schema = json.loads(

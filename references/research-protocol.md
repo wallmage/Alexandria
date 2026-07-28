@@ -2,15 +2,16 @@
 
 ## Coverage map
 
-Start from the selected archetype. Turn each relevant dimension into a concrete research question, an owner, and a completion signal. Skip irrelevant dimensions. Add cross-cutting questions for incentives, alternatives, risks, and what would change the conclusion.
+Read `content-quality.md`. Start from the selected archetype and reader contract. Turn each relevant dimension into a concrete question, priority, decision relevance, owner, evidence target, and completion criterion. Skip irrelevant dimensions. Add cross-cutting questions for incentives, alternatives, risks, and what would change the conclusion.
 
 Example:
 
-| Area | Question | Best evidence | Complete when |
-|---|---|---|---|
-| Current state | What is true as of the report date? | Official record plus independent confirmation | Material facts are current and corroborated |
-| Mechanism | How does it actually work? | Technical documentation, direct observation, expert analysis | Causal steps and limits are explained |
-| Outcomes | What happened or is likely to happen? | Measurements, studies, filings, datasets | Main estimates include uncertainty |
+| Priority | Area | Question | Best evidence | Complete when |
+|---|---|---|---|---|
+| High | Current state | What is true as of the report date? | Accountable record plus independent confirmation | Material facts are current and corroborated |
+| High | Mechanism | How does it actually work? | Technical record, direct observation, expert analysis | Causal steps, assumptions, and limits are explained |
+| High | Outcomes | What happened or is likely to happen? | Measurements, studies, filings, datasets | Main estimates include uncertainty and alternatives |
+| Medium | Context | Which history changes the interpretation? | Original and later historical sources | The reader can understand the present without a chronology dump |
 
 ## Query design
 
@@ -21,8 +22,13 @@ Use several query families:
 - criticism, failure, controversy, limitation, and alternative;
 - dates, versions, jurisdictions, or geographies that matter;
 - source-specific searches for filings, papers, standards, court records, or public data.
+- disconfirming searches for failure, criticism, adverse outcomes, boundary conditions, and alternative explanations;
+- stakeholder searches for documented user, worker, customer, community, or participant experience;
+- correction searches for later revisions, retractions, changed versions, and updated policy.
 
 Use the current runtime date. Search in the source language when it improves recall.
+
+For every provisional key judgment, write the strongest rival explanation and the evidence that would distinguish between them. Search for that evidence before confirming the judgment.
 
 ## Source evaluation
 
@@ -48,6 +54,8 @@ Judge sources on two separate axes.
 
 The right source depends on the claim. A filing may establish reported revenue, not product quality. A company announcement may establish its stated plan, not the plan's feasibility. A preprint can be useful but must remain a preprint in the report.
 
+Assign each source a family and one or more roles. Several pages from one publisher, syndicated stories, and studies built on the same underlying dataset do not create independent triangulation.
+
 ## Conflict handling
 
 When reliable sources disagree:
@@ -60,6 +68,8 @@ When reliable sources disagree:
 
 Never average incompatible estimates without a defensible method.
 
+Make contradiction links reciprocal in the ledger. A disputed claim records the disagreement, the resolution or remaining uncertainty, and the effect on the conclusion.
+
 ## Evidence coverage gate
 
 Before drafting, classify each planned conclusion:
@@ -71,3 +81,16 @@ Before drafting, classify each planned conclusion:
 - unknown.
 
 Remove or soften conclusions that outrun their evidence. A report may be inconclusive; it may not be falsely certain.
+
+## Research stop
+
+Stop only when:
+
+- every high-priority area is supported, disputed, or an explicit gap;
+- key analysis has met triangulation or carries a reduced-confidence limitation;
+- the strongest counterevidence and rival explanation have been tested;
+- current facts have been checked near the report date;
+- another search pass is repeating known evidence rather than changing the decision;
+- unresolved questions and their effect on the verdict are recorded.
+
+Record the stop reason in the ledger synthesis. Length is never a stopping criterion.

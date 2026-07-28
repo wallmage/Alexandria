@@ -4,6 +4,7 @@
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 
@@ -43,6 +44,11 @@ def validate_references(data):
     ]
     source_set = set(source_ids)
     claim_set = set(claim_ids)
+    sources_by_id = {
+        source.get("source_id"): source
+        for source in sources
+        if isinstance(source, dict) and source.get("source_id")
+    }
     claims_by_id = {
         claim.get("claim_id"): claim
         for claim in claims
@@ -64,6 +70,57 @@ def validate_references(data):
                 errors.append(
                     f"Coverage {area} references unknown claim {claim_id}."
                 )
+        if (
+            item.get("priority") == "high"
+            and item.get("status") in {"unstarted", "in_progress"}
+        ):
+            errors.append(f"High-priority coverage {area} is unresolved.")
+        if item.get("status") == "gap" and not str(
+            item.get("gap_impact") or ""
+        ).strip():
+            errors.append(f"Coverage {area} is a gap but has no gap impact.")
+
+    report_date_value = data.get("report_date")
+    try:
+        report_day = (
+            date.fromisoformat(report_date_value)
+            if isinstance(report_date_value, str)
+            else None
+        )
+    except ValueError:
+        report_day = None
+    for source_id, source in sources_by_id.items():
+        try:
+            published = (
+                date.fromisoformat(source["published"])
+                if isinstance(source.get("published"), str)
+                else None
+            )
+            accessed = (
+                date.fromisoformat(source["accessed"])
+                if isinstance(source.get("accessed"), str)
+                else None
+            )
+        except ValueError:
+            continue
+        if published and report_day and published > report_day:
+            errors.append(f"{source_id} is published after the report date.")
+        if published and accessed and published > accessed:
+            errors.append(f"{source_id} is published after it was accessed.")
+
+    def foundation_source_ids(claim_id, visited=None):
+        visited = set() if visited is None else set(visited)
+        if claim_id in visited:
+            return set()
+        visited.add(claim_id)
+        claim = claims_by_id.get(claim_id, {})
+        linked = claim.get("source_ids", [])
+        foundations = set(linked) if isinstance(linked, list) else set()
+        supports = claim.get("supports", [])
+        if isinstance(supports, list):
+            for related_id in supports:
+                foundations.update(foundation_source_ids(related_id, visited))
+        return foundations
 
     for claim in claims:
         if not isinstance(claim, dict):
@@ -84,6 +141,58 @@ def validate_references(data):
                     errors.append(f"{claim_id} has a circular {relation} reference.")
                 if related_id not in claim_set:
                     errors.append(f"{claim_id} references unknown claim {related_id}.")
+                elif relation == "contradicts":
+                    other = claims_by_id.get(related_id, {})
+                    reverse = other.get("contradicts", [])
+                    if not isinstance(reverse, list) or claim_id not in reverse:
+                        errors.append(
+                            f"{claim_id} contradicts {related_id}, but the "
+                            "relationship is not reciprocal."
+                        )
+        if claim.get("status") == "disputed":
+            if not str(claim.get("resolution") or "").strip():
+                errors.append(f"{claim_id} is disputed but has no resolution.")
+            if not claim.get("contradicts"):
+                errors.append(
+                    f"{claim_id} is disputed but has no contradicting claim."
+                )
+
+        if (
+            claim.get("kind") == "analysis"
+            and claim.get("importance") == "key"
+        ):
+            triangulation = claim.get("triangulation", {})
+            triangulation_status = (
+                triangulation.get("status")
+                if isinstance(triangulation, dict)
+                else None
+            )
+            families = {
+                sources_by_id[source_id].get("source_family")
+                for source_id in foundation_source_ids(claim_id)
+                if source_id in sources_by_id
+                and sources_by_id[source_id].get("source_family")
+            }
+            if triangulation_status == "met" and len(families) < 2:
+                errors.append(
+                    f"{claim_id} declares triangulation met but has "
+                    f"{len(families)} source family."
+                )
+            if triangulation_status == "limited":
+                if claim.get("confidence") == "high":
+                    errors.append(
+                        f"{claim_id}: high-confidence key judgment cannot "
+                        "use limited triangulation."
+                    )
+                if not str(claim.get("limitations") or "").strip():
+                    errors.append(
+                        f"{claim_id} has limited triangulation but no limitation."
+                    )
+            if triangulation_status == "not_applicable":
+                errors.append(
+                    f"{claim_id} is a key analysis; triangulation cannot be "
+                    "not applicable."
+                )
 
     circular_paths = set()
 
@@ -114,6 +223,78 @@ def validate_references(data):
             errors.append(f"{claim_id} has no sourced foundation.")
     for path in sorted(circular_paths):
         errors.append(f"Analysis has circular support: {' -> '.join(path)}.")
+
+    synthesis = data.get("synthesis")
+    if isinstance(synthesis, dict):
+        central = synthesis.get("central_judgment_claim_ids", [])
+        central = central if isinstance(central, list) else []
+        counterevidence = synthesis.get("counterevidence_claim_ids", [])
+        counterevidence = (
+            counterevidence if isinstance(counterevidence, list) else []
+        )
+        for claim_id in central:
+            claim = claims_by_id.get(claim_id)
+            if not claim:
+                errors.append(f"Synthesis references unknown central judgment {claim_id}.")
+            elif (
+                claim.get("importance") != "key"
+                or claim.get("include_in_report") is not True
+            ):
+                errors.append(
+                    f"Central judgment {claim_id} must be an included key claim."
+                )
+        for claim_id, claim in claims_by_id.items():
+            if (
+                claim.get("importance") == "key"
+                and claim.get("include_in_report") is True
+                and claim_id not in central
+            ):
+                errors.append(
+                    f"Key report claim {claim_id} is missing from the central synthesis."
+                )
+        for claim_id in counterevidence:
+            if claim_id not in claim_set:
+                errors.append(
+                    f"Synthesis references unknown counterevidence {claim_id}."
+                )
+
+        for implication in synthesis.get("implications", []):
+            if not isinstance(implication, dict):
+                continue
+            for claim_id in implication.get("claim_ids", []):
+                if claim_id not in claim_set:
+                    errors.append(
+                        f"Synthesis references unknown implication claim {claim_id}."
+                    )
+        for takeaway in synthesis.get("decisions_or_takeaways", []):
+            if not isinstance(takeaway, dict):
+                continue
+            for claim_id in takeaway.get("rationale_claim_ids", []):
+                if claim_id not in claim_set:
+                    errors.append(
+                        f"Synthesis references unknown takeaway rationale {claim_id}."
+                    )
+        for scenario in synthesis.get("scenarios", []):
+            if not isinstance(scenario, dict):
+                continue
+            for claim_id in scenario.get("claim_ids", []):
+                if claim_id not in claim_set:
+                    errors.append(
+                        f"Synthesis references unknown scenario claim {claim_id}."
+                    )
+
+        high_priority_claims = {
+            claim_id
+            for item in coverage
+            if isinstance(item, dict) and item.get("priority") == "high"
+            for claim_id in item.get("claim_ids", [])
+        }
+        for claim_id in central:
+            if claim_id in claim_set and claim_id not in high_priority_claims:
+                errors.append(
+                    f"Central judgment {claim_id} is not covered by a "
+                    "high-priority research area."
+                )
     return errors
 
 

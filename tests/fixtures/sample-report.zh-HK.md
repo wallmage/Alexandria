@@ -8,7 +8,7 @@
 
 ## 主要流程
 
-系統會把 Markdown 轉成 PDF，建立目錄，並保留可按的[資料來源](https://example.com/hk-source)。
+系統會把 Markdown 轉成 PDF，建立目錄，並保留可按的[資料來源](https://example.com/hk-source)，讓測試可以同時核對排版結果和引用路徑。
 
 | 階段 | 預期結果 |
 |---|---|

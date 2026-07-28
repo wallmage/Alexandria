@@ -18,8 +18,10 @@ An Alexandria report must:
 3. Preserve a traceable path from consequential claims to sources.
 4. Prefer evidence quality and coverage over source quotas; meet the hard length range through depth, not filler.
 5. State uncertainty, conflicts, and evidence gaps plainly.
-6. Pass the bundled, language-specific Rewild gate so it reads like a thoughtful human editor wrote it.
-7. Survive structural, PDF, and visual checks before delivery.
+6. Test the central judgment against counterevidence, rival explanations, and decision-changing facts.
+7. Pass the bundled, language-specific Rewild gate so it reads like a thoughtful human editor wrote it.
+8. Pass the report-bound content quality gate before rendering.
+9. Survive structural, PDF, and visual checks before delivery.
 
 Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar names and spellings before building the report around them.
 
@@ -68,12 +70,13 @@ Adapt the outline and research depth within those limits. A narrower subject bel
 
 ## 2. Design the research
 
-Read `references/research-protocol.md`. Create:
+Read `references/research-protocol.md` and `references/content-quality.md`. Create:
 
-1. a coverage map derived from the selected archetype;
-2. a query plan for each coverage area;
-3. an evidence ledger using `references/evidence-ledger.schema.json`;
-4. an explicit list of unresolved questions.
+1. a reader contract and governing question;
+2. a prioritized coverage map derived from the selected archetype;
+3. direct, corroborating, and disconfirming query plans;
+4. a version-2 evidence ledger using `references/evidence-ledger.schema.json`;
+5. an explicit list of unresolved questions and their effect on the verdict.
 
 If parallel research is available and appropriate, divide coverage areas among research agents. Give each agent exclusive primary ownership and a disjoint numeric ID range—for example, `S1000–S1999` and `C1000–C1999`—while allowing it to flag cross-cutting evidence. Each returns ledger entries, contradictions, gaps, and a short synthesis—not a detached pile of URLs. The primary agent deduplicates sources and rewrites IDs and relationships before validation.
 
@@ -100,9 +103,11 @@ For every consequential claim, add a ledger entry with:
 - source ID and URL;
 - publication and access dates;
 - faithful extract or source location;
-- evidence type and independence;
-- confidence and limitations;
-- supporting or contradicting claim IDs.
+- evidence type, source family, role, and independence;
+- importance, confidence, limitations, and decision relevance;
+- the reasoning behind analysis and what would change it;
+- honest triangulation status;
+- reciprocal supporting or contradicting claim IDs and conflict resolution.
 
 Mark `include_in_report: true` for every ledger claim used in the draft. After drafting, copy a distinctive sentence of at least 40 characters from each claim-bearing paragraph into that claim's `report_excerpts`. This keeps the internal claim map in the ledger—not the delivered Markdown—and lets the validator locate every used claim in the report.
 
@@ -116,12 +121,14 @@ Before drafting:
 - verify quotations against the original source;
 - verify current facts close to delivery;
 - mark unsupported coverage areas as gaps rather than filling them with inference.
+- test the strongest rival explanation and material counterevidence;
+- record the central judgments, implications, usable takeaways or scenarios, limitations, and research stop reason in `synthesis`.
 
 No source minimum is mandatory. Use enough independent evidence to support the claims and perspectives the report actually contains.
 
 ## 4. Build the argument
 
-Use the archetype as a coverage guide, not a rigid chapter template. Find the report's governing question and answer it early.
+Use the archetype as a coverage guide, not a rigid chapter template. Find the report's governing question and answer it early. Build the argument through observation, interpretation, judgment, implication, then action or takeaway; repair any missing link before drafting.
 
 A strong structure usually includes:
 
@@ -138,7 +145,7 @@ Outline around reader questions and causal relationships. Combine weak or repeti
 
 ## 5. Draft with citations
 
-The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md` when a specific register would help. Read the visual-component section of `references/pdf-templates.md` before drafting; use metric, insight, and takeaway blocks only for content that deserves that visual weight.
+The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md` when a specific register would help. Read the visual-component section of `references/pdf-templates.md` before drafting; use metric, insight, and takeaway blocks only for content that deserves that visual weight. Apply the section contract and value-density edit in `references/content-quality.md`.
 
 Requirements:
 
@@ -204,7 +211,25 @@ If Rewild takes the report below the minimum length, deepen the research, analys
 
 Any change to report text after the receipt is written invalidates it. Return to this step, refresh `REPORT_PRE_REWILD_MD`, review the changed report, and issue a new receipt.
 
-## 7. Validate the Markdown
+## 7. Content quality hard gate
+
+Review the exact post-Rewild report and final ledger using Section 13 of `references/content-quality.md`. Use an independent reviewer when available; otherwise use a context-isolated fresh-eyes pass. Record the review in `CONTENT_REVIEW_NOTE` using `references/content-review.schema.json`.
+
+Every dimension must score at least 4. Fix critical findings. A major evidence limitation may remain only when the report clearly discloses it and the review records the exact disclosure. Then issue a receipt:
+
+```bash
+ALEXANDRIA_ENV="$(mktemp -d)/venv"
+python3 -m venv "$ALEXANDRIA_ENV"
+ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
+"$ALEXANDRIA_PYTHON" -m pip install -r "$SKILL_ROOT/requirements.txt"
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/content_gate.py" "$REPORT_MD" \
+  --ledger "$LEDGER_JSON" --review-note "$CONTENT_REVIEW_NOTE" \
+  --receipt "$CONTENT_RECEIPT"
+```
+
+The gate binds the exact report, ledger, review note, language, and bundled schemas. Any later change to one of them invalidates the receipt; repeat the review and gate. Do not render without a current receipt.
+
+## 8. Validate the Markdown
 
 Save a cross-platform-safe filename:
 
@@ -216,16 +241,7 @@ Save a cross-platform-safe filename:
 
 Pass paths as argument-array values where possible. In a shell, quote every path and variable.
 
-Before the first bundled command, create a task-owned environment outside the user's project and install the pinned dependencies. Set `ALEXANDRIA_PYTHON` to `bin/python` on POSIX or `Scripts/python.exe` on Windows. On POSIX:
-
-```bash
-ALEXANDRIA_ENV="$(mktemp -d)/venv"
-python3 -m venv "$ALEXANDRIA_ENV"
-ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
-"$ALEXANDRIA_PYTHON" -m pip install -r "$SKILL_ROOT/requirements.txt"
-```
-
-Then run:
+Reuse the task-owned environment from Step 7. On Windows, set `ALEXANDRIA_PYTHON` to the environment's `Scripts/python.exe`. Then run:
 
 ```bash
 # All languages
@@ -233,13 +249,14 @@ Then run:
 
 # English
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
-  --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" --expected-lang en \
+  --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --content-receipt "$CONTENT_RECEIPT" --expected-lang en \
   --min-words 7500 --max-words 15000 --min-sections 3 --min-sources 1
 
 # Simplified or Traditional Chinese
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" "$REPORT_MD" \
   --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
-  --expected-lang zh-CN \
+  --content-receipt "$CONTENT_RECEIPT" --expected-lang zh-CN \
   --min-chars 5000 --max-chars 10000 --min-sections 3 --min-sources 1
 ```
 
@@ -253,7 +270,7 @@ Use `--expected-lang zh-HK` instead for Hong Kong Traditional Chinese. Then manu
 - the conclusion reflects the evidence, including uncertainty;
 - the requested language and scope were followed.
 
-## 8. Render and inspect the PDF
+## 9. Render and inspect the PDF
 
 Read `references/pdf-production.md`. Use the supplied scripts and pinned dependencies. In brief:
 
@@ -261,10 +278,12 @@ Read `references/pdf-production.md`. Use the supplied scripts and pinned depende
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
   "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
   --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY" \
-  --rewild-receipt "$REWILD_RECEIPT"
+  --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --content-receipt "$CONTENT_RECEIPT"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
   "$REPORT_MD" --ledger "$LEDGER_JSON" \
-  --rewild-receipt "$REWILD_RECEIPT" --pdf "$REPORT_PDF" \
+  --rewild-receipt "$REWILD_RECEIPT" --content-receipt "$CONTENT_RECEIPT" \
+  --pdf "$REPORT_PDF" \
   --expected-lang "$REPORT_LANG" \
   --min-pages 10 --min-text-chars 5000 --min-links 1
 ```
@@ -281,7 +300,7 @@ Render the PDF to images and inspect every page or a complete contact sheet. Che
 
 Do not use file size as a content or quality signal.
 
-## 9. Deliver
+## 10. Deliver
 
 Provide clickable links to every final PDF and the Markdown source. Summarize the central conclusion in one or two sentences and note any material evidence limitation. Do not paste the whole report into chat unless the user asks.
 
@@ -289,6 +308,7 @@ The task is complete only when:
 
 - the research question is answered;
 - the evidence ledger and report agree;
+- the current Rewild and content quality receipts pass;
 - deterministic checks pass;
 - the final PDF was reopened and visually inspected;
 - every promised deliverable exists at the reported paths.

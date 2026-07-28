@@ -99,6 +99,8 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("--date", result.stdout)
         self.assertIn("--cover-image", result.stdout)
         self.assertIn("--rewild-receipt", result.stdout)
+        self.assertIn("--content-receipt", result.stdout)
+        self.assertIn("--ledger", result.stdout)
 
     def test_rejects_non_pdf_output_before_loading_render_dependencies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -113,6 +115,10 @@ class CommandLineTests(unittest.TestCase):
                     str(source.with_suffix(".txt")),
                     "--rewild-receipt",
                     str(Path(temp_dir) / "receipt.json"),
+                    "--ledger",
+                    str(Path(temp_dir) / "ledger.json"),
+                    "--content-receipt",
+                    str(Path(temp_dir) / "content-receipt.json"),
                 ],
                 capture_output=True,
                 text=True,
@@ -137,13 +143,34 @@ class ConverterUnitTests(unittest.TestCase):
     def render_pdf(self, source, output, **kwargs):
         with mock.patch.object(
             self.converter, "validate_rewild_for_render", return_value=None
+        ), mock.patch.object(
+            self.converter, "validate_content_for_render", return_value=None
         ):
             return self.converter.render_pdf(
                 source,
                 output,
                 rewild_receipt="receipt.json",
+                content_receipt="content-receipt.json",
+                ledger="ledger.json",
                 **kwargs,
             )
+
+    def test_render_rejects_a_missing_content_receipt_before_loading_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "report.md"
+            output = Path(temp_dir) / "report.pdf"
+            source.write_text("# Report\n", encoding="utf-8")
+            with mock.patch.object(
+                self.converter, "validate_rewild_for_render", return_value=None
+            ):
+                with self.assertRaisesRegex(ValueError, "Content quality"):
+                    self.converter.render_pdf(
+                        source,
+                        output,
+                        rewild_receipt=Path(temp_dir) / "rewild.json",
+                        ledger=Path(temp_dir) / "ledger.json",
+                        content_receipt=None,
+                    )
 
     def test_detects_english_simplified_and_traditional_chinese(self):
         self.assertEqual(self.converter.detect_language("A report about markets."), "en")

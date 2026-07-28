@@ -1,16 +1,38 @@
 {
+  "schema_version": 2,
   "subject": "Alexandria render pipeline",
   "research_question": "Does the sample pipeline satisfy its basic output contract?",
+  "brief": {
+    "intended_reader": "Alexandria maintainers",
+    "decision_or_use": "Confirm that the test fixture exercises the required render path.",
+    "report_language": "en",
+    "scope": {
+      "time_horizon": "Current fixture behavior",
+      "geography": "Not applicable",
+      "inclusions": [
+        "Markdown conversion",
+        "PDF rendering",
+        "Clickable citation preservation"
+      ],
+      "exclusions": [
+        "Real-world research quality"
+      ]
+    }
+  },
   "report_date": "2026-07-28",
   "coverage": [
     {
       "area": "rendering",
       "question": "Can the generated PDF be reopened?",
+      "priority": "high",
+      "decision_relevance": "A broken render path would invalidate the production fixture.",
+      "completion_criteria": "The report renders and preserves a clickable source link.",
       "owner": "primary",
       "status": "supported",
       "claim_ids": [
         "C1"
       ],
+      "gap_impact": null,
       "notes": null
     }
   ],
@@ -25,7 +47,10 @@
       "accessed": "2026-07-28",
       "provenance": "primary_independent",
       "evidence_type": "official_documentation",
-      "source_family": null,
+      "source_family": "alexandria-fixture",
+      "roles": [
+        "empirical_data"
+      ],
       "limitations": "Fixture data only"
     }
   ],
@@ -34,10 +59,12 @@
       "claim_id": "C1",
       "claim": "The pipeline preserves a clickable source link.",
       "kind": "fact",
+      "importance": "key",
       "source_ids": [
         "S1"
       ],
       "extract_or_location": "Fixture",
+      "as_of": "2026-07-28",
       "confidence": "low",
       "status": "supported",
       "include_in_report": true,
@@ -46,8 +73,48 @@
       ],
       "supports": [],
       "contradicts": [],
+      "reasoning": null,
+      "decision_relevance": "The PDF pipeline must preserve source access.",
+      "what_would_change": "A rendered fixture without an external clickable link.",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "This is a direct test fixture observation."
+      },
+      "resolution": null,
       "limitations": "This is a schema fixture, not research evidence."
     }
   ],
+  "synthesis": {
+    "central_judgment_claim_ids": [
+      "C1"
+    ],
+    "counterevidence_claim_ids": [],
+    "implications": [
+      {
+        "statement": "The render fixture can test link preservation.",
+        "claim_ids": [
+          "C1"
+        ],
+        "for_whom": "Alexandria maintainers",
+        "timing": "During continuous integration"
+      }
+    ],
+    "decisions_or_takeaways": [
+      {
+        "statement": "Keep the clickable-link assertion in the production fixture.",
+        "rationale_claim_ids": [
+          "C1"
+        ],
+        "tradeoff": "The fixture proves pipeline behavior, not research quality.",
+        "success_signal": "The rendered PDF contains an external link annotation.",
+        "failure_signal": "The PDF link annotation is missing."
+      }
+    ],
+    "scenarios": [],
+    "limitations": [
+      "The fixture is synthetic and does not establish real research quality."
+    ],
+    "research_stop_reason": "The fixture covers the one pipeline behavior assigned to it."
+  },
   "unresolved_questions": []
 }

@@ -619,6 +619,10 @@ def build_parser():
         "--rewild-receipt",
         help="required Rewild gate receipt bound to this exact Markdown file",
     )
+    parser.add_argument(
+        "--content-receipt",
+        help="required content-quality receipt bound to the report and ledger",
+    )
     parser.add_argument("--pdf", help="Rendered PDF to reopen and validate")
     parser.add_argument("--min-words", type=int, default=0)
     parser.add_argument("--max-words", type=int, default=0)
@@ -675,6 +679,35 @@ def main(argv=None):
                 validate_rewild_receipt(
                     markdown_path,
                     receipt,
+                    expected_lang=args.expected_lang,
+                )
+            )
+    if not args.content_receipt:
+        errors.append(
+            "A Content quality gate receipt is required. "
+            "Run scripts/content_gate.py first."
+        )
+    elif not args.ledger:
+        errors.append(
+            "Content receipt validation requires --ledger."
+        )
+    else:
+        try:
+            content_receipt = json.loads(
+                Path(args.content_receipt).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"Content receipt could not be read: {exc}")
+        else:
+            try:
+                from .content_gate import validate_content_receipt
+            except ImportError:
+                from content_gate import validate_content_receipt
+            errors.extend(
+                validate_content_receipt(
+                    markdown_path,
+                    Path(args.ledger),
+                    content_receipt,
                     expected_lang=args.expected_lang,
                 )
             )

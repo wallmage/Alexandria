@@ -33,10 +33,15 @@ On Debian/Ubuntu CI, install `fonts-noto-cjk`. A PDF that extracts the right Uni
 Read `references/pdf-templates.md` and resolve the intake values before rendering. The available systems are Executive, Spectrum, Atlas, Horizon, Maison, Blueprint, Terrain, Orbit, Sunbeam, Current, and Apricot. Set `REPORT_TEMPLATE` to the matching lowercase identifier; use `auto` only when deterministic topic adaptation is intended.
 
 ```bash
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_ledger.py" "$LEDGER_JSON"
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/content_gate.py" "$REPORT_MD" \
+  --ledger "$LEDGER_JSON" --review-note "$CONTENT_REVIEW_NOTE" \
+  --receipt "$CONTENT_RECEIPT"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
   "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
   --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY" \
-  --rewild-receipt "$REWILD_RECEIPT"
+  --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --content-receipt "$CONTENT_RECEIPT"
 ```
 
 Use `--lang en`, `--lang zh-CN`, or `--lang zh-HK` when automatic script detection is ambiguous. Use `--keep-html` only when debugging layout. The converter refuses to replace an existing PDF; prefer a versioned filename, or pass `--force` only when replacement is intentional.
@@ -48,7 +53,7 @@ Optional metadata and imagery:
 - `--date "$REPORT_DATE"`: override the Markdown metadata date and today's fallback.
 - `--cover-image "$COVER_IMAGE"`: use a verified local raster image inside the report directory when the selected visual system benefits from subject-specific imagery, especially Maison, Atlas, Horizon, Terrain, Current, or Apricot.
 
-When the user did not choose a template, render Executive first, then render the non-Executive result from `select_adaptive_companion()` in `scripts/pdf_templates.py` to a second filename. Both PDFs must use the same Markdown, evidence, and Rewild receipt.
+When the user did not choose a template, render Executive first, then render the non-Executive result from `select_adaptive_companion()` in `scripts/pdf_templates.py` to a second filename. Both PDFs must use the same Markdown, evidence, Rewild receipt, and content receipt.
 
 The contents page includes only the report structure: section titles, short section descriptions, and page numbers. Do not add document-control or engagement panels.
 
@@ -56,13 +61,13 @@ Relative raster-image paths resolve from the Markdown file's directory. Remote i
 
 ## Validate
 
-Run the ledger validator first, then cross-check the report and PDF:
+Reopen and cross-check the report and rendered PDF:
 
 ```bash
-"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_ledger.py" "$LEDGER_JSON"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
   "$REPORT_MD" --ledger "$LEDGER_JSON" \
-  --rewild-receipt "$REWILD_RECEIPT" --pdf "$REPORT_PDF" \
+  --rewild-receipt "$REWILD_RECEIPT" --content-receipt "$CONTENT_RECEIPT" \
+  --pdf "$REPORT_PDF" \
   --expected-lang "$REPORT_LANG" \
   --min-sources 1 --min-sections 3 \
   --min-pages 10 --min-text-chars 5000 --min-links 1

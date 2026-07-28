@@ -8,7 +8,7 @@
 
 ## 主要流程
 
-系统会把 Markdown 转成 PDF，建立目录，并保留可点击的[资料来源](https://example.com/cn-source)。
+系统会把 Markdown 转成 PDF，建立目录，并保留可点击的[资料来源](https://example.com/cn-source)，让测试可以同时核对排版结果和引用路径。
 
 | 阶段 | 预期结果 |
 |---|---|

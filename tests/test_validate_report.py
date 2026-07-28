@@ -1,6 +1,8 @@
 import importlib.util
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -200,6 +202,32 @@ Words after the sources section.
                 encoding="utf-8",
             )
             self.assertEqual(1, validate_report.main([str(path)]))
+
+    def test_cli_requires_content_receipt_after_rewild_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            report = work / "report.md"
+            rewild = work / "rewild.json"
+            report.write_text(GOOD_REPORT, encoding="utf-8")
+            rewild.write_text("{}", encoding="utf-8")
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(
+                    validate_report,
+                    "validate_rewild_receipt",
+                    return_value=[],
+                ),
+                redirect_stderr(stderr),
+            ):
+                result = validate_report.main(
+                    [
+                        str(report),
+                        "--rewild-receipt",
+                        str(rewild),
+                    ]
+                )
+            self.assertEqual(1, result)
+            self.assertIn("Content quality gate receipt is required", stderr.getvalue())
 
     def test_pdf_validation_counts_clickable_links(self):
         class Annotation:

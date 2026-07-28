@@ -8,7 +8,7 @@ Alexandria is named after the Library of Alexandria (the great library of the an
 
 1. **Frame the subject.** Alexandria can approach a person, organization, artifact, event, concept, system, or any combination of them. These categories are research lenses, not boundaries: anything can be researched. There are no fixed subject limits, so ask any question.
 2. **Research with context.** It checks current claims against fresh evidence without throwing away older sources that explain the history or mechanism. Each important claim keeps its source, date, confidence, and any serious contradiction.
-3. **Write and produce.** The evidence becomes one argument rather than a pile of notes. Before typesetting, every draft must pass a bundled Rewild gate for English, Simplified Chinese, or Hong Kong Traditional Chinese: it inspects AI-writing tells, rewrites only where needed, checks the result against the evidence, and blocks production until fidelity and regional-language problems are gone.
+3. **Write and produce.** The evidence becomes one argument rather than a pile of notes; before typesetting, every draft must pass the language-specific Rewild gate and a second content review that tests the conclusion, source independence, counterevidence, reasoning, depth, and practical value against the exact final report.
 
 You spend less time directing the research and sorting links. What comes back is a coherent argument with sources you can inspect.
 

@@ -262,6 +262,8 @@ class ConverterUnitTests(unittest.TestCase):
                     takeaway_label="Takeaway",
                 )
                 self.assertIsNone(re.search(r"__[A-Z_]+__", css))
+                self.assertIn('@font-face', css)
+                self.assertIn('font-family: "Alexandria Sans"', css)
 
     def test_paged_media_css_keeps_rules_and_rows_out_of_content(self):
         css = self.converter.build_css(

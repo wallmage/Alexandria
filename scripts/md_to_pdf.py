@@ -67,6 +67,8 @@ SAFE_ATTRIBUTES = {
     "code": {"class"},
 }
 LOCAL_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+BUNDLED_FONT_SUFFIXES = {".ttf"}
+BUNDLED_FONT_ROOT = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 SAFE_IMAGE_DATA_TYPES = (
     "data:image/png",
     "data:image/jpeg",
@@ -77,25 +79,25 @@ MAX_ASSET_BYTES = 25_000_000
 MIN_COVER_SHORT_EDGE = 600
 MIN_COVER_LONG_EDGE = 1000
 
-FONT_SANS_EN = '"Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif'
+FONT_SANS_EN = '"Alexandria Sans", "Avenir Next", "Helvetica Neue", Arial, sans-serif'
 FONT_SANS_CN = (
-    '"Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB", '
+    '"Alexandria Sans", "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB", '
     '"Microsoft YaHei", "Droid Sans Fallback", Arial, sans-serif'
 )
 FONT_SANS_HK = (
-    '"Noto Sans CJK HK", "PingFang HK", "Hiragino Sans", '
+    '"Alexandria Sans", "Noto Sans CJK HK", "PingFang HK", "Hiragino Sans", '
     '"Microsoft JhengHei", "Droid Sans Fallback", Arial, sans-serif'
 )
 FONT_SERIF_EN = (
-    '"Iowan Old Style", "Baskerville", "Palatino Linotype", Georgia, serif'
+    '"Alexandria Serif", "Iowan Old Style", Baskerville, Georgia, serif'
 )
 FONT_SERIF_CN = (
-    '"Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", serif'
+    '"Alexandria Serif", "Noto Serif CJK SC", "Songti SC", STSong, SimSun, serif'
 )
 FONT_SERIF_HK = (
-    '"Noto Serif CJK HK", "Songti TC", "STSong", "PMingLiU", serif'
+    '"Alexandria Serif", "Noto Serif CJK HK", "Songti TC", STSong, PMingLiU, serif'
 )
-FONT_MONO = '"Menlo", "Consolas", "Courier New", Courier, monospace'
+FONT_MONO = '"Alexandria Mono", Menlo, Consolas, "Courier New", monospace'
 
 
 class SafeHTMLParser(HTMLParser):
@@ -197,9 +199,14 @@ def make_url_fetcher(asset_root, default_fetcher=None):
             else unquote(parsed.path)
         )
         resource_path = Path(raw_path).resolve()
-        if not resource_path.is_relative_to(asset_root):
+        is_report_asset = resource_path.is_relative_to(asset_root)
+        is_bundled_font = (
+            resource_path.is_relative_to(BUNDLED_FONT_ROOT)
+            and resource_path.suffix.lower() in BUNDLED_FONT_SUFFIXES
+        )
+        if not (is_report_asset or is_bundled_font):
             raise ValueError(f"Asset is outside the report directory: {resource_path}")
-        if resource_path.suffix.lower() not in LOCAL_ASSET_SUFFIXES:
+        if is_report_asset and resource_path.suffix.lower() not in LOCAL_ASSET_SUFFIXES:
             raise ValueError(f"Unsupported local asset type: {resource_path.suffix}")
         if resource_path.stat().st_size > MAX_ASSET_BYTES:
             raise ValueError(

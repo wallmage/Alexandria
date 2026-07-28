@@ -51,6 +51,13 @@ class RepositoryContractTests(unittest.TestCase):
         missing = [path for path in sorted(local_paths) if not (ROOT / path).is_file()]
         self.assertEqual([], missing)
 
+    def test_open_fonts_are_bundled_with_their_licenses(self):
+        font_root = ROOT / "assets" / "fonts"
+        for family in ("SourceSans3", "SourceSerif4", "SourceCodePro"):
+            with self.subTest(family=family):
+                self.assertGreater((font_root / f"{family}.ttf").stat().st_size, 100_000)
+                self.assertTrue((font_root / f"OFL-{family}.txt").is_file())
+
     def test_skill_is_progressively_disclosed_and_runtime_neutral(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertLess(len(skill.split()), 3000)

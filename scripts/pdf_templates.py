@@ -23,6 +23,28 @@ TEMPLATE_CHOICES = (
     "apricot",
 )
 
+FONT_ROOT = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+BUNDLED_FONT_CSS = f"""
+@font-face {{
+    font-family: "Alexandria Sans";
+    src: url("{(FONT_ROOT / "SourceSans3.ttf").as_uri()}") format("truetype");
+    font-weight: 200 900;
+    font-style: normal;
+}}
+@font-face {{
+    font-family: "Alexandria Serif";
+    src: url("{(FONT_ROOT / "SourceSerif4.ttf").as_uri()}") format("truetype");
+    font-weight: 200 900;
+    font-style: normal;
+}}
+@font-face {{
+    font-family: "Alexandria Mono";
+    src: url("{(FONT_ROOT / "SourceCodePro.ttf").as_uri()}") format("truetype");
+    font-weight: 200 900;
+    font-style: normal;
+}}
+"""
+
 
 @dataclass(frozen=True)
 class TemplateSpec:
@@ -3641,7 +3663,13 @@ def build_css(
         }
         else ""
     )
-    css = COMMON_CSS + shared_feature + TEMPLATE_CSS[template] + RESPONSIVE_COVER_CSS
+    css = (
+        BUNDLED_FONT_CSS
+        + COMMON_CSS
+        + shared_feature
+        + TEMPLATE_CSS[template]
+        + RESPONSIVE_COVER_CSS
+    )
     for placeholder, value in values.items():
         css = css.replace(placeholder, value)
     unresolved = sorted(set(re.findall(r"__[A-Z_]+__", css)))

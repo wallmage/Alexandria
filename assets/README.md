@@ -8,3 +8,9 @@
 - `apricot-workshop.jpeg` — exported from the user-supplied Pencil design as the Apricot template's workshop illustration.
 
 These files are visual fallbacks, not research evidence. A report may replace them with a verified, subject-relevant local raster image through `--cover-image`.
+
+## Fonts
+
+`fonts/` bundles Source Sans 3, Source Serif 4, and Source Code Pro so PDF
+typography is reproducible across macOS, Linux, and CI. Each family is
+distributed under the SIL Open Font License included beside the font file.

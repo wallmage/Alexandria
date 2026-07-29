@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from scripts.render_binding import expected_render_binding
+
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "validate_report.py"
 SPEC = importlib.util.spec_from_file_location("validate_report", MODULE_PATH)
 validate_report = importlib.util.module_from_spec(SPEC)
@@ -37,6 +39,598 @@ The outlook separates observation from inference and names what could change the
 
 
 class MarkdownValidationTests(unittest.TestCase):
+    def test_typed_identity_metadata_is_not_an_ungated_prose_channel(self):
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        safe_report = """# Report
+
+> Client: Acme Research
+> Prepared by: Alice Smith
+
+## Analysis
+
+## Sources
+
+- [Source](https://example.com/a)
+"""
+        self.assertEqual(
+            [],
+            validate_report.validate_report_against_ledger(
+                safe_report,
+                ledger,
+            ),
+        )
+
+        for field, value in (
+            ("Client", "Alice Stole Funds"),
+            ("Prepared by", "Alice Killed Bob"),
+            ("Client", "Acme Failed Audit"),
+        ):
+            with self.subTest(field=field, value=value):
+                report = (
+                    "# Report\n\n"
+                    f"> {field}: {value}\n\n"
+                    "## Analysis\n\n"
+                    "## Sources\n\n"
+                    "- [Source](https://example.com/a)\n"
+                )
+                errors = validate_report.validate_report_against_ledger(
+                    report,
+                    ledger,
+                )
+                self.assertTrue(
+                    any(
+                        value in error
+                        and "maps to no ledger claim" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_visible_assertions_cannot_bypass_ledger_validation_by_block_style(self):
+        cases = {
+            "heading": "### Revenue increased by 50 percent.",
+            "table": (
+                "| Metric | Result |\n"
+                "| --- | --- |\n"
+                "| Revenue | Increased by 50 percent. |"
+            ),
+            "blockquote": "> Revenue increased by 50 percent.",
+            "callout": "> [!METRIC]\n> Revenue increased by 50 percent.",
+            "cover standfirst": "> Revenue increased by 50 percent.",
+            "question": "Did revenue increase by 50 percent?",
+            "transition prefix": (
+                "This section examines why revenue increased by 50 percent."
+            ),
+        }
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        for name, assertion in cases.items():
+            with self.subTest(block_style=name):
+                report = (
+                    "# Report\n\n"
+                    f"{assertion}\n\n"
+                    "## Analysis\n\n"
+                    "Context only.\n\n"
+                    "## Sources\n\n"
+                    "- [Source](https://example.com/a)\n"
+                )
+                errors = validate_report.validate_report_against_ledger(
+                    report,
+                    ledger,
+                )
+                self.assertTrue(
+                    any(
+                        "maps to no ledger claim" in error
+                        and (
+                            "revenue" in error.lower()
+                            or "increased" in error.lower()
+                        )
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_duplicate_sources_heading_does_not_hide_later_visible_assertion(self):
+        report = """# Report
+
+## Sources
+
+- [Early source](https://example.com/a)
+
+## Analysis
+
+Revenue increased by 50 percent.
+
+## Sources
+
+- [Final source](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any("maps to no ledger claim" in error for error in errors),
+            errors,
+        )
+
+    def test_terminal_sources_allows_only_bibliography_entries(self):
+        report = """# Report
+
+## Analysis
+
+Supported analysis.
+
+## Sources
+
+- [Source](https://example.com/a)
+
+### Hidden conclusion
+
+Acme committed criminal fraud.
+"""
+        structure_errors = validate_report.validate_markdown(report)
+        self.assertTrue(
+            any("bibliography" in error.lower() for error in structure_errors),
+            structure_errors,
+        )
+
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        ledger_errors = validate_report.validate_report_against_ledger(
+            report,
+            ledger,
+        )
+        self.assertTrue(
+            any(
+                "criminal fraud" in error.lower()
+                and "maps to no ledger claim" in error
+                for error in ledger_errors
+            ),
+            ledger_errors,
+        )
+
+    def test_short_factual_heading_must_map_to_a_ledger_claim(self):
+        report = """# Report
+
+## Analysis
+
+### Acme committed criminal fraud
+
+## Sources
+
+- [Source](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                "criminal fraud" in error.lower()
+                and "maps to no ledger claim" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_each_table_row_requires_its_own_claim_mapping(self):
+        supported = "Acme revenue increased by 10 percent."
+        report = f"""# Report
+
+## Analysis
+
+| Finding |
+| --- |
+| {supported} |
+| Acme committed criminal fraud. |
+
+## Sources
+
+- [Source](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": supported,
+                    "kind": "fact",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                    "extract_or_location": supported,
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": supported,
+                        }
+                    ],
+                    "report_excerpts": [supported],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                "criminal fraud" in error.lower()
+                and "maps to no ledger claim" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_factual_table_header_cannot_pose_as_a_column_label(self):
+        report = """# Report
+
+## Analysis
+
+| Acme committed criminal fraud |
+| --- |
+
+## Sources
+
+- [Source](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                "criminal fraud" in error.lower()
+                and "maps to no ledger claim" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_bibliography_link_label_cannot_carry_an_unsupported_claim(self):
+        report = """# Report
+
+## Analysis
+
+Context only.
+
+## Sources
+
+- [Acme committed criminal fraud](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                "criminal fraud" in error.lower()
+                and "maps to no ledger claim" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_present_tense_short_heading_must_map_to_a_claim(self):
+        report = """# Report
+
+## Analysis
+
+### Beta launches Nova
+
+## Sources
+
+- [Normal source title](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                "Beta launches Nova" in error
+                and "maps to no ledger claim" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_irregular_verb_assertions_in_headings_and_source_labels_must_map(self):
+        assertions = (
+            "Beta won the contract",
+            "Beta led the market",
+            "Beta sold Nova",
+        )
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        for assertion in assertions:
+            for location, rendered in (
+                ("heading", f"### {assertion}"),
+                (
+                    "source label",
+                    f"- [{assertion}](https://example.com/a)",
+                ),
+            ):
+                with self.subTest(assertion=assertion, location=location):
+                    report = (
+                        "# Report\n\n"
+                        "## Analysis\n\n"
+                        f"{rendered if location == 'heading' else 'Context only.'}\n\n"
+                        "## Sources\n\n"
+                        f"{rendered if location == 'source label' else '- [Source](https://example.com/a)'}\n"
+                    )
+                    errors = validate_report.validate_report_against_ledger(
+                        report,
+                        ledger,
+                    )
+                    self.assertTrue(
+                        any(
+                            assertion in error
+                            and "maps to no ledger claim" in error
+                            for error in errors
+                        ),
+                        errors,
+                    )
+
+    def test_structural_suffix_cannot_hide_an_assertion(self):
+        assertions = (
+            "Acme failed audit",
+            "Acme falsified audit",
+            "Beta lost market audit",
+        )
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [],
+        }
+        for assertion in assertions:
+            for location, rendered in (
+                ("heading", f"### {assertion}"),
+                (
+                    "source label",
+                    f"- [{assertion}](https://example.com/a)",
+                ),
+            ):
+                with self.subTest(assertion=assertion, location=location):
+                    report = (
+                        "# Report\n\n"
+                        "## Analysis\n\n"
+                        f"{rendered if location == 'heading' else ''}\n\n"
+                        "## Sources\n\n"
+                        f"{rendered if location == 'source label' else '- [Source](https://example.com/a)'}\n"
+                    )
+                    errors = validate_report.validate_report_against_ledger(
+                        report,
+                        ledger,
+                    )
+                    self.assertTrue(
+                        any(
+                            assertion in error
+                            and "maps to no ledger claim" in error
+                            for error in errors
+                        ),
+                        errors,
+                    )
+
+    def test_exact_ledger_source_title_remains_a_valid_source_label(self):
+        report = """# Report
+
+## Analysis
+
+Context only.
+
+## Sources
+
+- [Beta won the contract](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {
+                    "source_id": "S1",
+                    "url": "https://example.com/a",
+                    "title": "Beta won the contract",
+                }
+            ],
+            "claims": [],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertFalse(
+            any("Beta won the contract" in error for error in errors),
+            errors,
+        )
+
+    def test_mapped_table_cell_does_not_cover_unrelated_sibling_cell(self):
+        supported = "Alpha revenue increased."
+        report = f"""# Report
+
+## Analysis
+
+| Supported finding | Unrelated finding |
+| --- | --- |
+| {supported} [Source](https://example.com/a) | Beta launches Nova. |
+
+## Sources
+
+- [Normal source title](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": supported,
+                    "kind": "fact",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                    "extract_or_location": supported,
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": supported,
+                        }
+                    ],
+                    "report_excerpts": [supported],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                "Beta launches Nova" in error
+                and "maps to no ledger claim" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_mapped_excerpt_does_not_cover_an_appended_assertion_in_same_cell(self):
+        supported = "Alpha revenue increased."
+        unsupported = "Beta won the contract."
+        report = f"""# Report
+
+## Analysis
+
+| Finding |
+| --- |
+| {supported} {unsupported} |
+
+## Sources
+
+- [Source](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": supported,
+                    "kind": "fact",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                    "extract_or_location": supported,
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": supported,
+                        }
+                    ],
+                    "report_excerpts": [supported],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertTrue(
+            any(
+                unsupported in error
+                and "maps to no ledger claim" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_sentence_units_do_not_split_decimal_numbers(self):
+        supported = "Alpha revenue reached 3.14 percent."
+        report = f"""# Report
+
+## Analysis
+
+{supported} [Source](https://example.com/a)
+
+## Sources
+
+- [Source](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-07-29",
+            "people": [],
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"}
+            ],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim": supported,
+                    "kind": "fact",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                    "extract_or_location": supported,
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": supported,
+                        }
+                    ],
+                    "report_excerpts": [supported],
+                }
+            ],
+        }
+        errors = validate_report.validate_report_against_ledger(report, ledger)
+        self.assertEqual([], errors)
+
     def test_cited_qualitative_fact_must_map_to_a_ledger_claim(self):
         report = """# Report
 
@@ -332,6 +926,31 @@ Words after the sources section.
         self.assertIn("Sources must be the final H2 section.", errors)
         self.assertTrue(any("Markdown links" in error for error in errors))
 
+    def test_requires_exactly_one_terminal_sources_heading(self):
+        report = """# Title
+
+## Sources
+
+- [Early](https://example.com/early)
+
+## Analysis
+
+Visible analysis.
+
+## Sources
+
+- [Final](https://example.com/final)
+"""
+        errors = validate_report.validate_markdown(
+            report,
+            min_sources=1,
+            min_sections=1,
+        )
+        self.assertTrue(
+            any("exactly one" in error.lower() for error in errors),
+            errors,
+        )
+
     def test_cli_does_not_create_success_for_invalid_markdown(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.md"
@@ -427,6 +1046,99 @@ Words after the sources section.
         joined = " ".join(errors)
         for phrase in ("title metadata", "author metadata", "tagged", "language", "A4", "bookmarks"):
             self.assertIn(phrase, joined)
+
+    def test_pdf_validation_rejects_binding_for_a_different_report(self):
+        class Page:
+            mediabox = SimpleNamespace(width=595.28, height=841.89)
+
+            def extract_text(self):
+                return "report text"
+
+            def get(self, key, default):
+                return default
+
+        fake_pypdf = SimpleNamespace(PdfReader=lambda path: SimpleNamespace(
+            pages=[Page()],
+            metadata={
+                "/Title": "Title",
+                "/Author": "Author",
+                "/Keywords": "alexandria-input-v1:" + "0" * 64,
+            },
+            root_object={
+                "/MarkInfo": {"/Marked": True},
+                "/StructTreeRoot": {},
+                "/Outlines": {},
+                "/Lang": "en",
+            },
+        ))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = []
+            for index in range(5):
+                artifact = root / f"artifact-{index}"
+                artifact.write_text(f"artifact {index}", encoding="utf-8")
+                artifacts.append(artifact)
+            with mock.patch.dict("sys.modules", {"pypdf": fake_pypdf}):
+                errors = validate_report.validate_pdf(
+                    Path("report.pdf"),
+                    expected_lang="en",
+                    artifact_paths=tuple(artifacts),
+                )
+        self.assertIn("different gated artifacts", " ".join(errors))
+
+    def test_pdf_validation_requires_renderer_issued_output_proof(self):
+        class Page:
+            mediabox = SimpleNamespace(width=595.28, height=841.89)
+
+            def extract_text(self):
+                return "unrelated PDF text"
+
+            def get(self, key, default):
+                return default
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pdf = root / "unrelated.pdf"
+            pdf.write_bytes(b"not the renderer output")
+            artifacts = []
+            for index in range(5):
+                artifact = root / f"artifact-{index}"
+                artifact.write_text(f"artifact {index}", encoding="utf-8")
+                artifacts.append(artifact)
+            binding = expected_render_binding(*artifacts)
+            fake_pypdf = SimpleNamespace(
+                PdfReader=lambda path: SimpleNamespace(
+                    pages=[Page()],
+                    metadata={
+                        "/Title": "Title",
+                        "/Author": "Author",
+                        "/Keywords": binding,
+                    },
+                    root_object={
+                        "/MarkInfo": {"/Marked": True},
+                        "/StructTreeRoot": {},
+                        "/Outlines": {},
+                        "/Lang": "en",
+                    },
+                )
+            )
+            with (
+                mock.patch.dict("sys.modules", {"pypdf": fake_pypdf}),
+                mock.patch.object(
+                    validate_report,
+                    "_page_quality_errors",
+                    return_value=[],
+                ),
+            ):
+                errors = validate_report.validate_pdf(
+                    pdf,
+                    expected_lang="en",
+                    artifact_paths=tuple(artifacts),
+                )
+        self.assertTrue(
+            any("render receipt" in error.lower() for error in errors),
+            errors,
+        )
 
     def test_pdf_validation_resolves_indirect_mark_info(self):
         class Indirect:
@@ -525,8 +1237,8 @@ Words after the sources section.
         }
         errors = validate_report.validate_report_against_ledger(report, ledger)
         joined = " ".join(errors)
-        self.assertIn("quantity '900'", joined)
-        self.assertIn("asserts 'patched'", joined)
+        self.assertIn("maps to no ledger claim", joined)
+        self.assertIn("900 incidents, all patched", joined)
 
     def test_markdown_url_parser_keeps_balanced_parentheses(self):
         url = "https://en.wikipedia.org/wiki/Function_(mathematics)"

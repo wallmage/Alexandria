@@ -434,6 +434,56 @@
         }
       }
     },
+    "namedSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "subject_type", "person_id"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subject_type": {
+          "description": "Semantic subject type. Organization is not a self-attested safety bypass: validation rejects names that independently resolve as people.",
+          "enum": ["person", "organization"]
+        },
+        "person_id": {
+          "type": ["string", "null"],
+          "pattern": "^P[0-9]+$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "subject_type": {"const": "person"}
+            },
+            "required": ["subject_type"]
+          },
+          "then": {
+            "properties": {
+              "person_id": {
+                "type": "string",
+                "pattern": "^P[0-9]+$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subject_type": {"const": "organization"}
+            },
+            "required": ["subject_type"]
+          },
+          "then": {
+            "properties": {
+              "person_id": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
     "searchRecord": {
       "type": "object",
       "additionalProperties": false,
@@ -627,7 +677,7 @@
           "pattern": "^S[0-9]+$"
         },
         "extract_or_location": {
-          "description": "The exact extract or precise location supplied by this individual source. Live fidelity checks bind probes to this source only.",
+          "description": "The exact extract or precise location supplied by this individual source. Each source record is validated independently and may not borrow a carrier, value, comparator, or unit from another record. Quantitative evidence must identify the claim's complete canonical metric carrier and preserve prefix or postfix comparators plus complete symbolic or worded unit syntax; a bare figure is insufficient. Live fidelity checks bind probes to this source only.",
           "type": "string",
           "minLength": 1
         }
@@ -903,7 +953,7 @@
           "uniqueItems": true
         },
         "extract_or_location": {
-          "description": "The quoted or located evidence behind claim. Every quantitative token and status assertion in claim must be covered here or declared in derived_assertions.",
+          "description": "The quoted or located evidence behind claim. Every source_evidence record is checked independently. Every quantitative token must preserve its prefix or postfix comparator, full symbolic or worded unit syntax, and complete canonical metric carrier; a bare figure is insufficient. Every quantitative token and status assertion must be covered here or declared in derived_assertions.",
           "type": ["string", "null"]
         },
         "source_evidence": {
@@ -993,6 +1043,13 @@
             "pattern": "^P[0-9]+$"
           },
           "uniqueItems": true
+        },
+        "named_subjects": {
+          "description": "Explicit inventory of every named person or organization in harmful or sensitive claim/report text. Organization typing is independently checked and cannot override a name that resolves as a person. Registered person claims may omit entries when person_ids and the people registry already resolve the name.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/namedSubject"
+          }
         },
         "person_claim_role": {
           "description": "Required whenever person_ids is non-empty. Classifies the claim before vocabulary-based safety checks so harmful, private, response, and resolution claims cannot rely on a finite keyword list.",

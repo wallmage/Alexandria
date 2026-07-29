@@ -9,12 +9,14 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 try:
     from .validate_ledger import validate_references, validate_schema
     from .validate_report import (
         SOURCE_HEADINGS,
         _h2_sections,
+        _mask_fenced_code,
         validate_report_against_ledger,
     )
 except ImportError:
@@ -22,6 +24,7 @@ except ImportError:
     from validate_report import (
         SOURCE_HEADINGS,
         _h2_sections,
+        _mask_fenced_code,
         validate_report_against_ledger,
     )
 
@@ -107,6 +110,107 @@ def _section_review_errors(report_text, review):
                 f"Section review {heading} is not in the final report."
             )
     return errors
+
+
+def _rendered_markdown_visual_references(report_text):
+    """Return image references that visible report Markdown can render."""
+    visible = _mask_fenced_code(report_text)
+    visible = re.sub(r"<!--.*?-->", " ", visible, flags=re.DOTALL)
+    visible = re.sub(r"`[^`\n]*`", " ", visible)
+    references = []
+    for match in re.finditer(
+        r"!\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)\n]+))",
+        visible,
+    ):
+        references.append(match.group(1) or match.group(2))
+    references.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"""(?i)<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>""",
+            visible,
+        )
+    )
+    return references
+
+
+def _rendered_markdown_visual_paths(report_text):
+    """Discover local raster paths that Markdown can render."""
+    paths = set()
+    for reference in _rendered_markdown_visual_references(report_text):
+        parsed = urlparse(reference.strip())
+        if parsed.scheme or reference.startswith(("#", "data:")):
+            continue
+        paths.add(Path(unquote(parsed.path)).as_posix())
+    return paths
+
+
+def _approved_visual_assets(report_path, report_text, review):
+    """Validate reviewed local visuals and return receipt-safe bindings."""
+    report_root = Path(report_path).resolve().parent
+    approved = []
+    errors = []
+    if any(
+        urlparse(reference.strip()).scheme.casefold() == "data"
+        for reference in _rendered_markdown_visual_references(report_text)
+    ):
+        errors.append(
+            "Embedded data images are not allowed in report Markdown; "
+            "use a reviewed local raster asset."
+        )
+    seen = set()
+    for record in review.get("visual_assets", []):
+        if not isinstance(record, dict):
+            continue
+        raw_path = record.get("path")
+        if not isinstance(raw_path, str):
+            continue
+        relative = Path(raw_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            errors.append(
+                f"Reviewed visual asset must use a report-relative path: {raw_path}."
+            )
+            continue
+        normalized_path = relative.as_posix()
+        if normalized_path in seen:
+            errors.append(f"Duplicate visual asset review: {normalized_path}.")
+            continue
+        seen.add(normalized_path)
+        candidate = (report_root / relative).resolve()
+        try:
+            candidate.relative_to(report_root)
+        except ValueError:
+            errors.append(
+                f"Reviewed visual asset escapes the report directory: {raw_path}."
+            )
+            continue
+        try:
+            digest = file_sha256(candidate)
+        except OSError as exc:
+            errors.append(
+                f"Reviewed visual asset could not be verified: {raw_path}: {exc}"
+            )
+            continue
+        if digest != record.get("sha256"):
+            errors.append(
+                f"Reviewed visual asset hash does not match: {raw_path}."
+            )
+            continue
+        if record.get("disposition") != "approved":
+            errors.append(f"Visual asset is not approved: {raw_path}.")
+            continue
+        approved.append({"path": normalized_path, "sha256": digest})
+    discovered = _rendered_markdown_visual_paths(report_text)
+    body_approvals = {
+        record.get("path")
+        for record in review.get("visual_assets", [])
+        if isinstance(record, dict)
+        and record.get("usage") in {"body", "body_and_cover"}
+    }
+    for path in sorted(discovered - body_approvals):
+        errors.append(f"Unapproved visual asset in report Markdown: {path}.")
+    for path in sorted(body_approvals - discovered):
+        errors.append(f"Unused visual asset approval in report Markdown: {path}.")
+    return approved, errors
 
 
 def _write_receipt(path, payload):
@@ -216,6 +320,12 @@ def run_content_gate(
 
     report_hash = file_sha256(report_path)
     ledger_hash = file_sha256(ledger_path)
+    approved_visual_assets, visual_asset_errors = _approved_visual_assets(
+        report_path,
+        report_text,
+        review,
+    )
+    errors.extend(visual_asset_errors)
     if not _same_bound_name(review.get("report_path"), report_path):
         errors.append("Content review belongs to a different final report.")
     if review.get("report_sha256") != report_hash:
@@ -272,6 +382,7 @@ def run_content_gate(
             source_fidelity_receipt_path
         ),
         "minimum_score": min(item["score"] for item in scores.values()),
+        "approved_visual_assets": approved_visual_assets,
     }
     _write_receipt(receipt_path, receipt)
     return []

@@ -17,6 +17,7 @@
     "scores",
     "checks",
     "section_reviews",
+    "visual_assets",
     "findings",
     "evidence_limitations",
     "completion_note"
@@ -155,6 +156,12 @@
         "$ref": "#/$defs/sectionReview"
       }
     },
+    "visual_assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/visualAsset"
+      }
+    },
     "evidence_limitations": {
       "type": "array",
       "items": {
@@ -224,6 +231,37 @@
         },
         "disposition": {
           "const": "keep"
+        }
+      }
+    },
+    "visualAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "usage",
+        "visible_text_and_claims_review",
+        "disposition"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "usage": {
+          "enum": ["body", "cover", "body_and_cover"]
+        },
+        "visible_text_and_claims_review": {
+          "type": "string",
+          "minLength": 20
+        },
+        "disposition": {
+          "const": "approved"
         }
       }
     },

@@ -5,7 +5,8 @@ description: Use when a user asks for deep research, a deep dive, investigation,
 
 # Alexandria
 
-Produce a source-backed research report that is useful to a decision-maker and pleasant to read. The normal deliverables are one Markdown source file and one or two visually checked PDFs, according to the template-choice rule below.
+Produce a source-backed research report that is useful to a decision-maker and
+pleasant to read. Deliver Markdown and one or two visually checked PDFs.
 
 Resolve `SKILL_ROOT` to the absolute directory containing this `SKILL.md` before running bundled scripts. Never assume the current working directory is the skill directory, and never install dependencies into the user's project.
 
@@ -23,14 +24,14 @@ An Alexandria report must:
 8. Pass the report-bound content quality gate before rendering.
 9. Survive structural, PDF, and visual checks before delivery.
 
-Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar names and spellings before building the report around them.
+Never invent facts, quotations, sources, dates, URLs, or subjects. Verify
+spellings.
 
 ## 1. Frame the assignment
 
-Infer what is safe from context. Read `references/pdf-templates.md`, then ask its
-four intake questions—template, prepared by, client, and confidentiality—in one
-non-blocking update. Include all eleven templates with their complete one-sentence
-descriptions. Begin research in the same turn.
+Infer what is safe from context. Read `references/pdf-templates.md`, ask its
+four intake questions with complete one-sentence descriptions of all eleven
+templates. Begin research in the same turn.
 Never wait for an answer.
 
 Apply later answers before rendering. Without answers, use Alexandria as
@@ -44,7 +45,6 @@ Determine:
 - intended reader and decision;
 - time horizon and geographic scope;
 - explicit output language;
-- useful depth;
 - whether the topic needs current web research.
 - PDF template and optional cover image;
 - prepared-by name, optional client name, and confidentiality state.
@@ -73,9 +73,8 @@ Alexandria is deliberately long-form. The delivery bounds are hard:
 - **Simplified or Traditional Chinese:** 5,000–10,000 non-whitespace characters.
 - **Production target:** roughly ten or more finished PDF pages, depending on language, tables, and layout.
 
-Adapt depth within those limits. Deepen short drafts with research into history,
-counterevidence, alternatives, or implications; never pad. Compress repetition
-in long drafts without deleting decisive evidence.
+Deepen short drafts with history, counterevidence, alternatives, or
+implications; never pad. Compress repetition without deleting decisive evidence.
 
 ## 2. Design the research
 
@@ -87,10 +86,9 @@ Read `references/research-protocol.md` and `references/content-quality.md`. Crea
 4. a version-3 evidence ledger using `references/evidence-ledger.schema.json`;
 5. an explicit list of unresolved questions and their effect on the verdict.
 
-For parallel research, assign exclusive coverage and disjoint source/claim ID
-ranges. Each agent returns ledger entries, contradictions, gaps, and synthesis.
-The primary agent deduplicates and reconciles IDs before validation. Apply the
-same coverage plan sequentially when parallel work is unavailable.
+For parallel research, assign exclusive coverage and disjoint ID ranges. Each
+agent returns ledger entries, contradictions, gaps, and synthesis. Reconcile
+IDs before validation; use the same plan sequentially when needed.
 
 Use the runtime date in time-sensitive queries. Do not hard-code a calendar year.
 
@@ -98,7 +96,7 @@ Use the runtime date in time-sensitive queries. Do not hard-code a calendar year
 
 Use available search and browser capabilities. Prefer primary sources where they answer the claim directly, then add independent corroboration or criticism where it matters.
 
-Freshness applies to claims, not to the entire bibliography:
+Apply freshness by claim:
 
 - current state, price, leadership, availability, policy, and performance require the newest authoritative evidence available;
 - recent events need contemporaneous reporting and later corrections where available;
@@ -121,18 +119,23 @@ For every consequential claim, add a ledger entry with:
 - honest triangulation status;
 - reciprocal supporting or contradicting claim IDs and conflict resolution.
 
-A claim may not assert more than its per-source evidence carries. Every number,
-date, version, score, unit, direction, and status in `claim` must appear in
-`source_evidence`, be declared in `derived_assertions`, or — for original
-arithmetic — be recorded as `kind: estimate` with `assumptions`. Record
+A claim may not assert more than its per-source evidence carries. Every
+quantity in `claim` must preserve its sign, comparator, magnitude, scale,
+currency, and measurement dimension in `source_evidence`; this includes
+Arabic and Chinese numerals. Dates, versions, scores, directions, and statuses
+must likewise appear in `source_evidence`, be declared in
+`derived_assertions`, or — for original arithmetic — be recorded as
+`kind: estimate` with `assumptions`. Record
 `verified_at`, the date you re-read the source, separately from `as_of`, the date
 the fact was true. `supports` points downward only, to the evidence a claim rests
 on; cycles are rejected.
 
-Bind every named person through `people` and `person_ids`, then classify every
-person-linked claim with `person_claim_role` and a substantive
-`person_claim_assessment`; do not rely on a keyword scan to decide whether a
-claim is harmful. Harmful claims about a living, recently
+Inventory every named person in every archetype through `people` and
+`person_ids`; omitting a person from the registry is a validation failure, not
+a way to bypass screening. Classify every person-linked claim with
+`person_claim_role` and a substantive `person_claim_assessment`; do not rely
+on supplied IDs alone to decide whether a claim is harmful. Harmful claims
+about a living, recently
 deceased, or unknown-status person require
 `human_harm_review`: exact legal stage, accountable corroboration (or a limited
 single-source exception), attribution, resolution search, right of reply, and
@@ -279,6 +282,10 @@ ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
   --online --receipt "$SOURCE_FIDELITY_RECEIPT"
 ```
 
+The receipt is only an audit record. Rendering and final validation re-read the
+sample through production transport and fail on unavailable, changed, or
+fabricated evidence.
+
 Review the exact post-Rewild report and final ledger using Section 13 of `references/content-quality.md`. Include the three structural counts in Section 13: the closing-sentence census, the section-shape census, and the section-length spread. Record structural uniformity as a `structure` finding. Use an independent reviewer when available; otherwise use a context-isolated fresh-eyes pass. Record the review in `CONTENT_REVIEW_NOTE` using `references/content-review.schema.json`.
 
 Every dimension must score at least 4. Fix critical findings. A major evidence limitation may remain only when the report clearly discloses it and the review records the exact disclosure. Then issue a receipt:
@@ -332,7 +339,7 @@ Use `--expected-lang zh-HK` instead for Hong Kong Traditional Chinese. Then manu
   ledger claim or carries a nearby citation;
 - every negative existence claim carries its search record;
 - citations support the exact nearby claim;
-- Sources is the final H2 section;
+- exactly one Sources heading exists and it is the final H2 section;
 - links open and point to the intended page;
 - dates and “as of” statements are clear;
 - the conclusion reflects the evidence, including uncertainty;
@@ -359,11 +366,13 @@ Read `references/pdf-production.md`. Use the supplied scripts and pinned depende
   --min-pages 10 --min-text-chars 5000 --min-links 1
 ```
 
-Reuse the Step 7 environment. The PDF converter refuses to replace an existing output unless `--force` is explicitly supplied; prefer a versioned filename to overwriting a prior report.
+Reuse the Step 7 environment. Existing output requires `--force`; prefer a
+versioned filename. Validation deterministically rerenders from gated inputs
+and receipt options, rejecting forged, stale, or modified PDFs.
 
 Repeat the language-specific hard length flags from Step 7 in the PDF validation command: `--min-words 7500 --max-words 15000` for English, or `--min-chars 5000 --max-chars 10000` for either Chinese variant. The converter independently rejects a missing, stale, wrong-language, or short-report receipt before loading the render engine.
 
-Add `--client "$CLIENT_NAME"` only when the user supplied a non-empty client. Add `--confidential` only when the user turned confidentiality On. Add `--cover-image "$COVER_IMAGE"` only for a verified local raster image inside the report directory.
+Put custom client/preparer labels in typed H1 metadata before gating. Render only exact gated labels. Add confidentiality only when On; all custom images need approved path/hash visual reviews.
 
 Put a concise standfirst in the first blockquote immediately after the H1,
 followed by the report date. The renderer uses that standfirst on the cover and

@@ -17,6 +17,15 @@ from scripts.rewild_gate import (
     run_gate,
 )
 from scripts.validate_report import validate_rewild_receipt
+from tests.source_fidelity_transport import mock_production_transport
+
+FIXTURE_SOURCE_RESPONSES = {
+    "example.com": (
+        200,
+        {"content-type": "text/html"},
+        b"<html><body><h1>Example Domain</h1></body></html>",
+    )
+}
 
 
 def write_review(path, *, report=None, source=None, report_lang="en"):
@@ -506,6 +515,18 @@ class RewildReceiptTests(unittest.TestCase):
         self.assertIn("軟體專案品質", prose)
         self.assertNotIn("台灣軟體產業報告", prose)
 
+    def test_checker_prose_does_not_truncate_later_body_at_early_sources_heading(self):
+        text = (
+            "# Report\n\n"
+            "## Sources\n\n[Early source](https://example.com/early)\n\n"
+            "## Analysis\n\nRevenue increased by 50 percent.\n\n"
+            "## Sources\n\n[Final source](https://example.com/final)"
+        )
+        prose = _checker_prose(text)
+        self.assertIn("Revenue increased by 50 percent.", prose)
+        self.assertNotIn("Early source", prose)
+        self.assertNotIn("Final source", prose)
+
     def test_full_gate_rejects_traditional_body_as_simplified_chinese(self):
         traditional = (
             "經濟風險評估趨勢監測維護規劃環境財務審計價值"
@@ -806,7 +827,8 @@ class ReceiptAuditTrailTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             case = next(c for c in CASES if c["lang"] == "en")
-            build_case(case, work)
+            with mock_production_transport(FIXTURE_SOURCE_RESPONSES):
+                build_case(case, work)
             case_root = work / case["name"]
             report = case_root / "report.md"
             receipt = case_root / "receipt.json"
@@ -831,7 +853,8 @@ class ReceiptAuditTrailTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             case = next(c for c in CASES if c["lang"] == "en")
-            build_case(case, work)
+            with mock_production_transport(FIXTURE_SOURCE_RESPONSES):
+                build_case(case, work)
             case_root = work / case["name"]
             report = case_root / "report.md"
             receipt = case_root / "receipt.json"

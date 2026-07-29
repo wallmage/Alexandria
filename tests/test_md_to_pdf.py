@@ -1,4 +1,8 @@
+import base64
+import hashlib
 import importlib.util
+import io
+import json
 import os
 import re
 import subprocess
@@ -10,6 +14,26 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "md_to_pdf.py"
+
+
+def encoded_raster(image_format, *, size=(1, 1), frames=1):
+    """Return a real raster fixture encoded by Pillow."""
+    from PIL import Image
+
+    images = [
+        Image.new("RGB", size, color=(index % 2 * 255, 0, 0))
+        for index in range(frames)
+    ]
+    output = io.BytesIO()
+    images[0].save(
+        output,
+        format=image_format,
+        save_all=frames > 1,
+        append_images=images[1:],
+        duration=10,
+        loop=0,
+    )
+    return output.getvalue()
 
 
 def fake_markdown_module():
@@ -102,6 +126,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("--source-fidelity-receipt", result.stdout)
         self.assertIn("--content-receipt", result.stdout)
         self.assertIn("--ledger", result.stdout)
+        self.assertIn("--render-receipt", result.stdout)
 
     def test_rejects_non_pdf_output_before_loading_render_dependencies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -317,17 +342,172 @@ Body.
             )
 
     def test_data_url_limit_matches_decoded_asset_limit(self):
-        with mock.patch.object(self.converter, "MAX_ASSET_BYTES", 3):
+        image = encoded_raster("PNG")
+        encoded = base64.b64encode(image).decode("ascii")
+        with mock.patch.object(self.converter, "MAX_ASSET_BYTES", len(image)):
             fetcher = self.converter.make_url_fetcher(
                 Path("."),
                 default_fetcher=lambda url: {"string": url},
             )
             self.assertEqual(
-                {"string": "data:image/png;base64,AAAA"},
-                fetcher("data:image/png;base64,AAAA"),
+                {"string": f"data:image/png;base64,{encoded}"},
+                fetcher(f"data:image/png;base64,{encoded}"),
             )
             with self.assertRaisesRegex(ValueError, "resource limit"):
-                fetcher("data:image/png;base64,AAAAAAAA")
+                fetcher(f"data:image/png;base64,{encoded}AAAA")
+
+    def test_percent_encoded_data_url_is_bounded_before_unquoting(self):
+        with (
+            mock.patch.object(self.converter, "MAX_ASSET_BYTES", 1),
+            mock.patch.object(
+                self.converter,
+                "unquote_to_bytes",
+                side_effect=AssertionError("oversized payload was expanded"),
+            ),
+            self.assertRaisesRegex(ValueError, "resource limit"),
+        ):
+            self.converter.decode_image_data_url("data:image/png,%41%42")
+
+    def test_photo_cover_sources_are_html_attribute_escaped(self):
+        hostile = 'cover"><p id="injected">UNREVIEWED</p><img src="cover.png'
+
+        for template in ("maison", "terrain", "apricot", "horizon"):
+            with self.subTest(template=template):
+                rendered = self.converter.cover_art_html(template, hostile)
+                self.assertNotIn('<p id="injected">', rendered)
+                self.assertIn(
+                    'src="cover&quot;&gt;&lt;p id=&quot;injected&quot;&gt;'
+                    "UNREVIEWED&lt;/p&gt;&lt;img src=&quot;cover.png\"",
+                    rendered,
+                )
+
+    def test_cover_rejects_allowed_suffix_with_disallowed_decoded_format(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report = root / "report.md"
+            image = root / "cover.png"
+            report.write_text("# Report\n", encoding="utf-8")
+            image.write_bytes(encoded_raster("BMP", size=(1000, 600)))
+
+            with self.assertRaisesRegex(ValueError, "decoded image format"):
+                self.converter.validate_cover_image(report, image)
+
+    def test_local_image_rejects_allowed_suffix_with_disallowed_decoded_format(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            image = root / "figure.png"
+            image.write_bytes(encoded_raster("BMP"))
+            fetcher = self.converter.make_url_fetcher(
+                root, default_fetcher=lambda url: {"string": url}
+            )
+
+            with self.assertRaisesRegex(ValueError, "decoded image format"):
+                fetcher(image.as_uri())
+
+    def test_local_image_returns_the_exact_bytes_that_were_validated(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            image = root / "figure.png"
+            original = encoded_raster("PNG")
+            replacement = encoded_raster("BMP")
+            image.write_bytes(original)
+
+            def swapping_fetcher(url):
+                image.write_bytes(replacement)
+                return {"string": image.read_bytes()}
+
+            fetcher = self.converter.make_url_fetcher(root, swapping_fetcher)
+            fetched = fetcher(image.as_uri())
+
+            self.assertEqual(original, fetched["string"])
+            self.assertEqual("image/png", fetched["mime_type"])
+            self.assertEqual(original, image.read_bytes())
+
+    def test_local_image_rejects_symbolic_links(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target.png"
+            target.write_bytes(encoded_raster("PNG"))
+            linked = root / "linked.png"
+            linked.symlink_to(target.name)
+            fetcher = self.converter.make_url_fetcher(
+                root, default_fetcher=lambda url: {"string": url}
+            )
+
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                fetcher(linked.as_uri())
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires POSIX FIFOs")
+    def test_local_image_rejects_non_regular_files_before_decoding(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fifo = root / "stream.png"
+            os.mkfifo(fifo)
+            fetcher = self.converter.make_url_fetcher(
+                root, default_fetcher=lambda url: {"string": url}
+            )
+
+            with (
+                mock.patch.object(
+                    self.converter,
+                    "validate_raster_image",
+                    side_effect=AssertionError("non-regular file was decoded"),
+                ),
+                self.assertRaisesRegex(ValueError, "regular file"),
+            ):
+                fetcher(fifo.as_uri())
+
+    def test_data_image_rejects_disallowed_decoded_format_despite_allowed_mime(self):
+        payload = base64.b64encode(encoded_raster("BMP")).decode("ascii")
+        fetcher = self.converter.make_url_fetcher(
+            Path("."), default_fetcher=lambda url: {"string": url}
+        )
+
+        with self.assertRaisesRegex(ValueError, "decoded image format"):
+            fetcher(f"data:image/png;base64,{payload}")
+
+    def test_local_image_rejects_decoded_pixel_budget_overrun(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            image = root / "figure.png"
+            image.write_bytes(encoded_raster("PNG", size=(7, 7)))
+            fetcher = self.converter.make_url_fetcher(
+                root, default_fetcher=lambda url: {"string": url}
+            )
+
+            with (
+                mock.patch.dict(self.converter.__dict__, {"MAX_IMAGE_PIXELS": 40}),
+                self.assertRaisesRegex(ValueError, "pixel limit"),
+            ):
+                fetcher(image.as_uri())
+
+    def test_data_image_rejects_decoded_frame_budget_overrun(self):
+        payload = base64.b64encode(encoded_raster("GIF", frames=2)).decode("ascii")
+        fetcher = self.converter.make_url_fetcher(
+            Path("."), default_fetcher=lambda url: {"string": url}
+        )
+
+        with (
+            mock.patch.dict(self.converter.__dict__, {"MAX_IMAGE_FRAMES": 1}),
+            self.assertRaisesRegex(ValueError, "frame limit"),
+        ):
+            fetcher(f"data:image/gif;base64,{payload}")
+
+    def test_data_image_rejects_total_decoded_pixel_budget_overrun(self):
+        payload = base64.b64encode(
+            encoded_raster("GIF", size=(3, 3), frames=2)
+        ).decode("ascii")
+        fetcher = self.converter.make_url_fetcher(
+            Path("."), default_fetcher=lambda url: {"string": url}
+        )
+
+        with (
+            mock.patch.dict(
+                self.converter.__dict__, {"MAX_IMAGE_TOTAL_PIXELS": 10}
+            ),
+            self.assertRaisesRegex(ValueError, "total decoded pixel limit"),
+        ):
+            fetcher(f"data:image/gif;base64,{payload}")
 
     def test_every_visual_system_reaches_the_report_body(self):
         for template in self.converter.TEMPLATES:
@@ -355,6 +535,25 @@ Body.
             return self.converter.md_to_html(source, **kwargs)
 
     def render_pdf(self, source, output, **kwargs):
+        artifact_defaults = {
+            "rewild_receipt": source.parent / "rewild-receipt.json",
+            "content_receipt": source.parent / "content-receipt.json",
+            "ledger": source.parent / "ledger.json",
+            "source_fidelity_receipt": (
+                source.parent / "source-fidelity-receipt.json"
+            ),
+        }
+        for name, path in artifact_defaults.items():
+            if name not in kwargs:
+                path.write_text(
+                    (
+                        json.dumps({"approved_visual_assets": []})
+                        if name == "content_receipt"
+                        else name
+                    ),
+                    encoding="utf-8",
+                )
+                kwargs[name] = path
         with mock.patch.object(
             self.converter, "validate_rewild_for_render", return_value=None
         ), mock.patch.object(
@@ -363,9 +562,6 @@ Body.
             return self.converter.render_pdf(
                 source,
                 output,
-                rewild_receipt="receipt.json",
-                content_receipt="content-receipt.json",
-                ledger="ledger.json",
                 **kwargs,
             )
 
@@ -839,7 +1035,8 @@ Body.
     def test_asset_url_fetcher_blocks_parent_paths_and_network(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "image.png").write_bytes(b"ok")
+            image_bytes = encoded_raster("PNG")
+            (root / "image.png").write_bytes(image_bytes)
             fetched = []
 
             def default_fetcher(url):
@@ -847,8 +1044,10 @@ Body.
                 return {"string": b"ok"}
 
             fetch = self.converter.make_url_fetcher(root, default_fetcher)
-            fetch((root / "image.png").as_uri())
-            self.assertEqual(1, len(fetched))
+            result = fetch((root / "image.png").as_uri())
+            self.assertEqual(image_bytes, result["string"])
+            self.assertEqual("image/png", result["mime_type"])
+            self.assertEqual([], fetched)
             for blocked in (
                 (root.parent / "secret.txt").as_uri(),
                 "https://example.com/image.png",
@@ -958,6 +1157,337 @@ Body.
 
             with self.assertRaisesRegex(ValueError, "Rewild gate receipt"):
                 self.converter.render_pdf(source, output)
+
+    def test_rendered_pdf_records_the_exact_gated_artifact_binding(self):
+        from pypdf import PdfReader
+
+        from scripts.render_binding import (
+            file_sha256,
+            validate_render_receipt,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            output = temp / "report.pdf"
+            source.write_text("# Report\n\n## Finding\n\nEvidence.", encoding="utf-8")
+            self.render_pdf(source, output)
+            metadata = PdfReader(output).metadata or {}
+            receipt = json.loads(
+                output.with_suffix(".render.json").read_text(encoding="utf-8")
+            )
+            output_hash = file_sha256(output)
+            receipt_errors = validate_render_receipt(
+                output,
+                receipt,
+                source,
+                temp / "ledger.json",
+                temp / "rewild-receipt.json",
+                temp / "content-receipt.json",
+                temp / "source-fidelity-receipt.json",
+                pdf_binding=metadata.get("/Keywords"),
+            )
+        self.assertEqual(receipt["binding"], metadata.get("/Keywords"))
+        self.assertEqual(output_hash, receipt["pdf_sha256"])
+        self.assertEqual([], receipt_errors)
+
+    def test_assertive_title_or_subtitle_absent_from_markdown_cannot_render(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            source.write_text(
+                "# Authorized report\n\n"
+                "> Authorized standfirst.\n\n"
+                "## Finding\n\nAuthorized evidence.",
+                encoding="utf-8",
+            )
+            for option in ("title", "subtitle"):
+                output = temp / f"{option}.pdf"
+                with (
+                    self.subTest(option=option),
+                    self.assertRaisesRegex(
+                        ValueError,
+                        rf"{option}.*gated Markdown",
+                    ),
+                ):
+                    self.render_pdf(
+                        source,
+                        output,
+                        **{option: "Acme committed criminal fraud."},
+                    )
+                self.assertFalse(output.exists())
+
+    def test_client_and_prepared_by_accept_only_bounded_identifier_labels(self):
+        cases = (
+            ("client", "Acme committed criminal fraud"),
+            ("client", "Alice Stole Funds"),
+            ("prepared_by", "Alice Killed Bob"),
+            ("client", "Acme Failed Audit"),
+            ("prepared_by", "Alexandria\nAcme Research"),
+            ("client", "A" * 81),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            source.write_text(
+                "# Authorized report\n\n## Finding\n\nAuthorized evidence.",
+                encoding="utf-8",
+            )
+            for option, value in cases:
+                output = temp / f"{option}-{len(value)}.pdf"
+                with (
+                    self.subTest(option=option, value=value),
+                    self.assertRaisesRegex(ValueError, "identifier label"),
+                ):
+                    self.render_pdf(
+                        source,
+                        output,
+                        **{option: value},
+                    )
+                self.assertFalse(output.exists())
+
+    def test_custom_identity_labels_must_come_from_typed_markdown_metadata(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "report.md"
+            source.write_text(
+                "# Authorized report\n\n"
+                "> Client: Acme Research\n"
+                "> Prepared by: Alice Smith\n"
+                "> Authorized standfirst.\n\n"
+                "## Finding\n\nAuthorized evidence.",
+                encoding="utf-8",
+            )
+            md_text, resolved = self.converter.resolve_render_inputs(
+                source,
+                {
+                    "title": None,
+                    "subtitle": None,
+                    "lang": "en",
+                    "template": "executive",
+                    "client": "Acme Research",
+                    "prepared_by": "Alice Smith",
+                    "confidential": False,
+                    "report_date": None,
+                    "cover_image": None,
+                },
+            )
+            self.assertEqual(source.read_text(encoding="utf-8"), md_text)
+            self.assertEqual("Acme Research", resolved["client"])
+            self.assertEqual("Alice Smith", resolved["prepared_by"])
+            self.assertEqual(
+                (
+                    "Authorized report",
+                    "",
+                    "Authorized standfirst.",
+                ),
+                self.converter.extract_report_header(md_text),
+            )
+
+    def test_visible_subtitle_changes_the_render_binding(self):
+        from pypdf import PdfReader
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            source.write_text(
+                "# Report\n\n## Finding\n\n"
+                "First subtitle\n\nSecond subtitle\n\nEvidence.",
+                encoding="utf-8",
+            )
+            artifacts = {
+                "rewild_receipt": temp / "rewild.json",
+                "ledger": temp / "ledger.json",
+                "content_receipt": temp / "content.json",
+                "source_fidelity_receipt": temp / "source.json",
+            }
+            for name, path in artifacts.items():
+                path.write_text(
+                    (
+                        json.dumps({"approved_visual_assets": []})
+                        if name == "content_receipt"
+                        else name
+                    ),
+                    encoding="utf-8",
+                )
+            bindings = []
+            with (
+                mock.patch.object(
+                    self.converter,
+                    "validate_rewild_for_render",
+                    return_value=None,
+                ),
+                mock.patch.object(
+                    self.converter,
+                    "validate_content_for_render",
+                    return_value=None,
+                ),
+            ):
+                for index, subtitle in enumerate(("First subtitle", "Second subtitle")):
+                    output = temp / f"report-{index}.pdf"
+                    self.converter.render_pdf(
+                        source,
+                        output,
+                        subtitle=subtitle,
+                        **artifacts,
+                    )
+                    bindings.append(
+                        (PdfReader(output).metadata or {}).get("/Keywords")
+                    )
+        self.assertNotEqual(bindings[0], bindings[1])
+
+    def test_local_image_bytes_change_the_render_binding(self):
+        from PIL import Image
+        from pypdf import PdfReader
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            image = temp / "figure.png"
+            source.write_text(
+                "# Report\n\n## Finding\n\n![Figure](figure.png)",
+                encoding="utf-8",
+            )
+            artifacts = {
+                "rewild_receipt": temp / "rewild.json",
+                "ledger": temp / "ledger.json",
+                "content_receipt": temp / "content.json",
+                "source_fidelity_receipt": temp / "source.json",
+            }
+            for name, path in artifacts.items():
+                path.write_text(
+                    (
+                        json.dumps({"approved_visual_assets": []})
+                        if name == "content_receipt"
+                        else name
+                    ),
+                    encoding="utf-8",
+                )
+            bindings = []
+            with (
+                mock.patch.object(
+                    self.converter,
+                    "validate_rewild_for_render",
+                    return_value=None,
+                ),
+                mock.patch.object(
+                    self.converter,
+                    "validate_content_for_render",
+                    return_value=None,
+                ),
+            ):
+                for index, color in enumerate(("red", "blue")):
+                    Image.new("RGB", (8, 8), color=color).save(image)
+                    artifacts["content_receipt"].write_text(
+                        json.dumps(
+                            {
+                                "approved_visual_assets": [
+                                    {
+                                        "path": "figure.png",
+                                        "sha256": hashlib.sha256(
+                                            image.read_bytes()
+                                        ).hexdigest(),
+                                    }
+                                ]
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    output = temp / f"image-report-{index}.pdf"
+                    self.converter.render_pdf(
+                        source,
+                        output,
+                        **artifacts,
+                    )
+                    bindings.append(
+                        (PdfReader(output).metadata or {}).get("/Keywords")
+                    )
+        self.assertNotEqual(bindings[0], bindings[1])
+
+    def test_unapproved_custom_cover_image_cannot_render(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            output = temp / "report.pdf"
+            cover = temp / "cover.png"
+            source.write_text("# Report\n\n## Finding\n\nEvidence.", encoding="utf-8")
+            Image.new("RGB", (1000, 600), "white").save(cover)
+            content_receipt = temp / "content.json"
+            content_receipt.write_text(
+                json.dumps({"approved_visual_assets": []}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "unapproved visual asset"):
+                self.render_pdf(
+                    source,
+                    output,
+                    cover_image=cover,
+                    template="maison",
+                    content_receipt=content_receipt,
+                )
+            self.assertFalse(output.exists())
+
+    def test_approved_custom_cover_image_can_render(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            output = temp / "report.pdf"
+            cover = temp / "cover.png"
+            source.write_text("# Report\n\n## Finding\n\nEvidence.", encoding="utf-8")
+            Image.new("RGB", (1000, 600), "white").save(cover)
+            content_receipt = temp / "content.json"
+            content_receipt.write_text(
+                json.dumps(
+                    {
+                        "approved_visual_assets": [
+                            {
+                                "path": "cover.png",
+                                "sha256": hashlib.sha256(
+                                    cover.read_bytes()
+                                ).hexdigest(),
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.render_pdf(
+                source,
+                output,
+                cover_image=cover,
+                template="maison",
+                content_receipt=content_receipt,
+            )
+            self.assertTrue(output.exists())
+
+    def test_unapproved_markdown_body_image_cannot_render(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            output = temp / "report.pdf"
+            body_image = temp / "body.png"
+            Image.new("RGB", (1000, 600), "white").save(body_image)
+            source.write_text(
+                "# Report\n\n## Finding\n\n![](body.png)",
+                encoding="utf-8",
+            )
+            content_receipt = temp / "content.json"
+            content_receipt.write_text(
+                json.dumps({"approved_visual_assets": []}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "unapproved visual asset"):
+                self.render_pdf(
+                    source,
+                    output,
+                    content_receipt=content_receipt,
+                )
+            self.assertFalse(output.exists())
 
     def test_keep_html_refuses_to_overwrite_existing_sidecar(self):
         with tempfile.TemporaryDirectory() as temp_dir:

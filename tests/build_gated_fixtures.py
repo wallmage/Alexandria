@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.content_gate import run_content_gate
+from scripts.report_blocks import visible_report_blocks
 from scripts.rewild_gate import file_sha256, run_gate
 from scripts.source_fidelity import issue_source_fidelity_receipt
 from scripts.validate_report import _report_prose
@@ -105,12 +106,45 @@ def build_case(case, output_root):
         case["depth"]() + "\n\n" + heading,
     )
     report_text = report_text.replace(case["fixture_url"], case["url"])
+    gated_title = {
+        "en": None,
+        "zh-CN": (
+            "研发系统排版检查报告：用于验证门禁、字体、表格、链接、目录、"
+            "分页和完整生产流程的合成样本"
+        ),
+        "zh-HK": (
+            "研發系統排版檢查報告：用於驗證門禁、字體、表格、連結、目錄、"
+            "分頁和完整生產流程的合成樣本"
+        ),
+    }[case["lang"]]
+
+    def linked_title(match):
+        title = gated_title or match.group(1)
+        return f"# [{title}]({case['url']})"
+
+    report_text = re.sub(
+        r"(?m)^# (.+)$",
+        linked_title,
+        report_text,
+        count=1,
+    )
     body, source_tail = report_text.split("\n\n" + heading, 1)
     body_parts = body.split("\n\n")
     mapped_excerpts = []
     for index, part in enumerate(body_parts):
         raw = part.lstrip()
-        if raw.startswith(("#", ">", "|", "```")):
+        if raw.startswith("|"):
+            lines = part.splitlines()
+            for row_index in range(2, len(lines)):
+                if lines[row_index].strip().startswith("|"):
+                    lines[row_index] = re.sub(
+                        r"\|\s*$",
+                        f" [Fixture source]({case['url']}) |",
+                        lines[row_index],
+                    )
+            body_parts[index] = "\n".join(lines)
+            continue
+        if raw.startswith(("#", ">", "```")):
             continue
         if not re.search(r"https?://", part):
             part += f" [Fixture source]({case['url']})"
@@ -121,6 +155,11 @@ def build_case(case, output_root):
         if len(normalized) >= 10:
             mapped_excerpts.append(normalized)
     report_text = "\n\n".join(body_parts) + "\n\n" + heading + source_tail
+    mapped_excerpts.extend(
+        block.text
+        for block in visible_report_blocks(report_text)
+        if block.kind == "table" or block.heading_level == 1
+    )
 
     report = case_root / "report.md"
     source = case_root / "pre-rewild.md"
@@ -232,6 +271,7 @@ def build_case(case, output_root):
                     }
                     for heading in case["section_headings"]
                 ],
+                "visual_assets": [],
                 "findings": [],
                 "evidence_limitations": [
                     "This fixture tests production controls, not real-world research."

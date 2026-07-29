@@ -3,10 +3,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from scripts.content_gate import run_content_gate, validate_content_receipt
 from scripts.source_fidelity import issue_source_fidelity_receipt
+from tests.source_fidelity_transport import mock_production_transport
 
 ROOT = Path(__file__).parents[1]
 SCORES = (
@@ -70,6 +70,7 @@ def write_review(path, report, ledger, *, report_lang="en"):
             }
             for heading in ("Executive summary", "Key process", "Outlook")
         ],
+        "visual_assets": [],
         "findings": [],
         "evidence_limitations": [
             "The fixture tests production behavior rather than real-world research."
@@ -106,8 +107,27 @@ class ContentGateTests(unittest.TestCase):
             ROOT / "tests" / "fixtures" / "sample-report.md"
         ).read_text(encoding="utf-8")
         report_text = report_text.replace(
+            "# R&D Systems: A Render Check",
+            f"# [R&D Systems: A Render Check]({source_url})",
+            1,
+        )
+        table_rows = (
+            "Safe HTML Record",
+            "A4 PDF Record",
+            "Extractable text Record",
+        )
+        report_text = report_text.replace(
             summary, f"{summary} [Record]({source_url})"
         ).replace(outlook, f"{outlook} [Record]({source_url})")
+        for row in (
+            "| Parse | Safe HTML |",
+            "| Render | A4 PDF |",
+            "| Reopen | Extractable text |",
+        ):
+            report_text = report_text.replace(
+                row,
+                row[:-1] + f" [Record]({source_url}) |",
+            )
         report.write_text(report_text, encoding="utf-8")
         ledger_data = json.loads(
             (ROOT / "tests" / "fixtures" / "evidence-ledger.json").read_text(
@@ -115,22 +135,26 @@ class ContentGateTests(unittest.TestCase):
             )
         )
         ledger_data["claims"][0]["report_excerpts"] = [
+            "R&D Systems: A Render Check",
             (
                 "This compact fixture checks typography, navigation, "
                 "citations, and special characters."
             ),
+            "Its only factual purpose is to exercise the report pipeline.",
             ledger_data["claims"][0]["report_excerpts"][0],
             outlook,
+            *table_rows,
         ]
         ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
         write_review(review, report, ledger)
-        with mock.patch(
-            "scripts.source_fidelity._request_pinned",
-            return_value=(
-                200,
-                {"content-type": "text/plain"},
-                b"Fixture",
-            ),
+        with mock_production_transport(
+            {
+                "example.com": (
+                    200,
+                    {"content-type": "text/plain"},
+                    b"Fixture",
+                )
+            }
         ):
             issue_source_fidelity_receipt(
                 ledger,
@@ -175,6 +199,174 @@ class ContentGateTests(unittest.TestCase):
                     source_fidelity_receipt_path=source_receipt,
                     expected_lang="en",
                 ),
+            )
+
+    def test_visual_asset_approval_is_hash_bound_into_the_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            cover = Path(directory) / "cover.png"
+            cover.write_bytes(b"reviewed safe cover pixels")
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["visual_assets"] = [
+                {
+                    "path": "cover.png",
+                    "sha256": file_sha256(cover),
+                    "usage": "cover",
+                    "visible_text_and_claims_review": (
+                        "No visible text or externally checkable claim appears."
+                    ),
+                    "disposition": "approved",
+                }
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+
+            self.assertEqual(
+                [],
+                run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                ),
+            )
+            result = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [
+                    {
+                        "path": "cover.png",
+                        "sha256": file_sha256(cover),
+                    }
+                ],
+                result["approved_visual_assets"],
+            )
+
+            cover.write_bytes(b"ALICE STOLE FUNDS")
+            errors = validate_content_receipt(
+                report,
+                ledger,
+                result,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertTrue(
+                any("visual asset" in error.lower() for error in errors),
+                errors,
+            )
+
+    def test_body_images_are_discovered_and_unused_approvals_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            body_image = Path(directory) / "body.png"
+            body_image.write_bytes(b"ALICE STOLE FUNDS")
+            report.write_text(
+                report.read_text(encoding="utf-8").replace(
+                    "## Outlook",
+                    "![](body.png)\n\n## Outlook",
+                ),
+                encoding="utf-8",
+            )
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["report_sha256"] = file_sha256(report)
+            review.write_text(json.dumps(note), encoding="utf-8")
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertTrue(
+                any("unapproved visual asset" in error.lower() for error in errors),
+                errors,
+            )
+
+            note["visual_assets"] = [
+                {
+                    "path": "body.png",
+                    "sha256": file_sha256(body_image),
+                    "usage": "body",
+                    "visible_text_and_claims_review": (
+                        "The visible text and claim content were reviewed."
+                    ),
+                    "disposition": "approved",
+                }
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+            self.assertEqual(
+                [],
+                run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                ),
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            unused = Path(directory) / "unused.png"
+            unused.write_bytes(b"reviewed but unused")
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["visual_assets"] = [
+                {
+                    "path": "unused.png",
+                    "sha256": file_sha256(unused),
+                    "usage": "body",
+                    "visible_text_and_claims_review": (
+                        "The visible text and claim content were reviewed."
+                    ),
+                    "disposition": "approved",
+                }
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertTrue(
+                any("unused visual asset" in error.lower() for error in errors),
+                errors,
+            )
+
+    def test_embedded_data_images_cannot_bypass_visual_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            report.write_text(
+                report.read_text(encoding="utf-8").replace(
+                    "## Outlook",
+                    (
+                        "![](data:image/png;base64,"
+                        "QUxJQ0UgU1RPTEUgRlVORFM=)\n\n## Outlook"
+                    ),
+                ),
+                encoding="utf-8",
+            )
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["report_sha256"] = file_sha256(report)
+            review.write_text(json.dumps(note), encoding="utf-8")
+
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertTrue(
+                any("embedded data image" in error.lower() for error in errors),
+                errors,
             )
 
     def test_low_score_and_false_required_check_block_the_gate(self):
@@ -289,7 +481,26 @@ class ContentGateTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
+            ledger_data["claims"][0]["report_excerpts"].append(disclosure)
+            ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
+            with mock_production_transport(
+                {
+                    "example.com": (
+                        200,
+                        {"content-type": "text/plain"},
+                        b"Fixture",
+                    )
+                }
+            ):
+                source_receipt.unlink()
+                issue_source_fidelity_receipt(
+                    ledger,
+                    source_receipt,
+                    now=__import__("datetime").date(2026, 7, 28),
+                )
             note["report_sha256"] = file_sha256(report)
+            note["ledger_sha256"] = file_sha256(ledger)
             note["findings"][0]["report_disclosure_excerpt"] = disclosure
             review.write_text(json.dumps(note), encoding="utf-8")
             self.assertEqual(

@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -138,8 +139,10 @@ HUMAN_HARM_PATTERN = re.compile(
     r"tax evasion|plagiariz(?:ed|ing)|discriminat(?:ed|ion)|"
     r"retaliat(?:ed|ion)|extort(?:ed|ion)|blackmail(?:ed)?|"
     r"kidnap(?:ped|ping)?|traffick(?:ed|ing)?|perjury|forgery|"
-    r"falsif(?:ied|ication)|scam(?:med)?|wrongdoing|personal failing)\b|"
-    r"指控|被控|起訴|起诉|定罪|無罪|无罪|欺詐|欺诈|騷擾|骚扰|賄賂|贿赂"
+    r"falsif(?:ied|ication)|scam(?:med)?|lied|lying|deceiv(?:ed|ing)|"
+    r"wrongdoing|personal failing)\b|"
+    r"指控|被控|起訴|起诉|定罪|無罪|无罪|欺詐|欺诈|騷擾|骚扰|賄賂|贿赂|"
+    r"說謊|说谎|撒謊|撒谎"
 )
 SENSITIVE_PRIVATE_PATTERN = re.compile(
     r"(?i)\b(?:medical|diagnos(?:is|ed)|health condition|sexuality|religion|"
@@ -164,6 +167,150 @@ LEGAL_STAGE_PATTERNS = {
     "expunged": re.compile(r"(?i)\b(?:expunged|sealed record)\b|撤銷記錄|撤销记录"),
     "retracted": re.compile(r"(?i)\b(?:retracted|withdrew|withdrawn)\b|撤回"),
 }
+
+_NAMED_PERSON_RE = re.compile(
+    r"(?<![\w'])"
+    r"(?:(?:Mr|Mrs|Ms|Mx|Dr|Professor|Prof)\.?\s+)?"
+    r"([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]+"
+    r"(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]+){1,3})"
+    r"(?![\w'])"
+)
+_PERSON_BEFORE_HARM_RE = re.compile(
+    r"(?<![\w'])"
+    r"([a-zà-öø-ÿ][a-zà-öø-ÿ'’-]+"
+    r"\s+[a-zà-öø-ÿ][a-zà-öø-ÿ'’-]+)"
+    r"(?=\s+(?:lied|deceived|committed|stole|embezzled|assaulted|"
+    r"harassed|murdered|bribed|defrauded|faces?\b.{0,30}\b(?:charges?|"
+    r"allegations?|investigation)|was\s+accused\s+of\s+(?:lying|fraud|"
+    r"misconduct)|(?:is|was|has\s+been)\s+accused\s+of\s+"
+    r"(?:lying|fraud|misconduct)|was\s+(?:charged|indicted|convicted)))",
+    re.IGNORECASE,
+)
+_PERSON_AFTER_HARM_RE = re.compile(
+    r"\b(?:accuses?|accused|charges?|charged|investigates?|investigated)\s+"
+    r"([a-zà-öø-ÿ][a-zà-öø-ÿ'’-]+\s+"
+    r"[a-zà-öø-ÿ][a-zà-öø-ÿ'’-]+)\b",
+    re.IGNORECASE,
+)
+_PERSON_AFTER_HARM_BY_RE = re.compile(
+    r"\b(?:fraud|misconduct|wrongdoing|bribery|corruption|theft|abuse|"
+    r"harassment|assault|lying|deception)\s+(?:by|against|involving)\s+"
+    r"([a-zà-öø-ÿ][a-zà-öø-ÿ'’-]+\s+"
+    r"[a-zà-öø-ÿ][a-zà-öø-ÿ'’-]+)\b",
+    re.IGNORECASE,
+)
+_CJK_HARM_LOOKAHEAD = (
+    r"(?:涉嫌|被控|被指控|遭指控|遭控|說謊|说谎|撒謊|撒谎|犯下|實施|实施|"
+    r"欺詐|欺诈|騷擾|骚扰|賄賂|贿赂)"
+)
+_CJK_COMPOUND_PERSON_BEFORE_HARM_RE = re.compile(
+    r"((?:歐陽|欧阳|司馬|司马|上官|諸葛|诸葛|東方|东方|皇甫|"
+    r"尉遲|尉迟|公孫|公孙|慕容|令狐|長孫|长孙)[\u3400-\u9fff]{1,2})"
+    r"(?=" + _CJK_HARM_LOOKAHEAD + r")"
+)
+_CJK_PERSON_BEFORE_HARM_RE = re.compile(
+    r"([王李張张劉刘陳陈楊杨黃黄趙赵吳吴周徐孫孙馬马朱胡郭何高林羅罗"
+    r"鄭郑梁謝谢宋唐許许韓韩馮冯鄧邓曹彭曾肖田董袁潘于蔣蒋蔡余杜"
+    r"葉叶程蘇苏魏呂吕丁任沈姚盧卢姜崔鍾钟譚谭陸陆汪范金石廖賈贾"
+    r"夏韋韦付方白鄒邹孟熊秦邱江尹薛閻阎段雷侯龍龙史陶黎賀贺顧顾"
+    r"毛郝龔龚邵萬万錢钱嚴严覃武戴莫孔向湯汤][\u3400-\u9fff]{1,2})"
+    r"(?=" + _CJK_HARM_LOOKAHEAD + r")"
+)
+_CJK_PLAUSIBLE_PERSON_RE = re.compile(
+    r"([王李張张劉刘陳陈楊杨黃黄趙赵吳吴周徐孫孙馬马朱胡郭何高林羅罗"
+    r"鄭郑梁謝谢宋唐許许韓韩馮冯鄧邓曹彭曾肖田董袁潘于蔣蒋蔡余杜"
+    r"葉叶程蘇苏魏呂吕丁任沈姚盧卢姜崔鍾钟譚谭陸陆汪范金石廖賈贾"
+    r"夏韋韦付方白鄒邹孟熊秦邱江尹薛閻阎段雷侯龍龙史陶黎賀贺顧顾"
+    r"毛郝龔龚邵萬万錢钱嚴严覃武戴莫孔向湯汤][\u3400-\u9fff]{1,2})"
+)
+_CJK_ORGANIZATION_MARKERS = set("司會会院校行社局部廠厂店團团署處处所")
+_NON_PERSON_NAME_WORDS = {
+    "The", "This", "That", "A", "An", "Example", "Independent",
+    "Regulator", "Registry", "Court", "Committee", "Commission",
+    "Agency", "Association", "Authority", "Bank", "Company", "Corp",
+    "Corporation", "Council", "Department", "Foundation", "Government",
+    "Group", "Hospital", "Inc", "Institute", "Journal", "Laboratory",
+    "LLC", "Ltd", "Ministry", "News", "Office", "Organization", "Police",
+    "Borders", "International", "Report", "School", "Times", "United",
+    "Nations", "University", "Vendor", "Watch", "Without",
+}
+_NON_PERSON_NAME_WORDS_FOLDED = {
+    word.casefold() for word in _NON_PERSON_NAME_WORDS
+}
+_NON_PERSON_NAMES_FOLDED = {
+    "amnesty international",
+    "human rights watch",
+    "united nations",
+}
+
+
+def named_person_mentions(text):
+    """Return plausible explicit person names in harmful or private prose."""
+    names = set()
+    raw = str(text or "")
+    for match in _NAMED_PERSON_RE.finditer(raw):
+        name = " ".join(match.group(1).split())
+        words = name.split()
+        if (
+            name.casefold() in _NON_PERSON_NAMES_FOLDED
+            or
+            words[0].casefold() in _NON_PERSON_NAME_WORDS_FOLDED
+            or words[-1].casefold() in _NON_PERSON_NAME_WORDS_FOLDED
+        ):
+            continue
+        names.add(name)
+    for match in _PERSON_BEFORE_HARM_RE.finditer(raw):
+        name = " ".join(match.group(1).split())
+        words = name.split()
+        if (
+            name.casefold() not in _NON_PERSON_NAMES_FOLDED
+            and not any(
+            word.casefold() in _NON_PERSON_NAME_WORDS_FOLDED
+            for word in words
+            )
+        ):
+            names.add(name)
+    for match in _PERSON_AFTER_HARM_RE.finditer(raw):
+        name = " ".join(match.group(1).split())
+        if not any(
+            word.casefold() in _NON_PERSON_NAME_WORDS_FOLDED
+            for word in name.split()
+        ):
+            names.add(name)
+    for match in _PERSON_AFTER_HARM_BY_RE.finditer(raw):
+        name = " ".join(match.group(1).split())
+        if not any(
+            word.casefold() in _NON_PERSON_NAME_WORDS_FOLDED
+            for word in name.split()
+        ):
+            names.add(name)
+    names.update(
+        match.group(1) for match in _CJK_PERSON_BEFORE_HARM_RE.finditer(raw)
+    )
+    names.update(
+        match.group(1)
+        for match in _CJK_COMPOUND_PERSON_BEFORE_HARM_RE.finditer(raw)
+    )
+    for match in _CJK_PLAUSIBLE_PERSON_RE.finditer(raw):
+        name = match.group(1)
+        after = raw[match.end() : match.end() + 2]
+        if after[:1] in _CJK_ORGANIZATION_MARKERS:
+            continue
+        context = raw[max(0, match.start() - 16) : match.end() + 16]
+        if HUMAN_HARM_PATTERN.search(context):
+            names.add(name)
+    return names
+
+
+def named_subject_mentions(text):
+    """Return explicit named subjects without guessing person vs organization."""
+    raw = str(text or "")
+    names = {
+        " ".join(match.group(1).split())
+        for match in _NAMED_PERSON_RE.finditer(raw)
+    }
+    names.update(named_person_mentions(raw))
+    return names
 
 
 def mentions_person_alias(text, person):
@@ -233,17 +380,9 @@ _ISO_DATE_RE = re.compile(r"\b([0-9]{4})-([0-9]{2})-([0-9]{2})\b")
 _ISO_MONTH_RE = re.compile(r"\b([0-9]{4})-([0-9]{2})\b")
 _VERSION_RE = re.compile(r"\b[vV]?([0-9]+(?:\.[0-9]+){2,})\b")
 _NUMBER_RE = re.compile(
-    r"(?<![\w.])([0-9]+(?:[,\u00a0\u202f][0-9]{3})*(?:\.[0-9]+)?)(?![0-9])"
-    r"(?:\s*(k|mm|m|bn|b|tn|thousand|million|billion|trillion)\b)?",
-    re.IGNORECASE,
-)
-_MEASURE_RE = re.compile(
-    r"(?P<prefix>[$€£¥])?\s*"
-    r"(?P<number>[0-9]+(?:[,\u00a0\u202f][0-9]{3})*(?:\.[0-9]+)?)"
-    r"(?:\s*(?P<scale>k|mm|m|bn|b|tn|thousand|million|billion|trillion))?"
-    r"\s*(?P<unit>%|percent(?:age)?(?:\s+points?)?|basis\s+points?|"
-    r"users?|people|persons?|customers?|employees?|accounts?|subscribers?|"
-    r"dollars?|usd|euros?|eur|pounds?|gbp|yen|jpy|yuan|rmb|cny)?(?=\W|$)",
+    r"(?<![\w.])([+-]?[0-9]+(?:[,\u00a0\u202f][0-9]{3})*(?:\.[0-9]+)?)(?![0-9])"
+    r"(?:(k|mm|m|bn|b|tn)\b|[\s\u00a0\u202f]+"
+    r"(thousand|million|billion|trillion)\b)?",
     re.IGNORECASE,
 )
 _NUMBER_WORD_ALT = "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True))
@@ -261,6 +400,34 @@ _WORD_NUMBER_RE = re.compile(
 )
 
 _NUMBER_WORD_TOKEN_RE = re.compile(r"\b(" + _NUMBER_WORD_ALT + r")\b", re.IGNORECASE)
+
+_CJK_DIGITS = {
+    "零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "两": 2,
+    "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}
+_CJK_SMALL_UNITS = {"十": 10, "百": 100, "千": 1000}
+_CJK_NUMBER_RE = re.compile(
+    r"(?<![零〇一二兩两三四五六七八九十百千萬万億亿兆])"
+    r"([負负正]?[零〇一二兩两三四五六七八九十百千萬万億亿兆]+)"
+)
+_CJK_PERCENT_OF_RE = re.compile(
+    r"百分之(?P<number>[零〇一二兩两三四五六七八九十百千萬万億亿兆]+"
+    r"|[0-9]+(?:\.[0-9]+)?)"
+)
+_CJK_TENTHS_RE = re.compile(
+    r"(?P<number>[零〇一二兩两三四五六七八九十]+|[0-9]+(?:\.[0-9]+)?)成"
+    r"(?P<remainder>[零〇一二兩两三四五六七八九]|[0-9])?"
+)
+_CJK_PERCENT_POINT_RE = re.compile(
+    r"(?P<number>[零〇一二兩两三四五六七八九十百千]+"
+    r"|[0-9]+(?:\.[0-9]+)?)(?:個|个)?百分(?:點|点)"
+)
+_CJK_MEASURE_SUFFIX_RE = re.compile(
+    r"^(?:%|％|元|圓|圆|美元|歐元|欧元|日圓|日元|新台幣|新台币|"
+    r"人民幣|人民币|毫秒|微秒|秒|分鐘|"
+    r"分钟|小時|小时|天|週|周|年|位元|比特|字節|字节|人|名|位|戶|"
+    r"户|個|个|件|宗|次|家|套|台|輛|辆|份|項|项)"
+)
 
 
 def _word_phrase_value(phrase):
@@ -291,6 +458,64 @@ def _word_phrase_value(phrase):
     # Keep integral results integral so the word form and the digit form share
     # a key: the digit scanner emits n:1, never n:1.0.
     return int(value) if float(value).is_integer() else value
+
+
+def _cjk_number_value(phrase):
+    """Return the integer denoted by a Chinese numeral and its scale units."""
+    text = str(phrase)
+    sign = -1 if text[:1] in {"負", "负"} else 1
+    text = text.lstrip("負负正")
+
+    def parse(part):
+        if not part:
+            return 0
+        if all(char in _CJK_DIGITS for char in part):
+            return int("".join(str(_CJK_DIGITS[char]) for char in part))
+        for variants, scale in (
+            (("兆",), 1_000_000_000_000),
+            (("億", "亿"), 100_000_000),
+            (("萬", "万"), 10_000),
+        ):
+            positions = [
+                part.find(char) for char in variants if char in part
+            ]
+            if positions:
+                index = min(positions)
+                return (parse(part[:index]) or 1) * scale + parse(
+                    part[index + 1 :]
+                )
+        total = 0
+        pending = 0
+        for char in part:
+            if char in _CJK_DIGITS:
+                pending = _CJK_DIGITS[char]
+            elif char in _CJK_SMALL_UNITS:
+                total += (pending or 1) * _CJK_SMALL_UNITS[char]
+                pending = 0
+        return total + pending
+
+    return sign * parse(text)
+
+
+def _cjk_quantity_in_context(text, start, end):
+    """Accept CJK numerals only where the surrounding grammar is quantitative."""
+    source = str(text or "")
+    raw = source[start:end].lstrip("負负正")
+    tail = str(text or "")[end : end + 12]
+    if _CJK_MEASURE_SUFFIX_RE.match(tail):
+        return True
+    before = source[start - 1 : start]
+    after = source[end : end + 1]
+    # A numeral followed by another ideograph is normally part of a word or
+    # idiom ("千方百計", "百事可樂", "千萬別"), unless the suffix above is
+    # an explicit unit/counter. A numeral that closes a clause is quantitative
+    # even when its metric immediately precedes it ("人口三千萬。").
+    if re.match(r"[\u3400-\u9fff]", after):
+        return False
+    # Ordinal labels are ordering, not measured evidence.
+    if before in {"第", "唯"}:
+        return False
+    return bool(raw)
 
 #: Units that turn a spelled-out number into an asserted measurement rather
 #: than an ordinary prose count. A bare count ("three CVEs", "five surfaces")
@@ -335,6 +560,195 @@ _MAGNITUDE_UNIT_RE = re.compile(
     r"[\s  -]*(?:(?:an?|per)[\s  -]+)?(?:" + _MAGNITUDE_UNITS + r")\b",
     re.IGNORECASE,
 )
+
+_MEASURE_NUMBER_SOURCE = (
+    r"[+-]?[0-9]+(?:[,\u00a0\u202f][0-9]{3})*(?:\.[0-9]+)?"
+    r"(?:(?:k|mm|m|bn|b|tn)\b|[\s\u00a0\u202f]+"
+    r"(?:thousand|million|billion|trillion)\b)?"
+    r"|\b(?:" + _NUMBER_WORD_ALT + r")"
+    r"(?:[\s\u00a0\u202f-]+(?:and[\s\u00a0\u202f-]+)?(?:"
+    + _NUMBER_WORD_ALT + r"))*\b"
+    r"|[負负正]?[零〇一二兩两三四五六七八九十百千萬万億亿兆]+"
+)
+_MEASURE_UNIT_SOURCE = (
+    r"degrees?\s+(?:celsius|fahrenheit|kelvin)|"
+    r"°\s*[cf]|℃|℉|"
+    r"[A-Za-zµμΩ]+(?:[²³]|\^-?[0-9]+)?"
+    r"(?:(?:[·⋅*/])[A-Za-zµμΩ]+(?:[²³]|\^-?[0-9]+)?)+|"
+    r"[A-Za-zµμΩ]+(?:[²³]|\^-?[0-9]+)|"
+    r"[A-Za-zµμΩ]+(?:\s+per\s+(?:square\s+|cubic\s+)?[A-Za-zµμΩ]+)|"
+    r"%|％|percent(?:age)?(?:\s+points?)?|per\s+cent|basis\s+points?|"
+    r"(?:個|个)?百分(?:點|点)|成|"
+    r"dollars?|usd|euros?|eur|pounds?|gbp|yen|jpy|yuan|rmb|cny|twd|"
+    r"新台幣|新台币|人民幣|人民币|元|圓|圆|"
+    r"nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|"
+    r"days?|weeks?|months?|years?|µs|μs|us|ms|s|毫秒|微秒|秒|分鐘|分钟|小時|小时|"
+    r"天|週|周|年|"
+    r"bits?|bytes?|kilobytes?|megabytes?|gigabytes?|terabytes?|petabytes?|"
+    r"kb|mb|gb|tb|pb|位元|比特|字節|字节|千字節|千字节|兆字節|兆字节|"
+    r"users?|people|persons?|customers?|employees?|accounts?|subscribers?|"
+    r"items?|units?|records?|incidents?|engineers?|runs?|packages?|downloads?|"
+    r"entries|cves?|surfaces?|vendors?|seats?|人|名|位|戶|户|個|个|件|宗|次|"
+    r"[A-Za-z][A-Za-z0-9_-]{0,23}|[\u3400-\u9fff]{1,6}"
+)
+_MEASURE_VALUE_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])"
+    r"(?P<prefix>NT\$|US\$|HK\$|A\$|C\$|USD|CNY|RMB|TWD|EUR|GBP|JPY|"
+    r"新台幣|新台币|人民幣|人民币|"
+    r"[$€£¥￥])?\s*"
+    r"(?P<number>" + _MEASURE_NUMBER_SOURCE + r")"
+    r"(?:[\s\u00a0\u202f-]*(?:an?\s+)?"
+    r"(?P<unit>" + _MEASURE_UNIT_SOURCE + r"))?"
+    r"(?![A-Za-z0-9µμΩ°℃℉²³^·⋅*/_-])",
+    re.IGNORECASE,
+)
+
+_TEMPERATURE_UNITS = {
+    "°c": "temperature:celsius",
+    "℃": "temperature:celsius",
+    "degree celsius": "temperature:celsius",
+    "degrees celsius": "temperature:celsius",
+    "°f": "temperature:fahrenheit",
+    "℉": "temperature:fahrenheit",
+    "degree fahrenheit": "temperature:fahrenheit",
+    "degrees fahrenheit": "temperature:fahrenheit",
+    "degree kelvin": "temperature:kelvin",
+    "degrees kelvin": "temperature:kelvin",
+    "k": "temperature:kelvin",
+    "kelvin": "temperature:kelvin",
+}
+
+_CURRENCY_PREFIXES = {
+    "$": "currency:USD", "US$": "currency:USD",
+    "NT$": "currency:TWD", "HK$": "currency:HKD",
+    "A$": "currency:AUD", "C$": "currency:CAD",
+    "新台幣": "currency:TWD", "新台币": "currency:TWD",
+    "人民幣": "currency:CNY", "人民币": "currency:CNY",
+    "USD": "currency:USD", "CNY": "currency:CNY", "RMB": "currency:CNY",
+    "TWD": "currency:TWD", "EUR": "currency:EUR", "GBP": "currency:GBP",
+    "JPY": "currency:JPY",
+    "€": "currency:EUR", "£": "currency:GBP",
+    "¥": "currency:CNY", "￥": "currency:CNY",
+}
+_CURRENCY_UNITS = {
+    "dollar": "currency:USD", "dollars": "currency:USD", "usd": "currency:USD",
+    "euro": "currency:EUR", "euros": "currency:EUR", "eur": "currency:EUR",
+    "pound": "currency:GBP", "pounds": "currency:GBP", "gbp": "currency:GBP",
+    "yen": "currency:JPY", "jpy": "currency:JPY",
+    "yuan": "currency:CNY", "rmb": "currency:CNY", "cny": "currency:CNY",
+    "twd": "currency:TWD", "新台幣": "currency:TWD", "新台币": "currency:TWD",
+    "人民幣": "currency:CNY", "人民币": "currency:CNY",
+    "元": "currency:CNY", "圓": "currency:CNY", "圆": "currency:CNY",
+}
+_TIME_UNIT_SECONDS = {
+    "nanosecond": Decimal("0.000000001"),
+    "microsecond": Decimal("0.000001"),
+    "µs": Decimal("0.000001"),
+    "μs": Decimal("0.000001"),
+    "us": Decimal("0.000001"),
+    "millisecond": Decimal("0.001"),
+    "ms": Decimal("0.001"),
+    "second": Decimal("1"),
+    "s": Decimal("1"),
+    "minute": Decimal("60"),
+    "hour": Decimal("3600"),
+    "day": Decimal("86400"),
+    "week": Decimal("604800"),
+    "month": Decimal("2629800"),
+    "year": Decimal("31557600"),
+    "毫秒": Decimal("0.001"), "微秒": Decimal("0.000001"),
+    "秒": Decimal("1"), "分鐘": Decimal("60"), "分钟": Decimal("60"),
+    "小時": Decimal("3600"), "小时": Decimal("3600"),
+    "天": Decimal("86400"), "週": Decimal("604800"), "周": Decimal("604800"),
+    "年": Decimal("31557600"),
+}
+_DATA_UNIT_BYTES = {
+    "bit": Decimal("0.125"), "byte": Decimal("1"),
+    "kb": Decimal("1000"), "kilobyte": Decimal("1000"),
+    "mb": Decimal("1000000"), "megabyte": Decimal("1000000"),
+    "gb": Decimal("1000000000"), "gigabyte": Decimal("1000000000"),
+    "tb": Decimal("1000000000000"), "terabyte": Decimal("1000000000000"),
+    "pb": Decimal("1000000000000000"), "petabyte": Decimal("1000000000000000"),
+    "位元": Decimal("0.125"), "比特": Decimal("0.125"),
+    "字節": Decimal("1"), "字节": Decimal("1"),
+    "千字節": Decimal("1000"), "千字节": Decimal("1000"),
+    "兆字節": Decimal("1000000"), "兆字节": Decimal("1000000"),
+}
+_COUNT_UNITS = {
+    "user", "people", "person", "customer", "employee", "account",
+    "subscriber", "item", "unit", "record", "incident", "engineer", "run",
+    "package", "download", "entry", "cve", "surface", "vendor", "seat",
+    "人", "名", "位", "戶", "户", "個", "个", "件", "宗", "次",
+}
+_UNKNOWN_UNIT_STOPWORDS = {
+    "a", "an", "and", "as", "at", "by", "for", "from", "in", "is", "of",
+    "index", "on", "or", "per", "than", "the", "to", "was", "were", "with",
+}
+_QUANTITY_COMPARATORS = (
+    (">=", re.compile(
+        r"(?:greater\s+than\s+or\s+equal\s+to|"
+        r">=|≥|at\s+least|no\s+(?:fewer|less)\s+than|"
+        r"not\s+less\s+than|不少於|不少于|不低於|不低于|至少)\s*$",
+        re.IGNORECASE,
+    )),
+    ("<=", re.compile(
+        r"(?:less\s+than\s+or\s+equal\s+to|"
+        r"<=|≤|at\s+most|no\s+more\s+than|not\s+more\s+than|"
+        r"不超過|不超过|不高於|不高于|至多)\s*$",
+        re.IGNORECASE,
+    )),
+    (">", re.compile(
+        r"(?:>|more\s+than|greater\s+than|over|超過|超过|多於|多于)\s*$",
+        re.IGNORECASE,
+    )),
+    ("<", re.compile(
+        r"(?:<|less\s+than|fewer\s+than|under|少於|少于|低於|低于)\s*$",
+        re.IGNORECASE,
+    )),
+    ("~", re.compile(
+        r"(?:~|≈|about|around|approximately|approx\.?|roughly|約|约)\s*$",
+        re.IGNORECASE,
+    )),
+)
+_UNRESOLVED_COMPARATOR_RE = re.compile(
+    r"(?:[<>≈~]|\b(?:above|below|equal|fewer|greater|less|more|least|most|"
+    r"under|over|approx(?:imately)?|rough(?:ly)?)\b|"
+    r"不低|不高|不少|不超|高於|高于|低於|低于)"
+    r"[^.;,，。；]{0,16}$",
+    re.IGNORECASE,
+)
+_POSTFIX_QUANTITY_COMPARATORS = (
+    (">=", re.compile(
+        r"^\s*(?:\+|or\s+(?:more|higher|greater)|and\s+(?:above|up))\b",
+        re.IGNORECASE,
+    )),
+    ("<=", re.compile(
+        r"^\s*(?:or\s+(?:less|lower|fewer)|and\s+(?:below|down))\b",
+        re.IGNORECASE,
+    )),
+)
+_UNRESOLVED_POSTFIX_COMPARATOR_RE = re.compile(
+    r"^\s*(?:or|and)\s+(?:about|approximately|around|roughly|thereabouts|"
+    r"more|less|higher|lower|greater|fewer|above|below)\S*",
+    re.IGNORECASE,
+)
+_MEASURE_CARRIER_STOPWORDS = {
+    "a", "an", "and", "approximately", "around", "as", "at", "be", "been",
+    "by", "exactly", "for", "from", "had", "has", "have", "in", "is", "least",
+    "less", "more", "most", "no", "of", "on", "or", "over", "roughly", "than",
+    "the", "to", "under", "was", "were", "with",
+} | set(_NUMBER_WORDS) | set(_TIME_UNIT_SECONDS) | set(_DATA_UNIT_BYTES) | {
+    "percent", "percentage", "point", "points", "basis", "dollar", "dollars",
+    "usd", "eur", "gbp", "jpy", "cny", "twd", "million", "billion",
+    "thousand", "trillion", "increase", "increased", "increasing", "rise",
+    "rose", "risen", "grew", "growth", "decrease", "decreased", "decline",
+    "fell", "fallen", "higher", "lower", "it", "vendor", "recorded",
+    "status", "page", "list", "published", "table", "leaves", "exposed",
+    "greater", "equal", "fewer",
+    "hit", "index", "lists", "listed", "measured", "reached",
+    "version", "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+}
 _MONTH_NAME_DATE_RE = re.compile(
     r"(?i)\b(?:([0-9]{1,2})\s+)?(" + "|".join(sorted(_MONTHS, key=len, reverse=True))
     + r")\.?\s+(?:([0-9]{1,2})(?:st|nd|rd|th)?,?\s+)?([0-9]{4})\b"
@@ -384,12 +798,29 @@ def _domain_family_names(url):
 
 def _normalize_number(raw):
     text = re.sub(r"[,  \s]", "", str(raw))
-    if "." in text:
-        whole, _, fraction = text.partition(".")
-        fraction = fraction.rstrip("0")
-        whole = whole.lstrip("0") or "0"
-        return f"{whole}.{fraction}" if fraction else whole
-    return text.lstrip("0") or "0"
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        return text
+    if number == 0:
+        return "0"
+    normalized = format(number.normalize(), "f")
+    return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
+
+
+def _number_match_scale(match):
+    """Return an attached abbreviation or a whitespace-delimited scale word."""
+    return (match.group(2) or match.group(3) or "").casefold()
+
+
+def _scaled_number(raw, scale=None):
+    try:
+        value = Decimal(_normalize_number(raw))
+    except InvalidOperation:
+        return None
+    if scale:
+        value *= Decimal(scale)
+    return _normalize_number(value)
 
 
 def _normalize_dates(text):
@@ -458,16 +889,9 @@ def _scan_quantities(text):
         return (match.group(0), {form}, {form}, False)
 
     def number(match):
-        normalized = _normalize_number(match.group(1))
+        scale = _SCALE_WORDS.get(_number_match_scale(match))
+        normalized = _scaled_number(match.group(1), scale)
         forms = {f"n:{normalized}"}
-        scale = _SCALE_WORDS.get((match.group(2) or "").casefold())
-        if scale:
-            try:
-                scaled = float(normalized) * scale
-            except ValueError:
-                scaled = None
-            if scaled is not None and scaled == int(scaled):
-                forms.add(f"n:{int(scaled)}")
         return (match.group(0).strip(), forms, set(forms), False)
 
     def word_number(match):
@@ -497,12 +921,55 @@ def _scan_quantities(text):
             False,
         )
 
+    def cjk_number(match):
+        if not _cjk_quantity_in_context(text, match.start(), match.end()):
+            return None
+        value = _cjk_number_value(match.group(1))
+        forms = {f"n:{value}"}
+        return (match.group(0), forms, set(forms), False)
+
+    def cjk_percentage(match, multiplier):
+        raw = match.group("number")
+        value = (
+            Decimal(_normalize_number(raw))
+            if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw)
+            else Decimal(_cjk_number_value(raw))
+        )
+        remainder = match.groupdict().get("remainder")
+        if remainder:
+            value = (
+                value * Decimal(multiplier)
+                + (
+                    Decimal(remainder)
+                    if remainder.isdigit()
+                    else Decimal(_cjk_number_value(remainder))
+                )
+            )
+        else:
+            value *= Decimal(multiplier)
+        normalized = _normalize_number(value)
+        forms = {f"n:{normalized}"}
+        return (match.group(0), forms, set(forms), False)
+
     take(_IDENTIFIER_RE, identifier)
     take(_ISO_DATE_RE, iso_date)
     take(_ISO_MONTH_RE, iso_month)
     take(_VERSION_RE, version)
+    take(
+        _CJK_PERCENT_POINT_RE,
+        lambda match: cjk_percentage(match, "1"),
+    )
+    take(
+        _CJK_PERCENT_OF_RE,
+        lambda match: cjk_percentage(match, "1"),
+    )
+    take(
+        _CJK_TENTHS_RE,
+        lambda match: cjk_percentage(match, "10"),
+    )
     take(_NUMBER_RE, number)
     take(_WORD_NUMBER_RE, word_number)
+    take(_CJK_NUMBER_RE, cjk_number)
     return tokens
 
 
@@ -524,32 +991,293 @@ def quantitative_evidence(*texts):
     return forms
 
 
-def _measure_signatures(text):
-    """Return number/unit pairs for units whose meaning cannot be exchanged."""
-    signatures = []
-    for match in _MEASURE_RE.finditer(str(text or "")):
-        prefix = (match.group("prefix") or "").casefold()
-        unit = (match.group("unit") or "").casefold()
-        if prefix or unit in {
-            "dollar", "dollars", "usd", "euro", "euros", "eur",
-            "pound", "pounds", "gbp", "yen", "jpy", "yuan", "rmb", "cny",
-        }:
-            category = "currency"
-        elif unit.startswith(("percent", "percentage", "basis")) or unit == "%":
-            category = "percentage"
-        elif unit.rstrip("s") in {
-            "user", "people", "person", "customer", "employee",
-            "account", "subscriber",
-        }:
-            category = "people"
-        else:
-            continue
-        numeric_text = " ".join(
-            part
-            for part in (match.group("number"), match.group("scale"))
-            if part
+def _measure_number_value(raw):
+    text = str(raw).strip()
+    digit = _NUMBER_RE.fullmatch(text)
+    if digit:
+        return Decimal(
+            _scaled_number(
+                digit.group(1),
+                _SCALE_WORDS.get(_number_match_scale(digit)),
+            )
         )
-        signatures.append((quantitative_evidence(numeric_text), category))
+    if _CJK_NUMBER_RE.fullmatch(text):
+        return Decimal(_cjk_number_value(text))
+    if _WORD_NUMBER_RE.fullmatch(text):
+        return Decimal(str(_word_phrase_value(text)))
+    return None
+
+
+def _singular_measure_unit(unit):
+    folded = " ".join(str(unit or "").casefold().split())
+    if folded in {"basis points", "percentage points"}:
+        return folded[:-1]
+    if folded in {"people"}:
+        return folded
+    if folded.endswith("s") and folded[:-1] in (
+        set(_TIME_UNIT_SECONDS) | set(_DATA_UNIT_BYTES) | _COUNT_UNITS
+        | set(_CURRENCY_UNITS)
+    ):
+        return folded[:-1]
+    return folded
+
+
+def _quantity_comparator(text, index, end=None):
+    prefix = str(text or "")[max(0, index - 48) : index]
+    for comparator, pattern in _QUANTITY_COMPARATORS:
+        if pattern.search(prefix):
+            return comparator
+    if _UNRESOLVED_COMPARATOR_RE.search(prefix):
+        return "unresolved"
+    if end is not None:
+        suffix = str(text or "")[end : end + 48]
+        for comparator, pattern in _POSTFIX_QUANTITY_COMPARATORS:
+            if pattern.search(suffix):
+                return comparator
+        if _UNRESOLVED_POSTFIX_COMPARATOR_RE.search(suffix):
+            return "unresolved"
+    return "="
+
+
+def _measure_carrier_tokens(text, match):
+    """Return the local metric a measured value describes."""
+    raw = str(text or "")
+    start = max(
+        raw.rfind(delimiter, 0, match.start())
+        for delimiter in (".", ";", ",", "/", "|", "\n", "。", "；", "，")
+    ) + 1
+    prefix = raw[start : match.start()]
+    conjunctions = list(re.finditer(r"\b(?:and|while)\b|而|及", prefix, re.I))
+    if conjunctions:
+        start += conjunctions[-1].end()
+    ends = [
+        position
+        for delimiter in (".", ";", ",", "/", "|", "\n", "。", "；", "，")
+        if (position := raw.find(delimiter, match.end())) >= 0
+    ]
+    end = min(ends) if ends else len(raw)
+    suffix = raw[match.end() : end]
+    conjunction = re.search(r"\b(?:and|while)\b|而|及", suffix, re.I)
+    if conjunction:
+        end = match.end() + conjunction.start()
+    def singular(word):
+        if word in {"failed", "fails", "failures"}:
+            return "failure"
+        if len(word) > 4 and word.endswith("ies"):
+            return word[:-3] + "y"
+        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            return word[:-1]
+        return word
+
+    def words(part):
+        return [
+            singular(word)
+            for word in re.findall(
+                r"[a-z][a-z0-9']*",
+                re.sub(r"[-‐‑‒–—’]", " ", part.casefold()),
+            )
+            if word not in _MEASURE_CARRIER_STOPWORDS
+            and not word.isdigit()
+        ]
+
+    prefix_words = words(raw[start : match.start()])
+    if prefix_words:
+        return set(prefix_words)
+    suffix_words = words(raw[match.end() : end])
+    if suffix_words:
+        return {
+            "failure"
+            if "failure" in suffix_words[:3]
+            else suffix_words[0]
+        }
+    clause = raw[start : match.start()] + raw[match.end() : end]
+    cjk = "".join(re.findall(r"[\u3400-\u9fff]", clause))
+    for noise in (
+        "為", "为", "是", "約", "约", "至少", "至多", "超過", "超过",
+        "不超過", "不超过", "不低於", "不低于", "不高於", "不高于",
+        "不少於", "不少于",
+    ):
+        cjk = cjk.replace(noise, "")
+    return {
+        cjk[index : index + 2]
+        for index in range(max(0, len(cjk) - 1))
+    } or ({cjk} if cjk else set())
+
+
+def _measure_signatures_match(claim_signature, evidence_signature):
+    claim_carrier = claim_signature["carrier"]
+    evidence_carrier = evidence_signature["carrier"]
+    return (
+        claim_signature["comparator"] != "unresolved"
+        and evidence_signature["comparator"] != "unresolved"
+        and
+        claim_signature["unit"] == evidence_signature["unit"]
+        and claim_signature["comparator"] == evidence_signature["comparator"]
+        and _quantity_is_covered(
+            claim_signature["forms"], evidence_signature["forms"]
+        )
+        and bool(claim_carrier)
+        and claim_carrier == evidence_carrier
+    )
+
+
+def _structured_number_fragment(text, match):
+    """Exclude dates, versions, and URLs from bare scalar carrier binding."""
+    raw = str(text or "")
+    start = match.start("number")
+    end = match.end("number")
+    before = raw[start - 1 : start]
+    after = raw[end : end + 1]
+    if before in ".-/" or after in "-/":
+        return True
+    if any(
+        url_match.start() <= start < url_match.end()
+        for url_match in _URL_RE.finditer(raw)
+    ):
+        return True
+    number = match.group("number")
+    digit = _NUMBER_RE.fullmatch(number)
+    if digit and not _number_match_scale(digit):
+        normalized = _normalize_number(digit.group(1))
+        if normalized.isdigit() and 1900 <= int(normalized) <= 2100:
+            return True
+    return False
+
+
+def _measure_signatures(text):
+    """Return raw and canonical values for measurements with semantic units."""
+    signatures = []
+    raw_text = str(text or "")
+    special_spans = []
+    for pattern, multiplier, category in (
+        (_CJK_PERCENT_POINT_RE, Decimal("1"), "percentage_point"),
+        (_CJK_PERCENT_OF_RE, Decimal("1"), "percentage"),
+        (_CJK_TENTHS_RE, Decimal("10"), "percentage"),
+    ):
+        for special in pattern.finditer(raw_text):
+            raw_number = special.group("number")
+            value = (
+                Decimal(_normalize_number(raw_number))
+                if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw_number)
+                else Decimal(_cjk_number_value(raw_number))
+            )
+            remainder = special.groupdict().get("remainder")
+            if remainder:
+                value = (
+                    value * multiplier
+                    + (
+                        Decimal(remainder)
+                        if remainder.isdigit()
+                        else Decimal(_cjk_number_value(remainder))
+                    )
+                )
+            else:
+                value *= multiplier
+            normalized = _normalize_number(value)
+            forms = {f"n:{normalized}"}
+            signatures.append(
+                {
+                    "raw_forms": forms,
+                    "forms": forms,
+                    "unit": category,
+                    "comparator": _quantity_comparator(
+                        raw_text, special.start(), special.end()
+                    ),
+                    "carrier": _measure_carrier_tokens(raw_text, special),
+                }
+            )
+            special_spans.append((special.start(), special.end()))
+    for match in _MEASURE_VALUE_RE.finditer(raw_text):
+        if any(
+            start < match.end() and match.start() < end
+            for start, end in special_spans
+        ):
+            continue
+        prefix = match.group("prefix") or ""
+        prefix_key = prefix.upper() if prefix.isascii() else prefix
+        raw_unit = match.group("unit") or ""
+        unit = _singular_measure_unit(raw_unit)
+        if (
+            _CJK_NUMBER_RE.fullmatch(match.group("number"))
+            and not _cjk_quantity_in_context(
+                raw_text, match.start("number"), match.end("number")
+            )
+        ):
+            continue
+        number = _measure_number_value(match.group("number"))
+        if number is None:
+            continue
+        category = None
+        multiplier = Decimal("1")
+        if unit in {"%", "％", "percent", "percentage", "per cent"}:
+            category = "percentage"
+        elif unit in _TEMPERATURE_UNITS:
+            category = _TEMPERATURE_UNITS[unit]
+        elif unit in {
+            "percentage point", "個百分點", "个百分點",
+            "個百分点", "个百分点",
+        }:
+            category = "percentage_point"
+        elif unit == "成":
+            category = "percentage"
+            multiplier = Decimal("10")
+        elif unit == "basis point":
+            category = "percentage"
+            multiplier = Decimal("0.01")
+        elif unit in _CURRENCY_UNITS or prefix:
+            category = _CURRENCY_UNITS.get(
+                unit, _CURRENCY_PREFIXES.get(prefix_key)
+            )
+            if prefix and unit in {"元", "圓", "圆"}:
+                category = _CURRENCY_PREFIXES.get(prefix_key)
+            if prefix and unit in _CURRENCY_UNITS:
+                prefixed = _CURRENCY_PREFIXES.get(prefix_key)
+                if (
+                    unit not in {"元", "圓", "圆"}
+                    and prefixed != _CURRENCY_UNITS[unit]
+                ):
+                    category = "currency:ambiguous"
+        elif unit in {"month", "year", "年"}:
+            category = {
+                "month": "time:calendar_month",
+                "year": "time:calendar_year",
+                "年": "time:calendar_year",
+            }[unit]
+        elif unit in _TIME_UNIT_SECONDS:
+            category = "time:seconds"
+            multiplier = _TIME_UNIT_SECONDS[unit]
+        elif unit in _DATA_UNIT_BYTES:
+            category = "data:bytes"
+            multiplier = _DATA_UNIT_BYTES[unit]
+        elif unit in _COUNT_UNITS:
+            category = "count:" + (
+                "person" if unit in {"people", "person", "人", "名", "位"} else unit
+            )
+        elif unit and unit not in _UNKNOWN_UNIT_STOPWORDS:
+            category = "unknown:" + _normalized_family(unit)
+        elif not prefix and not unit and not _structured_number_fragment(
+            raw_text, match
+        ):
+            category = "scalar"
+        if not category:
+            continue
+        if category.startswith("currency:") and (
+            raw_text[: match.start()].rstrip().endswith(("(", "（"))
+            and raw_text[match.end() :].lstrip().startswith((")", "）"))
+        ):
+            number = -abs(number)
+        normalized = _normalize_number(number * multiplier)
+        signatures.append(
+            {
+                "raw_forms": quantitative_evidence(match.group("number")),
+                "forms": {f"n:{normalized}"},
+                "unit": category,
+                "comparator": _quantity_comparator(
+                    raw_text, match.start(), match.end()
+                ),
+                "carrier": _measure_carrier_tokens(raw_text, match),
+            }
+        )
     return signatures
 
 
@@ -834,7 +1562,13 @@ def _evidence_carries_assertion(
     return False
 
 
-def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
+def evidence_coverage_errors(
+    claim,
+    dated_fields=(),
+    inherited_evidence="",
+    evidence_override=None,
+    evidence_label="extract_or_location",
+):
     """Require claim assertions to be covered by the recorded evidence.
 
     `dated_fields` carries the dates the ledger already records in its own
@@ -850,7 +1584,11 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
     if kind not in {"fact", "reported_claim", "estimate", "analysis"}:
         return []
     claim_text = _text(claim.get("claim"))
-    extract = _claim_evidence_text(claim)
+    extract = (
+        _claim_evidence_text(claim)
+        if evidence_override is None
+        else _text(evidence_override)
+    )
     claim_id = claim.get("claim_id", "<unknown>")
     errors = []
     if not claim_text:
@@ -859,7 +1597,7 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
         # An absent extract used to exempt the claim from every check below,
         # which made a blank field the cheapest way to assert anything.
         return [
-            f"{claim_id}: extract_or_location is empty, so nothing in the claim "
+            f"{claim_id}: {evidence_label} is empty, so nothing in the claim "
             "is evidenced. Quote the source wording or its precise location."
         ]
     extract = " ".join(part for part in (extract, _text(inherited_evidence)) if part)
@@ -875,6 +1613,8 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
         else ""
     )
     evidence_forms = quantitative_evidence(extract, assumption_text)
+    claim_measures = _measure_signatures(claim_text)
+    evidence_measures = _measure_signatures(extract + " " + assumption_text)
     for value in dated_fields:
         if isinstance(value, str) and _as_date(value):
             evidence_forms.add(f"d:{value}")
@@ -894,6 +1634,15 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
     for display, claim_forms in quantitative_obligations(claim_text):
         if _quantity_is_covered(claim_forms, evidence_forms):
             continue
+        if any(
+            _quantity_is_covered(claim_forms, claim_measure["raw_forms"])
+            and any(
+                _measure_signatures_match(claim_measure, evidence_measure)
+                for evidence_measure in evidence_measures
+            )
+            for claim_measure in claim_measures
+        ):
+            continue
         matching_expressions = [
             expression
             for expression, forms in derived_quantities
@@ -904,10 +1653,9 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
             continue
         errors.append(
             f"{claim_id}: quantity '{display}' appears in claim but not in "
-            "extract_or_location. Quote the figure from the source, or record "
+            f"{evidence_label}. Quote the figure from the source, or record "
             "it in derived_assertions with its derivation."
         )
-    evidence_measures = _measure_signatures(extract + " " + assumption_text)
     derived_measures = [
         (
             _text(entry.get("expression")).casefold(),
@@ -915,26 +1663,36 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
         )
         for entry in derived_entries
     ]
-    for claim_forms, claim_unit in _measure_signatures(claim_text):
-        same_number_is_evidenced = any(
-            _quantity_is_covered(claim_forms, evidence_forms_for_measure)
-            for evidence_forms_for_measure, _ in evidence_measures
-        )
-        if not same_number_is_evidenced:
+    for claim_measure in claim_measures:
+        claim_forms = claim_measure["forms"]
+        claim_unit = claim_measure["unit"]
+        if any(
+            expression in used_expressions
+            and _quantity_is_covered(
+                claim_measure["raw_forms"], expression_forms
+            )
+            for expression, expression_forms in derived_quantities
+        ):
+            continue
+        if (
+            kind == "estimate"
+            and claim_unit.startswith(("count:", "unknown:"))
+            and _quantity_is_covered(
+                claim_measure["raw_forms"], evidence_forms
+            )
+        ):
             continue
         if any(
-            evidence_unit == claim_unit
-            and _quantity_is_covered(claim_forms, evidence_forms_for_measure)
-            for evidence_forms_for_measure, evidence_unit in evidence_measures
+            _measure_signatures_match(claim_measure, evidence_measure)
+            for evidence_measure in evidence_measures
         ):
             continue
         matching_expressions = [
             expression
             for expression, signatures in derived_measures
             if any(
-                unit == claim_unit
-                and _quantity_is_covered(claim_forms, forms)
-                for forms, unit in signatures
+                _measure_signatures_match(claim_measure, signature)
+                for signature in signatures
             )
         ]
         if matching_expressions:
@@ -942,7 +1700,7 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
             continue
         errors.append(
             f"{claim_id}: the claim's {claim_unit} unit is not carried by "
-            "the evidence for the same quantity."
+            f"{evidence_label} for the same quantity."
         )
     folded_extract = extract.casefold()
     folded_claim = claim_text.casefold()
@@ -1003,7 +1761,7 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
             used_expressions.update(matching_expressions)
             continue
         errors.append(
-            f"{claim_id}: claim asserts '{label}' but extract_or_location "
+            f"{claim_id}: claim asserts '{label}' but {evidence_label} "
             "records no evidence of it. Quote the source wording that "
             "establishes the status, or declare it in derived_assertions."
         )
@@ -1546,7 +2304,198 @@ def validate_references(data):
         ]
         person_claim_role = claim.get("person_claim_role")
         person_claim_assessment = claim.get("person_claim_assessment")
-        if protected_people and person_claim_role not in {
+        harm_review = claim.get("human_harm_review")
+        claim_text = _text(claim.get("claim"))
+        report_text = (
+            " ".join(
+                _text(excerpt)
+                for excerpt in claim.get("report_excerpts", [])
+                if _text(excerpt)
+            )
+            if isinstance(claim.get("report_excerpts"), list)
+            else ""
+        )
+        safety_text = " ".join(
+            part for part in (claim_text, report_text) if part
+        )
+        harmful_text = bool(
+            HUMAN_HARM_PATTERN.search(safety_text)
+            or SENSITIVE_PRIVATE_PATTERN.search(safety_text)
+        )
+        subject_entries = claim.get("named_subjects", [])
+        subject_entries = (
+            subject_entries if isinstance(subject_entries, list) else []
+        )
+        typed_subjects = [
+            entry for entry in subject_entries if isinstance(entry, dict)
+        ]
+        declared_subject_names = {
+            _text(entry.get("name")).casefold()
+            for entry in typed_subjects
+            if _text(entry.get("name"))
+        }
+        declared_organization_names = {
+            _text(entry.get("name")).casefold()
+            for entry in typed_subjects
+            if entry.get("subject_type") == "organization"
+            and _text(entry.get("name"))
+        }
+        declared_person_entries = [
+            entry
+            for entry in typed_subjects
+            if entry.get("subject_type") == "person"
+        ]
+        for duplicate in _duplicates(
+            [
+                _text(entry.get("name")).casefold()
+                for entry in typed_subjects
+                if _text(entry.get("name"))
+            ]
+        ):
+            errors.append(
+                f"{claim_id}: named_subjects declares {duplicate!r} twice."
+            )
+        for entry in typed_subjects:
+            subject_name = _text(entry.get("name"))
+            subject_type = entry.get("subject_type")
+            subject_person_id = entry.get("person_id")
+            if subject_name and not _exact_expression_in_text(
+                subject_name, safety_text
+            ):
+                errors.append(
+                    f"{claim_id}: named_subjects entry {subject_name!r} "
+                    "does not appear in the claim or report excerpts."
+                )
+            if subject_type == "organization" and subject_person_id:
+                errors.append(
+                    f"{claim_id}: organization subject {subject_name!r} "
+                    "cannot carry person_id."
+                )
+            if subject_type == "person":
+                if subject_person_id not in people_by_id:
+                    errors.append(
+                        f"{claim_id}: person subject {subject_name!r} needs "
+                        "a registered person_id."
+                    )
+                else:
+                    subject_person = people_by_id[subject_person_id]
+                    if subject_person_id not in person_links:
+                        errors.append(
+                            f"{claim_id}: person subject {subject_name!r} must "
+                            f"link {subject_person_id} in person_ids."
+                        )
+                    if not mentions_person_alias(subject_name, subject_person):
+                        errors.append(
+                            f"{claim_id}: person subject {subject_name!r} "
+                            f"does not match registered person {subject_person_id}."
+                        )
+        named_candidates = (
+            named_subject_mentions(safety_text) if harmful_text else set()
+        )
+        named_people = (
+            named_person_mentions(safety_text) if harmful_text else set()
+        )
+        person_name_folds = {name.casefold() for name in named_people}
+        misclassified_organizations = {
+            name
+            for name in named_people
+            if name.casefold() in declared_organization_names
+        }
+        for name in sorted(misclassified_organizations):
+            errors.append(
+                f"{claim_id}: named subject {name!r} resolves as a person and "
+                "cannot be declared as an organization; register the named "
+                "person and link person_ids."
+            )
+        # Organization typing is a declaration, not an escape hatch. Only
+        # independently non-person names can suppress person safeguards.
+        trusted_organization_names = (
+            declared_organization_names - person_name_folds
+        )
+        registered_candidate_names = {
+            name.casefold()
+            for name in named_candidates
+            if any(
+                mentions_person_alias(name, person)
+                for person in people_by_id.values()
+            )
+        }
+        untyped_names = {
+            name
+            for name in named_candidates
+            if name.casefold() not in declared_subject_names
+            and name.casefold() not in registered_candidate_names
+        }
+        if untyped_names:
+            errors.append(
+                f"{claim_id}: harmful or sensitive claim has untyped named "
+                "subjects "
+                + ", ".join(sorted(untyped_names))
+                + "; declare every person or organization in named_subjects."
+            )
+        unregistered_names = {
+            name
+            for name in named_people
+            if not any(
+                mentions_person_alias(name, person)
+                for person in people_by_id.values()
+            )
+            and name.casefold() not in trusted_organization_names
+        }
+        named_registered_ids = {
+            person_id
+            for person_id, person in people_by_id.items()
+            if any(mentions_person_alias(name, person) for name in named_people)
+        }
+        named_registered_ids.update(
+            entry.get("person_id")
+            for entry in declared_person_entries
+            if entry.get("person_id") in people_by_id
+        )
+        unstated_status_ids = {
+            person_id
+            for person_id in named_registered_ids
+            if people_by_id[person_id].get("living_status")
+            not in PROTECTED_LIVING_STATUSES | {"deceased"}
+        }
+        named_protected_ids = {
+            person_id
+            for person_id in named_registered_ids
+            if people_by_id[person_id].get("living_status")
+            in PROTECTED_LIVING_STATUSES
+        }
+        typed_unresolved_person = (
+            (
+                person_claim_role in {"harmful", "sensitive_private_fact"}
+                or bool(declared_person_entries)
+            )
+            and not any(person_id in people_by_id for person_id in person_links)
+        )
+        if unregistered_names:
+            errors.append(
+                f"{claim_id}: harmful or sensitive claim names "
+                f"{', '.join(sorted(unregistered_names))}; register the named "
+                "person, record living_status, and link person_ids before "
+                "publishing the claim."
+            )
+        if unstated_status_ids:
+            errors.append(
+                f"{claim_id}: named-person harm needs explicit living_status "
+                "for " + ", ".join(sorted(unstated_status_ids)) + "."
+            )
+        if typed_unresolved_person and not unregistered_names:
+            errors.append(
+                f"{claim_id}: typed person-harm claim has no resolved subject; "
+                "register the person with living_status and link person_ids."
+            )
+        safety_subject = bool(
+            protected_people
+            or named_protected_ids
+            or unregistered_names
+            or unstated_status_ids
+            or typed_unresolved_person
+        )
+        if safety_subject and person_claim_role not in {
             "neutral",
             "harmful",
             "sensitive_private_fact",
@@ -1554,10 +2503,11 @@ def validate_references(data):
             "resolution",
         }:
             errors.append(
-                f"{claim_id}: claim linked to a protected person needs an "
-                "explicit person_claim_role classification."
+                f"{claim_id}: claim linked to, or explicitly naming, a "
+                "potentially protected person needs an explicit "
+                "person_claim_role classification."
             )
-        if protected_people and (
+        if safety_subject and (
             not isinstance(person_claim_assessment, dict)
             or person_claim_assessment.get("classification")
             != person_claim_role
@@ -1567,15 +2517,9 @@ def validate_references(data):
                 f"{claim_id}: protected-person claim needs a substantive "
                 "person_claim_assessment matching person_claim_role."
             )
-        harm_review = claim.get("human_harm_review")
-        claim_text = _text(claim.get("claim"))
-        harmful_text = bool(
-            HUMAN_HARM_PATTERN.search(claim_text)
-            or SENSITIVE_PRIVATE_PATTERN.search(claim_text)
-        )
         for person_id, person in people_by_id.items():
             if (
-                mentions_person_alias(claim_text, person)
+                mentions_person_alias(safety_text, person)
                 and person_id not in person_links
             ):
                 errors.append(
@@ -1594,7 +2538,7 @@ def validate_references(data):
                     f"the protected primary subject {primary_id}; pronouns "
                     "and omitted names do not remove that accountability."
                 )
-            if protected_people and person_claim_role not in {
+            if safety_subject and person_claim_role not in {
                 "harmful",
                 "sensitive_private_fact",
             }:
@@ -1603,8 +2547,8 @@ def validate_references(data):
                     f"person_claim_role {person_claim_role!r}."
                 )
         if (
-            SENSITIVE_PRIVATE_PATTERN.search(claim_text)
-            and protected_people
+            SENSITIVE_PRIVATE_PATTERN.search(safety_text)
+            and safety_subject
             and person_claim_role != "sensitive_private_fact"
         ):
             errors.append(
@@ -1612,7 +2556,7 @@ def validate_references(data):
                 "person_claim_role 'sensitive_private_fact'."
             )
         needs_harm_review = bool(
-            protected_people
+            safety_subject
             and (
                 harmful_text
                 or person_claim_role in {
@@ -1627,7 +2571,7 @@ def validate_references(data):
                 "human_harm_review bound to sourcing, attribution, resolution, "
                 "privacy, and right of reply."
             )
-        if isinstance(harm_review, dict) and protected_people:
+        if isinstance(harm_review, dict) and safety_subject:
             if (
                 person_claim_role == "sensitive_private_fact"
                 and harm_review.get("category") != "sensitive_private_fact"
@@ -1637,7 +2581,7 @@ def validate_references(data):
                     "requires the matching review category."
                 )
             if (
-                SENSITIVE_PRIVATE_PATTERN.search(claim_text)
+                SENSITIVE_PRIVATE_PATTERN.search(safety_text)
                 and harm_review.get("category") != "sensitive_private_fact"
             ):
                 errors.append(
@@ -1725,7 +2669,7 @@ def validate_references(data):
                     or claim.get("confidence") != "low"
                     or triangulation_status != "limited"
                     or not limitation
-                    or limitation.casefold() not in claim_text.casefold()
+                    or limitation.casefold() not in safety_text.casefold()
                 ):
                     errors.append(
                         f"{claim_id}: single-source harm must be a low-"
@@ -1748,7 +2692,7 @@ def validate_references(data):
                         + "."
                     )
             attribution = _text(harm_review.get("attributed_to"))
-            if not attribution or attribution.casefold() not in claim_text.casefold():
+            if not attribution or attribution.casefold() not in safety_text.casefold():
                 errors.append(
                     f"{claim_id}: protected-person harm must be attributed "
                     "in the claim text."
@@ -1756,7 +2700,7 @@ def validate_references(data):
             detected_claim_stages = {
                 stage
                 for stage, pattern in LEGAL_STAGE_PATTERNS.items()
-                if _has_affirmative_match(pattern.pattern, claim_text)
+                if _has_affirmative_match(pattern.pattern, safety_text)
             }
             evidence_text = " ".join(
                 _text(entry.get("extract_or_location"))
@@ -2015,6 +2959,14 @@ def validate_references(data):
                         f"{claim_id}: right of reply cannot be not_applicable "
                         "for a protected-person harm claim."
                     )
+            relevance = _text(
+                harm_review.get("governing_question_relevance")
+            )
+            if len(relevance) < 40:
+                errors.append(
+                    f"{claim_id}: protected-person harm needs a specific "
+                    "governing-question relevance justification."
+                )
             if harm_review.get("category") == "sensitive_private_fact":
                 privacy_basis = harm_review.get("privacy_basis")
                 privacy_ids = harm_review.get(
@@ -2022,9 +2974,6 @@ def validate_references(data):
                 )
                 privacy_ids = (
                     privacy_ids if isinstance(privacy_ids, list) else []
-                )
-                relevance = _text(
-                    harm_review.get("governing_question_relevance")
                 )
                 valid_privacy_source = any(
                     source_id in source_links
@@ -2048,7 +2997,6 @@ def validate_references(data):
                     privacy_basis
                     not in {"self_disclosed", "court_or_regulator_record"}
                     or not valid_privacy_source
-                    or len(relevance) < 40
                 ):
                     errors.append(
                         f"{claim_id}: sensitive private information needs "
@@ -2096,9 +3044,29 @@ def validate_references(data):
                 for related_id in claim.get("supports") or []
                 if related_id in claims_by_id
             )
-        errors.extend(
-            evidence_coverage_errors(claim, ledger_dates, inherited)
-        )
+        if source_evidence:
+            for record in source_evidence:
+                if not isinstance(record, dict):
+                    continue
+                source_id = record.get("source_id")
+                record_dates = [claim.get("as_of"), claim.get("verified_at")]
+                if source_id in sources_by_id:
+                    source = sources_by_id[source_id]
+                    record_dates.extend(
+                        [source.get("accessed"), source.get("published")]
+                    )
+                errors.extend(
+                    evidence_coverage_errors(
+                        claim,
+                        record_dates,
+                        evidence_override=record.get("extract_or_location"),
+                        evidence_label=f"source_evidence[{source_id}]",
+                    )
+                )
+        else:
+            errors.extend(
+                evidence_coverage_errors(claim, ledger_dates, inherited)
+            )
         errors.extend(
             _absence_errors(claim, report_day)
         )

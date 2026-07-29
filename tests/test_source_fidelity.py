@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
+from tests.source_fidelity_transport import mock_production_transport
+
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "source_fidelity.py"
 SPEC = importlib.util.spec_from_file_location("source_fidelity", MODULE_PATH)
 source_fidelity = importlib.util.module_from_spec(SPEC)
@@ -23,6 +25,21 @@ PRICING_PAGE = """
 """
 
 ADOPTION_PAGE = "<html><body><p>The survey covers developer tooling.</p></body></html>"
+
+
+def receipt_responses():
+    return {
+        "example.org": (
+            200,
+            {"content-type": "text/html"},
+            PRICING_PAGE.encode(),
+        ),
+        "example.net": (
+            200,
+            {"content-type": "text/html"},
+            b"<p>72% of teams reported daily use in 2026.</p>",
+        ),
+    }
 
 
 def ledger():
@@ -240,17 +257,9 @@ class FidelityTests(unittest.TestCase):
             ledger_path.write_text(json.dumps(value), encoding="utf-8")
             receipt_path = work / "receipt.json"
 
-            def request(target, *, timeout):
-                del timeout
-                body = (
-                    PRICING_PAGE
-                    if target.host == "example.org"
-                    else "<p>72% of teams reported daily use in 2026.</p>"
-                )
-                return 200, {"content-type": "text/html"}, body.encode()
-
-            with mock.patch.object(
-                source_fidelity, "_request_pinned", side_effect=request
+            with mock_production_transport(
+                receipt_responses(),
+                module=source_fidelity,
             ):
                 source_fidelity.issue_source_fidelity_receipt(
                     ledger_path,
@@ -413,17 +422,9 @@ class FidelityTests(unittest.TestCase):
             ledger_path = work / "ledger.json"
             ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
             receipt_path = work / "source-receipt.json"
-            def request(target, *, timeout):
-                del timeout
-                body = (
-                    PRICING_PAGE
-                    if target.host == "example.org"
-                    else "<p>72% of teams reported daily use in 2026.</p>"
-                )
-                return 200, {"content-type": "text/html"}, body.encode()
-
-            with mock.patch.object(
-                source_fidelity, "_request_pinned", side_effect=request
+            with mock_production_transport(
+                receipt_responses(),
+                module=source_fidelity,
             ):
                 source_fidelity.issue_source_fidelity_receipt(
                     ledger_path,
@@ -446,6 +447,45 @@ class FidelityTests(unittest.TestCase):
                 source_fidelity.validate_source_fidelity_receipt(
                     ledger_path, receipt
                 )
+            )
+
+    def test_live_revalidation_does_not_trust_passing_receipt_labels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            receipt_path = work / "source-receipt.json"
+            with mock_production_transport(
+                receipt_responses(),
+                module=source_fidelity,
+            ):
+                source_fidelity.issue_source_fidelity_receipt(
+                    ledger_path,
+                    receipt_path,
+                    sample_size=0,
+                )
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["checks"][0]["observation"]["response_sha256"] = "0" * 64
+            with mock_production_transport(
+                {
+                    "example.org": (
+                        200,
+                        {"content-type": "text/html"},
+                        b"<p>The recorded pricing evidence is absent.</p>",
+                    ),
+                    "example.net": receipt_responses()["example.net"],
+                },
+                module=source_fidelity,
+            ):
+                errors = (
+                    source_fidelity.validate_source_fidelity_receipt_online(
+                        ledger_path,
+                        receipt,
+                    )
+                )
+            self.assertTrue(
+                any("live source" in error.casefold() for error in errors),
+                errors,
             )
 
     def test_test_transport_cannot_issue_a_production_receipt(self):

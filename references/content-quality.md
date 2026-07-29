@@ -347,6 +347,14 @@ This test and the §9 Section Contract can appear to pull against each other. Th
 
 The required checks and finding fields live in `content-review.schema.json`. Critical findings must be fixed. A major evidence limitation may remain only when the report discloses it in clear language and the review records the exact disclosure excerpt.
 
+Every non-bundled visual that will appear in the PDF must also be listed in
+`visual_assets` before the gate runs. Record its report-relative path, exact
+SHA-256, `body`/`cover` usage, a review of any visible text or claims, and
+`approved` disposition. The gate discovers body images from Markdown; final
+rendering reconciles all actual local rasters against the approved set.
+Changing pixels, adding an unreviewed image, or leaving an approval unused
+fails production. Bundled decorative template assets need no review record.
+
 Run `scripts/source_fidelity.py --online` first and issue its receipt, then run
 `scripts/content_gate.py` after the review with that receipt. Any later change
 to the report, ledger, source-fidelity receipt, review note, verifier, or

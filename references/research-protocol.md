@@ -135,9 +135,17 @@ inside the freshness window: a search from last year says nothing about today.
 ### Claim text may not outrun per-source evidence
 
 Each direct source's `source_evidence.extract_or_location` is authoritative;
-the claim-level summary cannot replace it. Every quantity in `claim` — number,
-percentage, currency amount, date, score, or version — must appear with the
-same unit and direction in that evidence, and so must every status assertion:
+the claim-level summary cannot replace it. Every quantity in `claim` must
+preserve sign, comparator, magnitude, scale, currency, and measurement
+dimension in that evidence, including Arabic and Chinese numerals. The extract
+must also name the same complete metric carrier: a bare `20 ms` cannot
+substantiate `latency was 20 ms`, and a regional or other qualifier cannot be
+dropped. Prefix and postfix comparators must match. Preserve the complete unit
+expression, including Unicode temperature symbols, superscripts, and symbolic
+or worded compound units. Each `source_evidence` record must carry these
+elements independently; values and carriers are never assembled across
+sources. Dates,
+scores, versions, and every status assertion must likewise match:
 patched, deprecated,
 discontinued, recalled, retracted, approved, acquired, certified, open source.
 The failure this prevents is specific and real: a faithful quote covering the
@@ -169,8 +177,10 @@ that checks the ledger against the world rather than the report against the
 ledger. Run it with `--online` before delivery. Without `--online` it reports
 a visible skip, which is not a pass; an unreachable page is recorded as
 unverified, never as verified. Production requires `--receipt
-"$SOURCE_FIDELITY_RECEIPT"`; content review, report validation, and PDF export
-all reject a missing or stale receipt.
+"$SOURCE_FIDELITY_RECEIPT"`; content review rejects a missing or stale receipt,
+and final report validation and PDF export re-read the receipt's exact sample
+through the production transport. Mutable receipt JSON is never accepted as
+standalone proof that a live source was checked.
 
 ### Freshness records
 

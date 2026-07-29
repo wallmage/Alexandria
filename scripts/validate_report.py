@@ -17,9 +17,34 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 try:
+    from .render_binding import (
+        validate_render_binding,
+        validate_render_receipt,
+    )
+    from .report_blocks import (
+        SOURCE_HEADINGS,
+        bibliography_ranges,
+        h2_sections,
+        mask_fenced_code,
+        validation_report_blocks,
+        visible_report_blocks,
+        visible_report_prose,
+    )
     from .report_contract import detect_language
+    from .source_fidelity import validate_source_fidelity_receipt_online
 except ImportError:
+    from render_binding import validate_render_binding, validate_render_receipt
+    from report_blocks import (
+        SOURCE_HEADINGS,
+        bibliography_ranges,
+        h2_sections,
+        mask_fenced_code,
+        validation_report_blocks,
+        visible_report_blocks,
+        visible_report_prose,
+    )
     from report_contract import detect_language
+    from source_fidelity import validate_source_fidelity_receipt_online
 
 try:
     from .validate_ledger import (
@@ -42,14 +67,6 @@ except ImportError:
         mentions_person_alias,
     )
 
-SOURCE_HEADINGS = {
-    "sources",
-    "references",
-    "来源",
-    "資料來源",
-    "参考资料",
-    "參考資料",
-}
 LANG_CHOICES = ("en", "zh-CN", "zh-HK")
 ROOT = Path(__file__).resolve().parents[1]
 S2T_CHARACTER_MAP = (
@@ -61,45 +78,247 @@ REWILD_PROFILE_DIRS = {
     "zh-HK": "rewild-hk",
 }
 
+_STRUCTURAL_LABEL_EXACT = frozenset(
+    {
+        "analysis",
+        "audit",
+        "background",
+        "body",
+        "category",
+        "conclusion",
+        "conclusions",
+        "context",
+        "corroborating source",
+        "key takeaways",
+        "date",
+        "documentation",
+        "evidence",
+        "executive summary",
+        "expected result",
+        "finding",
+        "findings",
+        "impact",
+        "implication",
+        "implications",
+        "introduction",
+        "key process",
+        "limitation",
+        "limitations",
+        "measure",
+        "method",
+        "methodology",
+        "metric",
+        "name",
+        "next steps",
+        "normal source title",
+        "official source",
+        "option",
+        "options",
+        "outlook",
+        "overview",
+        "owner",
+        "parse",
+        "period",
+        "primary source",
+        "recommendation",
+        "recommendations",
+        "reference",
+        "references",
+        "render",
+        "reopen",
+        "report",
+        "result",
+        "results",
+        "risk",
+        "risks",
+        "scenario",
+        "scenarios",
+        "source",
+        "sources",
+        "stage",
+        "status",
+        "summary",
+        "supported finding",
+        "timeline",
+        "title",
+        "unrelated finding",
+        "value",
+        "ways forward",
+        "what this means",
+        "why it matters",
+        "current state",
+        "year",
+    }
+)
+_CJK_STRUCTURAL_LABEL_EXACT = frozenset(
+    {
+    "分析",
+    "背景",
+    "結論",
+    "结论",
+    "摘要",
+    "概覽",
+    "概览",
+    "方法",
+    "限制",
+    "建議",
+    "建议",
+    "展望",
+    "來源",
+    "来源",
+    "參考資料",
+    "参考资料",
+    "指標",
+    "指标",
+    "結果",
+    "结果",
+    "風險",
+    "风险",
+    "影響",
+    "影响",
+    "下一步",
+    "主要流程",
+    "階段",
+    "阶段",
+    "預期結果",
+    "预期结果",
+    "解析",
+    "重開",
+    "重开",
+    "未來展望",
+    "未来展望",
+    "測試資料來源",
+    "测试资料来源",
+    }
+)
+_IDENTITY_METADATA_LINE = re.compile(
+    r"(?i)^\s*>\s*(client|prepared[\s_-]*by)\s*:\s*(.+?)\s*$"
+)
+_IDENTITY_ORG_SUFFIXES = frozenset(
+    {
+        "advisory",
+        "association",
+        "company",
+        "corporation",
+        "foundation",
+        "group",
+        "institute",
+        "labs",
+        "laboratory",
+        "limited",
+        "llc",
+        "llp",
+        "partners",
+        "research",
+        "studio",
+        "systems",
+        "team",
+        "university",
+    }
+)
 
-def _h2_sections(text):
-    masked = _mask_fenced_code(text)
+
+def _is_safe_identity_label(value):
+    """Validate the narrow person/organization grammar used by cover metadata."""
+    label = value.strip()
+    if (
+        not label
+        or len(label) > 80
+        or len(label.split()) > 8
+        or re.search(r"""[\r\n<>[\]{}*_`~|:;!?。！？；]""", label)
+        or HUMAN_HARM_PATTERN.search(label)
+        or SENSITIVE_PRIVATE_PATTERN.search(label)
+        or NEGATIVE_EXISTENCE_PATTERN.search(label)
+    ):
+        return False
+    ascii_words = re.findall(r"[A-Za-z][A-Za-z0-9&'’.-]*", label)
+    if ascii_words:
+        connectors = {"and", "of", "the", "for", "de", "van", "von"}
+        if any(
+            word.casefold() not in connectors
+            and not (word[0].isupper() or word.isupper())
+            for word in ascii_words
+        ):
+            return False
+        return (
+            len(ascii_words) <= 2
+            or ascii_words[-1].casefold() in _IDENTITY_ORG_SUFFIXES
+        )
+    cjk_suffixes = (
+        "公司",
+        "有限公司",
+        "集團",
+        "集团",
+        "基金會",
+        "基金会",
+        "研究院",
+        "研究所",
+        "大學",
+        "大学",
+        "協會",
+        "协会",
+        "團隊",
+        "团队",
+    )
+    return len(label) <= 5 or label.endswith(cjk_suffixes)
+
+
+def _assertion_text_without_safe_identity_metadata(block):
+    """Remove only schema-valid typed identity lines from evidence prose."""
+    assertion_text = block.assertion_text
+    for line in block.raw.splitlines():
+        match = _IDENTITY_METADATA_LINE.fullmatch(line)
+        if not match or not _is_safe_identity_label(match.group(2)):
+            continue
+        rendered_line = re.sub(r"^\s*>\s*", "", line).strip()
+        assertion_text = assertion_text.replace(rendered_line, " ", 1)
+    return re.sub(r"\s+", " ", assertion_text).strip()
+
+
+def _assertion_units(text):
+    """Split a rendered block into independently checkable statements."""
     return [
-        (match.group(1).strip(), match.start())
-        for match in re.finditer(r"^##\s+(.+?)\s*$", masked, re.MULTILINE)
+        unit.strip()
+        for unit in re.split(
+            r"(?<=[!?！？。；;])\s*|(?<=\.)\s+",
+            text.strip(),
+        )
+        if unit.strip()
     ]
 
 
+def _is_explicit_structural_label(block, text):
+    """Recognize only bounded navigation/schema labels, not arbitrary prose."""
+    markdown_link_labels = {
+        re.sub(r"(?<!\\)[*_~`]+", "", label).strip()
+        for label in re.findall(r"(?<!!)\[([^\]\n]+)\]\(", block.raw)
+    }
+    if (
+        block.kind not in {"heading", "table_header", "table_row_label"}
+        and not block.in_bibliography
+        and text not in markdown_link_labels
+    ):
+        return False
+    label = text.strip()
+    if (
+        not label
+        or len(label) > 80
+        or re.search(r"[.!?！？。；;]|\d", label)
+    ):
+        return False
+    folded = label.casefold()
+    return (
+        folded in _STRUCTURAL_LABEL_EXACT
+        or label in _CJK_STRUCTURAL_LABEL_EXACT
+    )
+
+
+def _h2_sections(text):
+    return h2_sections(text)
+
+
 def _mask_fenced_code(text):
-    masked = []
-    fence_char = None
-    fence_length = 0
-
-    def hide(line):
-        return "".join(char if char in "\r\n" else " " for char in line)
-
-    for line in text.splitlines(keepends=True):
-        if fence_char is None:
-            opener = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-            if opener:
-                marker = opener.group(1)
-                fence_char = marker[0]
-                fence_length = len(marker)
-                masked.append(hide(line))
-            else:
-                masked.append(line)
-            continue
-
-        closing = re.match(r"^ {0,3}([`~]{3,})[ \t]*(?:\r?\n)?$", line)
-        masked.append(hide(line))
-        if (
-            closing
-            and set(closing.group(1)) == {fence_char}
-            and len(closing.group(1)) >= fence_length
-        ):
-            fence_char = None
-            fence_length = 0
-    return "".join(masked)
+    return mask_fenced_code(text)
 
 
 def _mask_nonlink_regions(text):
@@ -283,24 +502,24 @@ def simplified_script_errors(text, *, sections=None):
 
 def _report_prose(text, sections):
     """Return report body prose without Sources, URLs, markup, or code."""
-    source_starts = [
-        start
-        for heading, start in sections
-        if heading.casefold() in SOURCE_HEADINGS
-    ]
-    if source_starts:
-        text = text[: min(source_starts)]
-    text = _mask_fenced_code(text)
-    text = re.sub(r"<pre\b.*?</pre>", " ", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"(?m)^(?: {4}|\t).*$", " ", text)
-    text = re.sub(r"`[^`\n]*`", " ", text)
-    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    text = re.sub(r"https?://\S+", " ", text)
-    text = re.sub(r"<!--.*?-->|<[^>]+>", " ", text, flags=re.DOTALL)
-    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", text)
-    text = re.sub(r"[*_~>|]", " ", text)
-    return text
+    del sections
+    text = mask_fenced_code(text)
+
+    def hide(match):
+        return "".join(
+            character if character in "\r\n" else " "
+            for character in match.group(0)
+        )
+
+    text = re.sub(
+        r"<pre\b.*?</pre>",
+        hide,
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    text = re.sub(r"(?m)^(?: {4}|\t).*$", hide, text)
+    text = re.sub(r"`[^`\n]*`", hide, text)
+    return visible_report_prose(text)
 
 
 def validate_markdown(
@@ -360,6 +579,10 @@ def validate_markdown(
     if not source_indexes:
         errors.append("Report needs a final H2 Sources section.")
     else:
+        if len(source_indexes) != 1:
+            errors.append(
+                "Report must contain exactly one H2 Sources section."
+            )
         source_index = source_indexes[-1]
         if source_index != len(sections) - 1:
             errors.append("Sources must be the final H2 section.")
@@ -373,6 +596,16 @@ def validate_markdown(
             )
         if find_raw_urls(source_text):
             errors.append("Sources must use Markdown links, not raw URLs.")
+        source_tail_blocks = [
+            block
+            for block in visible_report_blocks(text)
+            if block.start >= source_start
+        ]
+        if source_tail_blocks:
+            errors.append(
+                "The terminal Sources section may contain only bibliography "
+                "entries; move visible narrative before Sources."
+            )
 
     return errors
 
@@ -406,6 +639,17 @@ def validate_report_against_ledger(text, ledger):
         and source.get("source_id")
         and source.get("url")
     }
+    source_titles_by_url = {
+        source.get("url"): re.sub(
+            r"\s+",
+            " ",
+            str(source.get("title")),
+        ).strip()
+        for source in sources
+        if isinstance(source, dict)
+        and source.get("url")
+        and source.get("title")
+    }
     claims_by_id = {
         claim.get("claim_id"): claim
         for claim in claims
@@ -430,33 +674,26 @@ def validate_report_against_ledger(text, ledger):
     for url in sorted(set(extract_markdown_urls(text)) - ledger_urls):
         errors.append(f"Report URL is not present in the ledger: {url}")
 
-    sections = _h2_sections(text)
-    body = text
-    source_starts = [
-        start
-        for heading, start in sections
-        if heading.casefold() in SOURCE_HEADINGS
-    ]
-    if source_starts:
-        body = body[: min(source_starts)]
+    blocks = validation_report_blocks(text)
+    source_ranges = bibliography_ranges(text)
+    terminal_source_range = source_ranges[-1] if source_ranges else None
     source_section_urls = set(
-        extract_markdown_urls(text[min(source_starts) :])
-        if source_starts
+        extract_markdown_urls(text[slice(*terminal_source_range)])
+        if terminal_source_range
         else []
     )
-    paragraphs = [
-        paragraph
-        for paragraph in re.split(r"\n\s*\n", body)
-        if paragraph.strip()
+    normalized_paragraphs = [
+        (block, block.text, block.assertion_text)
+        for block in blocks
+        if block.text
     ]
-    normalized_paragraphs = {
-        paragraph: re.sub(
-            r"\s+",
-            " ",
-            _report_prose(paragraph, []),
-        ).strip()
-        for paragraph in paragraphs
-    }
+    validation_units = [
+        (block, unit, unit)
+        for block, _, _ in normalized_paragraphs
+        for unit in _assertion_units(
+            _assertion_text_without_safe_identity_metadata(block)
+        )
+    ]
     excerpt_claims = []
     for claim in claims:
         if not isinstance(claim, dict) or claim.get("include_in_report") is not True:
@@ -482,13 +719,17 @@ def validate_report_against_ledger(text, ledger):
         report_day = date.fromisoformat(str(ledger.get("report_date")))
     except (TypeError, ValueError):
         report_day = None
-    for paragraph, normalized_paragraph in normalized_paragraphs.items():
-        if not normalized_paragraph or normalized_paragraph.startswith("#"):
+    for block, normalized_paragraph, assertion_text in validation_units:
+        paragraph = block.raw
+        if not assertion_text:
             continue
         mapped_claims = [
             claim
             for excerpt, claim in excerpt_claims
-            if excerpt in normalized_paragraph
+            if (
+                excerpt in normalized_paragraph
+                or normalized_paragraph in excerpt
+            )
         ]
         if HUMAN_HARM_PATTERN.search(
             normalized_paragraph
@@ -516,34 +757,28 @@ def validate_report_against_ledger(text, ledger):
                     r"(?:[A-Za-z]+\s+)?(?:"
                     r"[0-9]{4}年[0-9]{1,2}月(?:[0-9]{1,2}日)?|"
                     r"[0-9]{4}(?:[-/][0-9]{1,2})"
-                    r"(?:[-/][0-9]{1,2})?|[0-9]{4})",
-                    normalized_paragraph.strip(),
+                    r"(?:[-/][0-9]{1,2})?|[0-9]{4}|"
+                    r"[0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4}|"
+                    r"[A-Za-z]+\s+[0-9]{1,2},?\s+[0-9]{4})",
+                    assertion_text.strip(),
                 )
             )
-            raw = paragraph.lstrip()
-            structural_only = (
-                raw.startswith(("#", ">", "|", "```"))
-                or normalized_paragraph.endswith("?")
-                or normalized_paragraph.endswith("？")
-            )
-            transition_only = bool(
-                re.match(
-                    r"(?i)^(?:this|the (?:next|following|previous)) "
-                    r"(?:section|chapter|part|report) "
-                    r"(?:examines|explains|describes|outlines|covers|"
-                    r"discusses|turns to|sets out)\b"
-                    r"|^(?:本|下|上一)(?:節|节|章|部分|報告|报告).{0,12}"
-                    r"(?:說明|说明|介紹|介绍|討論|讨论|概述|轉向|转向)",
-                    normalized_paragraph,
+            exact_source_title = (
+                block.in_bibliography
+                and any(
+                    source_titles_by_url.get(url) == assertion_text
+                    for url in extract_markdown_urls(block.raw)
                 )
             )
             if not (
-                metadata_only or structural_only or transition_only
+                metadata_only
+                or _is_explicit_structural_label(block, assertion_text)
+                or exact_source_title
             ):
                 errors.append(
                     "Report unit carries externally checkable assertions but "
                     "maps to no ledger claim: "
-                    + normalized_paragraph[:120]
+                    + assertion_text[:120]
                 )
         if mapped_claims:
             mapped_evidence = []
@@ -566,7 +801,7 @@ def validate_report_against_ledger(text, ledger):
                     {
                         "claim_id": "report unit",
                         "kind": "fact",
-                        "claim": normalized_paragraph,
+                        "claim": assertion_text,
                         "extract_or_location": " ".join(mapped_evidence),
                     }
                 )
@@ -623,11 +858,9 @@ def validate_report_against_ledger(text, ledger):
             normalized = re.sub(r"\s+", " ", str(excerpt)).strip()
             matching_paragraphs = [
                 paragraph
-                for paragraph in paragraphs
+                for block, paragraph, _ in normalized_paragraphs
                 if normalized
-                in re.sub(
-                    r"\s+", " ", _report_prose(paragraph, [])
-                ).strip()
+                in paragraph
             ]
             if not matching_paragraphs:
                 errors.append(
@@ -641,8 +874,9 @@ def validate_report_against_ledger(text, ledger):
                 if source_id in source_urls
             }
             if expected_urls and not any(
-                expected_urls.intersection(extract_markdown_urls(paragraph))
-                for paragraph in matching_paragraphs
+                expected_urls.intersection(extract_markdown_urls(block.raw))
+                for block, paragraph, _ in normalized_paragraphs
+                if paragraph in matching_paragraphs
             ):
                 errors.append(
                     f"Claim {claim_id} has no nearby citation to its ledger source."
@@ -661,6 +895,8 @@ def validate_pdf(
     min_text_chars=1,
     min_links=0,
     expected_lang=None,
+    artifact_paths=None,
+    render_receipt_path=None,
 ):
     """Return errors after reopening and extracting text from a rendered PDF."""
     try:
@@ -707,6 +943,27 @@ def validate_pdf(
         errors.append("PDF is missing title metadata.")
     if not str(metadata.get("/Author") or "").strip():
         errors.append("PDF is missing author metadata.")
+    if artifact_paths is not None:
+        if render_receipt_path is None:
+            errors.append(
+                "A renderer-issued render receipt is required to verify the "
+                "exact PDF output."
+            )
+            errors.extend(
+                validate_render_binding(
+                    metadata.get("/Keywords"),
+                    *artifact_paths,
+                )
+            )
+        else:
+            errors.extend(
+                validate_render_receipt(
+                    path,
+                    render_receipt_path,
+                    *artifact_paths,
+                    pdf_binding=metadata.get("/Keywords"),
+                )
+            )
     mark_info = root.get("/MarkInfo", {})
     if hasattr(mark_info, "get_object"):
         mark_info = mark_info.get_object()
@@ -935,6 +1192,10 @@ def build_parser():
         help="required live-source receipt bound to the evidence ledger",
     )
     parser.add_argument("--pdf", help="Rendered PDF to reopen and validate")
+    parser.add_argument(
+        "--render-receipt",
+        help="renderer-issued receipt for the exact PDF bytes",
+    )
     parser.add_argument("--min-words", type=int, default=0)
     parser.add_argument("--max-words", type=int, default=0)
     parser.add_argument("--min-chars", type=int, default=0)
@@ -1019,17 +1280,34 @@ def main(argv=None):
                 from .content_gate import validate_content_receipt
             except ImportError:
                 from content_gate import validate_content_receipt
-            errors.extend(
-                validate_content_receipt(
-                    markdown_path,
-                    Path(args.ledger),
-                    content_receipt,
-                    source_fidelity_receipt_path=Path(
-                        args.source_fidelity_receipt
-                    ),
-                    expected_lang=args.expected_lang,
-                )
+            content_errors = validate_content_receipt(
+                markdown_path,
+                Path(args.ledger),
+                content_receipt,
+                source_fidelity_receipt_path=Path(
+                    args.source_fidelity_receipt
+                ),
+                expected_lang=args.expected_lang,
             )
+            errors.extend(content_errors)
+            if not content_errors and not errors:
+                try:
+                    source_receipt = json.loads(
+                        Path(args.source_fidelity_receipt).read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                except (OSError, json.JSONDecodeError) as exc:
+                    errors.append(
+                        f"Source-fidelity receipt could not be re-read: {exc}"
+                    )
+                else:
+                    errors.extend(
+                        validate_source_fidelity_receipt_online(
+                            Path(args.ledger),
+                            source_receipt,
+                        )
+                    )
     if args.pdf:
         errors.extend(
             validate_pdf(
@@ -1038,6 +1316,29 @@ def main(argv=None):
                 min_text_chars=max(args.min_text_chars, 0),
                 min_links=max(args.min_links, 0),
                 expected_lang=args.expected_lang,
+                artifact_paths=(
+                    (
+                        markdown_path,
+                        Path(args.ledger),
+                        Path(args.rewild_receipt),
+                        Path(args.content_receipt),
+                        Path(args.source_fidelity_receipt),
+                    )
+                    if all(
+                        (
+                            args.ledger,
+                            args.rewild_receipt,
+                            args.content_receipt,
+                            args.source_fidelity_receipt,
+                        )
+                    )
+                    else None
+                ),
+                render_receipt_path=(
+                    Path(args.render_receipt)
+                    if args.render_receipt
+                    else Path(args.pdf).with_suffix(".render.json")
+                ),
             )
         )
 

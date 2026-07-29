@@ -468,7 +468,7 @@ def cover_art_html(template, cover_image=None):
         </div>
         """
     if template == "maison":
-        photo = cover_image or bundled_template_image_data_uri("maison")
+        photo = safe_cover_image or bundled_template_image_data_uri("maison")
         return f"""
         <div class="cover-art maison-art" aria-hidden="true">
             <img class="cover-photo maison-photo" src="{photo}" alt="">
@@ -491,7 +491,7 @@ def cover_art_html(template, cover_image=None):
         </div>
         """
     if template == "terrain":
-        photo = cover_image or bundled_template_image_data_uri("terrain")
+        photo = safe_cover_image or bundled_template_image_data_uri("terrain")
         return f"""
         <div class="cover-art terrain-art" aria-hidden="true">
             <img class="cover-photo terrain-aerial" src="{photo}" alt="">
@@ -559,7 +559,7 @@ def cover_art_html(template, cover_image=None):
         </div>
         """
     if template == "apricot":
-        photo = cover_image or bundled_template_image_data_uri("apricot")
+        photo = safe_cover_image or bundled_template_image_data_uri("apricot")
         return f"""
         <div class="cover-art apricot-art" aria-hidden="true">
             <span class="apricot-spine"></span>
@@ -568,7 +568,7 @@ def cover_art_html(template, cover_image=None):
             <span class="apricot-orbit"></span>
         </div>
         """
-    horizon_image = cover_image or bundled_template_image_data_uri("horizon")
+    horizon_image = safe_cover_image or bundled_template_image_data_uri("horizon")
     return f"""
     <div class="cover-art horizon-art" aria-hidden="true">
         <img class="cover-photo" src="{horizon_image}" alt="">

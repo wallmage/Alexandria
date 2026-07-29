@@ -788,16 +788,11 @@ def _predicate_is_negated(clause, predicate, report_lang):
 def _checker_prose(text):
     """Return report-body prose for Rewild, preserving Markdown table cells."""
     try:
-        from .validate_report import _h2_sections, _report_prose
+        from .report_blocks import visible_report_prose
     except ImportError:
-        from validate_report import _h2_sections, _report_prose
+        from report_blocks import visible_report_prose
 
-    prose = _report_prose(text, _h2_sections(text))
-    return re.sub(
-        r"(?m)^\s*:?-{3,}:?(?:\s+:?-{3,}:?)+\s*$",
-        "",
-        prose,
-    )
+    return visible_report_prose(text)
 
 
 # Sentinels stand in for Markdown links while citation groups are matched.
@@ -862,6 +857,16 @@ def _fidelity_prose(text):
     reorders them. Citations are validated separately by validate_report, so
     the semantic comparison should see only the sentence prose around them.
     """
+    try:
+        from .report_blocks import mask_bibliography
+    except ImportError:
+        from report_blocks import mask_bibliography
+
+    # Preserve bibliography classification before link destinations are
+    # replaced by sentinels; the replacement is intentionally not valid
+    # Markdown and therefore cannot itself be recognized as a source entry.
+    text = mask_bibliography(text)
+
     # Strip citations from the raw Markdown BEFORE prose extraction: the
     # prose pass flattens links to their titles, after which citation groups
     # are indistinguishable from ordinary parentheticals. Links are replaced

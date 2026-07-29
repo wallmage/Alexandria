@@ -80,8 +80,9 @@ def _trusted_codex_egress():
     return bool(os.environ.get("CODEX_THREAD_ID") and os.environ.get("CODEX_SHELL"))
 
 
-def validate_public_http_url(url, *, resolver=socket.getaddrinfo):
+def validate_public_http_url(url, *, resolver=None):
     """Resolve one public HTTP(S) target or reject it before any connection."""
+    resolver = resolver or socket.getaddrinfo
     try:
         parsed = urlsplit(str(url or ""))
         port = parsed.port
@@ -351,9 +352,10 @@ def default_fetcher(
     url,
     *,
     timeout=DEFAULT_TIMEOUT_SECONDS,
-    resolver=socket.getaddrinfo,
+    resolver=None,
 ):
     """Fetch one public source through a DNS-pinned, redirect-safe transport."""
+    resolver = resolver or socket.getaddrinfo
     current = validate_public_http_url(url, resolver=resolver)
     original_host = current.host
     visited = set()
@@ -875,6 +877,54 @@ def validate_source_fidelity_receipt(ledger_path, receipt):
                 "Source-fidelity receipt is outside the report freshness window."
             )
     return errors
+
+
+def validate_source_fidelity_receipt_online(
+    ledger_path,
+    receipt,
+    *,
+    timeout=DEFAULT_TIMEOUT_SECONDS,
+    fetcher=None,
+):
+    """Re-read the receipt's source set before authorizing final delivery."""
+    errors = validate_source_fidelity_receipt(ledger_path, receipt)
+    if errors:
+        return errors
+    ledger_path = Path(ledger_path).resolve()
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"Evidence ledger could not be re-read: {exc}"]
+    selected_count = receipt["policy"]["selected_count"]
+    result = check_source_fidelity(
+        ledger,
+        fetcher=fetcher,
+        sample_size=selected_count,
+        online=True,
+        timeout=timeout,
+    )
+    live_errors = fidelity_errors(result)
+    if result.get("transport") != PRODUCTION_TRANSPORT:
+        live_errors.append(
+            "Final delivery did not use the production source transport."
+        )
+    expected_pairs = [
+        (check["claim_id"], check["source_id"], check["url"])
+        for check in receipt["checks"]
+    ]
+    actual_pairs = [
+        (check.get("claim_id"), check.get("source_id"), check.get("url"))
+        for check in result.get("checks", [])
+        if isinstance(check, dict)
+    ]
+    if actual_pairs != expected_pairs:
+        live_errors.append(
+            "Final delivery re-read a different source/probe selection."
+        )
+    return [
+        f"Fresh live source verification failed: {error}"
+        for error in live_errors
+    ]
 
 
 def fidelity_errors(result, *, allow_unverified=False, allow_skip=False):

@@ -284,7 +284,8 @@ def _word_phrase_value(phrase):
     return int(value) if float(value).is_integer() else value
 
 #: Historical vocabulary from the retired magnitude-specific word-number
-#: check. The current scanner treats all spelled-out numbers as evidence-only.
+#: check. Spelled-out counts create obligations equivalent to their digit
+#: forms; vague number-like words such as "dozens" do not.
 _MAGNITUDE_UNITS = (
     # proportion and multiple
     r"%|per ?cents?|percents?|percentage ?points?|basis ?points?|pc|pct"
@@ -386,9 +387,10 @@ def _normalize_dates(text):
 def _scan_quantities(text):
     """Yield (display, claim_forms, evidence_forms, is_word) for a string.
 
-    URLs and ledger IDs are ignored. Other identifiers, dates, versions, and
-    digit forms create obligations; spelled-out numbers can satisfy matching
-    digit obligations but never create obligations themselves.
+    URLs and ledger IDs are ignored. Other identifiers, dates, versions, digit
+    forms, and spelled-out counts create obligations. Spelled-out counts use
+    their digit-equivalent forms; vague number-like words such as "dozens" do
+    not create obligations.
     """
     working = _URL_RE.sub(" ", str(text or ""))
     working = _LEDGER_ID_RE.sub(" ", working)

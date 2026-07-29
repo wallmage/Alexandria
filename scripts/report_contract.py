@@ -1,6 +1,8 @@
 """Shared language, length, and date policy for Alexandria reports."""
 
+import html
 import re
+import unicodedata
 from datetime import date
 
 TRADITIONAL_MARKERS = frozenset(
@@ -30,6 +32,78 @@ ENGLISH_MONTHS = (
     "November",
     "December",
 )
+
+BIDI_CONTROL_CHARACTERS = frozenset(
+    chr(codepoint)
+    for codepoint in (
+        0x061C,
+        0x200E,
+        0x200F,
+        *range(0x202A, 0x202F),
+        *range(0x2066, 0x206A),
+    )
+)
+
+DEFAULT_IGNORABLE_RANGES = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+CJK_VISIBLE_PUNCTUATION = frozenset(
+    "，。！？；：、（）【】《》〈〉「」『』“”‘’"
+)
+
+
+def _is_default_ignorable(codepoint):
+    return any(start <= codepoint <= end for start, end in DEFAULT_IGNORABLE_RANGES)
+
+
+def forbidden_visible_control_characters(value):
+    """Return bidi controls whose visual ordering cannot be safely inferred."""
+    return sorted(
+        {
+            character
+            for character in str(value or "")
+            if character in BIDI_CONTROL_CHARACTERS
+        }
+    )
+
+
+def canonical_visible_text(value):
+    """Match text users see after entity decoding and ignorable removal."""
+    decoded = html.unescape(str(value or ""))
+    composed = unicodedata.normalize("NFC", decoded)
+    normalized = "".join(
+        character
+        if character in CJK_VISIBLE_PUNCTUATION
+        else unicodedata.normalize("NFKC", character)
+        for character in composed
+    )
+    visible = []
+    for character in normalized:
+        category = unicodedata.category(character)
+        codepoint = ord(character)
+        if category == "Cf" or _is_default_ignorable(codepoint):
+            continue
+        if category == "Cc" and character not in "\t\n\r":
+            visible.append(" ")
+            continue
+        visible.append(character)
+    return "".join(visible)
 
 
 def detect_language(text):

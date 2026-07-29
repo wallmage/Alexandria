@@ -11,7 +11,6 @@ recorded and printed as a visible skip rather than a silent success.
 
 import argparse
 import hashlib
-import html
 import http.client
 import ipaddress
 import json
@@ -23,18 +22,27 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
+from typing import ClassVar
 from urllib.error import URLError
 from urllib.parse import urljoin, urlsplit
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from artifact_safety import artifact_collision_errors  # noqa: E402
+from report_contract import canonical_visible_text  # noqa: E402
 
 SCHEMA_VERSION = 1
 DEFAULT_SAMPLE_SIZE = 8
 DEFAULT_TIMEOUT_SECONDS = 20
+DEFAULT_FETCH_ATTEMPTS = 3
 MAX_FETCH_BYTES = 4_000_000
 USER_AGENT = "Alexandria-source-fidelity/1.0"
 MAX_REDIRECTS = 5
-CODEX_EGRESS_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 PRODUCTION_TRANSPORT = "dns-pinned-http-v1"
 SUPPORTED_TEXT_TYPES = {
     "text/html",
@@ -49,11 +57,11 @@ LEDGER_SCHEMA = ROOT / "references" / "evidence-ledger.schema.json"
 MIN_PROBE_CHARACTERS = 16
 #: A probe longer than this is trimmed: long quotes rarely survive rendering.
 MAX_PROBE_CHARACTERS = 160
+PROBE_CONTEXT_RADIUS = 500
 
 _QUOTE_SPANS = re.compile(
     r"\"([^\"]{4,})\"|'([^']{4,})'|“([^”]{4,})”|「([^」]{4,})」|『([^』]{4,})』"
 )
-_TAG = re.compile(r"(?is)<(script|style)\b.*?</\1>|<[^>]+>")
 
 
 @dataclass(frozen=True)
@@ -73,11 +81,6 @@ class FetchedDocument:
     response_sha256: str
     content_type: str
     byte_count: int
-
-
-def _trusted_codex_egress():
-    """Identify the desktop runtime that maps public DNS into 198.18/15."""
-    return bool(os.environ.get("CODEX_THREAD_ID") and os.environ.get("CODEX_SHELL"))
 
 
 def validate_public_http_url(url, *, resolver=None):
@@ -125,13 +128,7 @@ def validate_public_http_url(url, *, resolver=None):
     unsafe = []
     for address in addresses:
         value = ipaddress.ip_address(address)
-        trusted_egress = (
-            literal is None
-            and scheme == "https"
-            and _trusted_codex_egress()
-            and value in CODEX_EGRESS_NETWORK
-        )
-        if not value.is_global and not trusted_egress:
+        if not value.is_global:
             unsafe.append(address)
     if unsafe:
         raise ValueError(
@@ -246,7 +243,7 @@ def _request_pinned(target, *, timeout):
 
 def normalize_text(value):
     """Fold whitespace, quotation marks, and case for substring comparison."""
-    text = html.unescape(str(value or ""))
+    text = canonical_visible_text(value)
     text = text.translate(
         str.maketrans(
             {
@@ -277,10 +274,10 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
-def _atomic_write_json(path, payload):
+def _atomic_write_json(path, payload, *, overwrite=False):
     path = Path(path)
-    if path.exists():
-        raise ValueError(f"Receipt already exists: {path}")
+    if path.exists() and not overwrite:
+        raise ValueError(f"Artifact already exists: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -304,41 +301,131 @@ def _atomic_write_json(path, payload):
         raise
 
 
+class _VisibleTextParser(HTMLParser):
+    """Collect only text a reader can see from self-contained HTML."""
+
+    ALWAYS_HIDDEN: ClassVar[set[str]] = {
+        "script",
+        "style",
+        "template",
+        "noscript",
+    }
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.parts = []
+
+    @staticmethod
+    def _element_is_hidden(tag, attrs):
+        attributes = {
+            str(name).casefold(): "" if value is None else str(value)
+            for name, value in attrs
+        }
+        style = attributes.get("style", "")
+        return bool(
+            tag.casefold() in _VisibleTextParser.ALWAYS_HIDDEN
+            or "hidden" in attributes
+            or attributes.get("aria-hidden", "").strip().casefold() == "true"
+            or re.search(
+                r"(?i)(?:^|;)\s*(?:display\s*:\s*none|"
+                r"visibility\s*:\s*hidden)\s*(?:;|$)",
+                style,
+            )
+        )
+
+    def handle_starttag(self, tag, attrs):
+        parent_hidden = self.stack[-1][1] if self.stack else False
+        hidden = parent_hidden or self._element_is_hidden(tag, attrs)
+        self.stack.append((tag.casefold(), hidden))
+        if not hidden:
+            self.parts.append(" ")
+
+    def handle_startendtag(self, tag, attrs):
+        if not self._element_is_hidden(tag, attrs):
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag):
+        folded = tag.casefold()
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == folded:
+                hidden = self.stack[index][1]
+                del self.stack[index:]
+                if not hidden:
+                    self.parts.append(" ")
+                break
+
+    def handle_data(self, data):
+        if not self.stack or not self.stack[-1][1]:
+            self.parts.append(data)
+
+
 def strip_markup(document):
-    """Return the readable text of an HTML or plain-text document."""
-    return normalize_text(_TAG.sub(" ", str(document or "")))
+    """Return reader-visible text from HTML or plain text."""
+    parser = _VisibleTextParser()
+    parser.feed(str(document or ""))
+    parser.close()
+    return normalize_text(" ".join(parser.parts))
+
+
+def _probe_windows(text):
+    """Cover all normalized text with bounded, overlapping exact probes."""
+    normalized = normalize_text(text)
+    if not normalized:
+        return []
+    if len(normalized) <= MAX_PROBE_CHARACTERS:
+        return [normalized]
+    overlap = max(32, MAX_PROBE_CHARACTERS // 4)
+    stride = MAX_PROBE_CHARACTERS - overlap
+    starts = list(range(0, len(normalized), stride))
+    final_start = len(normalized) - MAX_PROBE_CHARACTERS
+    if final_start not in starts:
+        starts.append(final_start)
+    return [
+        normalized[start : start + MAX_PROBE_CHARACTERS]
+        for start in sorted(set(starts))
+        if start < len(normalized)
+    ]
 
 
 def probe_strings(extract):
     """Return the substrings that must survive in the fetched source text.
 
-    Quoted spans are the strongest probes because they claim to be verbatim.
-    An extract that quotes nothing falls back to its own longest segments, so
-    a located-but-unquoted extract is still checked rather than skipped.
+    Quoted spans are verbatim evidence and every substantive unquoted segment
+    is evidence too. Locator-only prefixes such as ``Pricing page:`` identify
+    where to look, but do not claim that the label itself appears on the page.
     """
     text = str(extract or "").strip()
     if not text:
         return []
     probes = []
+    outside = []
+    cursor = 0
     for match in _QUOTE_SPANS.finditer(text):
+        outside.append(text[cursor : match.start()])
+        outside.append("\n")
         quoted = next(group for group in match.groups() if group is not None)
-        normalized = normalize_text(quoted)
-        if len(normalized) >= MIN_PROBE_CHARACTERS:
-            probes.append(normalized[:MAX_PROBE_CHARACTERS])
-    if not probes:
-        segments = [
-            normalize_text(segment)
-            for segment in re.split(r"[;\n]|\.\.\.|…", text)
-        ]
-        segments = [
+        probes.extend(_probe_windows(quoted))
+        cursor = match.end()
+    outside.append(text[cursor:])
+    unquoted_text = "".join(outside)
+    segments = [
+        normalize_text(segment)
+        for segment in re.split(r"[;\n]|\.\.\.|…", unquoted_text)
+    ]
+    substantive = [
+        segment
+        for segment in segments
+        if (
             segment
-            for segment in segments
-            if len(segment) >= MIN_PROBE_CHARACTERS
-        ]
-        if segments:
-            probes.append(max(segments, key=len)[:MAX_PROBE_CHARACTERS])
-        else:
-            probes.append(normalize_text(text)[:MAX_PROBE_CHARACTERS])
+            and any(character.isalnum() for character in segment)
+            and not segment.rstrip().endswith(":")
+        )
+    ]
+    for segment in substantive:
+        probes.extend(_probe_windows(segment))
+    if not probes and any(character.isalnum() for character in text):
+        probes.extend(_probe_windows(text))
     seen = set()
     unique = []
     for probe in probes:
@@ -364,7 +451,24 @@ def default_fetcher(
         if current.url in visited:
             raise ValueError("Source redirect loop detected.")
         visited.add(current.url)
-        status, headers, payload = _request_pinned(current, timeout=timeout)
+        for attempt in range(DEFAULT_FETCH_ATTEMPTS):
+            try:
+                status, headers, payload = _request_pinned(
+                    current,
+                    timeout=timeout,
+                )
+                break
+            except ssl.SSLCertVerificationError:
+                raise
+            except (
+                ssl.SSLError,
+                TimeoutError,
+                ConnectionError,
+                http.client.RemoteDisconnected,
+                OSError,
+            ):
+                if attempt + 1 >= DEFAULT_FETCH_ATTEMPTS:
+                    raise
         if len(payload) > MAX_FETCH_BYTES:
             raise ValueError(
                 f"Source response exceeds {MAX_FETCH_BYTES} bytes."
@@ -419,6 +523,31 @@ def _claim_weight(claim, central_ids):
     if claim.get("include_in_report") is True:
         return 1
     return 0
+
+
+def _probe_context_sha256s(document, probes):
+    """Bind each probe to every nearby normalized evidentiary context."""
+    context_hashes = []
+    for probe in probes:
+        positions = []
+        cursor = 0
+        while True:
+            position = document.find(probe, cursor)
+            if position < 0:
+                break
+            positions.append(position)
+            cursor = position + max(len(probe), 1)
+        hashes = []
+        for position in positions:
+            start = max(0, position - PROBE_CONTEXT_RADIUS)
+            end = min(
+                len(document),
+                position + len(probe) + PROBE_CONTEXT_RADIUS,
+            )
+            context = document[start:end]
+            hashes.append(hashlib.sha256(context.encode("utf-8")).hexdigest())
+        context_hashes.append(sorted(set(hashes)))
+    return context_hashes
 
 
 def select_samples(ledger, sample_size=DEFAULT_SAMPLE_SIZE):
@@ -587,13 +716,21 @@ def check_source_fidelity(
                 }
             )
             continue
+        check_observation = dict(observation) if observation is not None else None
+        if check_observation is not None:
+            check_observation["probe_context_sha256s"] = (
+                _probe_context_sha256s(document, sample["probes"])
+            )
+            check_observation["normalized_document_sha256"] = hashlib.sha256(
+                document.encode("utf-8")
+            ).hexdigest()
         checks.append(
             {
                 "claim_id": sample["claim_id"],
                 "source_id": sample["source_id"],
                 "url": url,
                 "status": "verified",
-                "observation": observation,
+                "observation": check_observation,
                 "detail": "Every recorded probe was found in the fetched text.",
             }
         )
@@ -839,6 +976,10 @@ def validate_source_fidelity_receipt(ledger_path, receipt):
             requested = urlsplit("")
         redirects = observation.get("redirects")
         response_hash = str(observation.get("response_sha256", ""))
+        document_hash = str(
+            observation.get("normalized_document_sha256", "")
+        )
+        context_hashes = observation.get("probe_context_sha256s")
         content_type = observation.get("content_type")
         byte_count = observation.get("byte_count")
         if (
@@ -851,6 +992,19 @@ def validate_source_fidelity_receipt(ledger_path, receipt):
             or not isinstance(redirects, list)
             or any(not isinstance(item, str) for item in redirects)
             or re.fullmatch(r"[0-9a-f]{64}", response_hash) is None
+            or re.fullmatch(r"[0-9a-f]{64}", document_hash) is None
+            or not isinstance(context_hashes, list)
+            or len(context_hashes) != len(expected_check["probe_sha256s"])
+            or any(
+                not isinstance(probe_hashes, list)
+                or not probe_hashes
+                or any(
+                    not isinstance(value, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                    for value in probe_hashes
+                )
+                for probe_hashes in context_hashes
+            )
             or content_type not in SUPPORTED_TEXT_TYPES | {"application/pdf"}
             or not isinstance(byte_count, int)
             or byte_count <= 0
@@ -921,6 +1075,33 @@ def validate_source_fidelity_receipt_online(
         live_errors.append(
             "Final delivery re-read a different source/probe selection."
         )
+    for recorded, current in zip(
+        receipt["checks"],
+        result.get("checks", []),
+        strict=False,
+    ):
+        recorded_observation = recorded.get("observation")
+        current_observation = (
+            current.get("observation") if isinstance(current, dict) else None
+        )
+        if not isinstance(recorded_observation, dict) or not isinstance(
+            current_observation, dict
+        ):
+            continue
+        if recorded_observation.get(
+            "probe_context_sha256s"
+        ) != current_observation.get("probe_context_sha256s"):
+            live_errors.append(
+                f"{recorded.get('claim_id')}: source evidence context changed "
+                "since the source-fidelity receipt was issued."
+            )
+        if recorded_observation.get(
+            "normalized_document_sha256"
+        ) != current_observation.get("normalized_document_sha256"):
+            live_errors.append(
+                f"{recorded.get('claim_id')}: normalized source document "
+                "changed since the source-fidelity receipt was issued."
+            )
     return [
         f"Fresh live source verification failed: {error}"
         for error in live_errors
@@ -976,6 +1157,11 @@ def build_parser():
     )
     parser.add_argument("--out", help="write the machine-readable result here")
     parser.add_argument(
+        "--force-output",
+        action="store_true",
+        help="replace an existing --out result; input/output collisions stay forbidden",
+    )
+    parser.add_argument(
         "--receipt",
         help="write a passing ledger-bound source-fidelity receipt here",
     )
@@ -984,6 +1170,29 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    collisions = artifact_collision_errors(
+        {"ledger": args.ledger},
+        {"receipt": args.receipt, "out": args.out},
+    )
+    if collisions:
+        for error in collisions:
+            print(f"[FAIL] {error}", file=sys.stderr)
+        return 1
+    if args.force_output and not args.out:
+        print("[FAIL] --force-output requires --out.", file=sys.stderr)
+        return 1
+    if args.out and Path(args.out).exists() and not args.force_output:
+        print(
+            f"[FAIL] Source-fidelity result already exists: {args.out}",
+            file=sys.stderr,
+        )
+        return 1
+    if args.receipt and Path(args.receipt).exists():
+        print(
+            f"[FAIL] Source-fidelity receipt already exists: {args.receipt}",
+            file=sys.stderr,
+        )
+        return 1
     try:
         ledger = json.loads(Path(args.ledger).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -1016,9 +1225,10 @@ def main(argv=None):
         return 1
     if args.out:
         try:
-            Path(args.out).write_text(
-                json.dumps(result, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
+            _atomic_write_json(
+                args.out,
+                result,
+                overwrite=args.force_output,
             )
         except OSError as exc:
             print(f"[FAIL] Source-fidelity result could not be written: {exc}",

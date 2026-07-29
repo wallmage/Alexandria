@@ -3,6 +3,11 @@
 import re
 from dataclasses import dataclass
 
+try:
+    from .report_contract import canonical_visible_text
+except ImportError:
+    from report_contract import canonical_visible_text
+
 SOURCE_HEADINGS = frozenset(
     {
         "sources",
@@ -117,6 +122,7 @@ def normalize_visible_text(raw, *, kind):
             line = line.replace("|", " ")
         normalized.append(line)
     text = _strip_inline_presentation("\n".join(normalized))
+    text = canonical_visible_text(text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -295,6 +301,23 @@ def report_blocks(text):
             buffered_kind = kind
             buffered_start = offset
             flush(line_end)
+            in_table = False
+        elif kind == "list":
+            # Every rendered <li> is an independent claim/citation boundary.
+            # Joining adjacent bullets lets one item's URL or evidence satisfy
+            # another item, so flush before starting each list item.
+            flush(offset)
+            buffered = [line]
+            buffered_kind = kind
+            buffered_start = offset
+            in_table = False
+        elif (
+            buffered
+            and buffered_kind == "list"
+            and kind == "paragraph"
+            and re.match(r"^\s{2,}\S", line)
+        ):
+            buffered.append(line)
             in_table = False
         elif buffered and kind != buffered_kind:
             flush(offset)

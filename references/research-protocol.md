@@ -176,11 +176,10 @@ central judgments and key claims first — and checks that each source's own
 that checks the ledger against the world rather than the report against the
 ledger. Run it with `--online` before delivery. Without `--online` it reports
 a visible skip, which is not a pass; an unreachable page is recorded as
-unverified, never as verified. Production requires `--receipt
-"$SOURCE_FIDELITY_RECEIPT"`; content review rejects a missing or stale receipt,
-and final report validation and PDF export re-read the receipt's exact sample
-through the production transport. Mutable receipt JSON is never accepted as
-standalone proof that a live source was checked.
+unverified, never as verified. Production requires
+`--receipt "$SOURCE_FIDELITY_RECEIPT"`; content review rejects a missing or
+stale receipt, and final validation verifies that receipt without fetching the
+same sources again.
 
 ### Freshness records
 

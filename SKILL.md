@@ -119,20 +119,16 @@ For every consequential claim, add a ledger entry with:
 - honest triangulation status;
 - reciprocal supporting or contradicting claim IDs and conflict resolution.
 
-A claim may not assert more than its per-source evidence carries. Every
-quantity in `claim` must preserve its sign, comparator, magnitude, scale,
-currency, and measurement dimension in `source_evidence`; this includes
-Arabic and Chinese numerals. Dates, versions, scores, directions, and statuses
-must likewise appear in `source_evidence`, be declared in
-`derived_assertions`, or — for original arithmetic — be recorded as
+A claim may not assert more than its per-source evidence carries. Figures,
+dates, versions, scores, directions, and statuses must be traceable to
+`source_evidence`, `derived_assertions`, or — for original arithmetic —
 `kind: estimate` with `assumptions`. Record
 `verified_at`, the date you re-read the source, separately from `as_of`, the date
 the fact was true. `supports` points downward only, to the evidence a claim rests
 on; cycles are rejected.
 
-Inventory every named person in every archetype through `people` and
-`person_ids`; omitting a person from the registry is a validation failure, not
-a way to bypass screening. Classify every person-linked claim with
+For reports centered on people or sensitive personal claims, inventory known
+people through `people` and `person_ids`. Classify every person-linked claim with
 `person_claim_role` and a substantive `person_claim_assessment`; do not rely
 on supplied IDs alone to decide whether a claim is harmful. Harmful claims
 about a living, recently
@@ -282,9 +278,8 @@ ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
   --online --receipt "$SOURCE_FIDELITY_RECEIPT"
 ```
 
-The receipt is only an audit record. Rendering and final validation re-read the
-sample through production transport and fail on unavailable, changed, or
-fabricated evidence.
+Rendering and final validation verify the receipt without fetching the same
+sources again.
 
 Review the exact post-Rewild report and final ledger using Section 13 of `references/content-quality.md`. Include the three structural counts in Section 13: the closing-sentence census, the section-shape census, and the section-length spread. Record structural uniformity as a `structure` finding. Use an independent reviewer when available; otherwise use a context-isolated fresh-eyes pass. Record the review in `CONTENT_REVIEW_NOTE` using `references/content-review.schema.json`.
 

@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import ssl
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -103,6 +104,29 @@ def fake_fetcher(pages):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_hidden_html_subtrees_are_not_reader_visible_evidence(self):
+        hidden_documents = (
+            "<template>The vendor sold customer records.</template><p>Visible page.</p>",
+            "<div hidden>The vendor sold customer records.</div><p>Visible page.</p>",
+            (
+                '<div aria-hidden="true">The vendor sold customer records.</div>'
+                "<p>Visible page.</p>"
+            ),
+            (
+                '<div style="display:none">The vendor sold customer records.</div>'
+                "<p>Visible page.</p>"
+            ),
+            (
+                '<div style="visibility: hidden">The vendor sold customer records.</div>'
+                "<p>Visible page.</p>"
+            ),
+        )
+        for document in hidden_documents:
+            with self.subTest(document=document):
+                visible = source_fidelity.strip_markup(document)
+                self.assertNotIn("vendor sold", visible)
+                self.assertIn("visible page", visible)
+
     def test_unknown_declared_charset_fails_cleanly(self):
         with self.assertRaisesRegex(ValueError, "unsupported character encoding"):
             source_fidelity._decode_document(
@@ -117,7 +141,11 @@ class ProbeTests(unittest.TestCase):
             "and a short 'x' quote."
         )
         self.assertEqual(
-            ["mandatory tool confirmation, no auto-approve flag"], probes
+            [
+                "mandatory tool confirmation, no auto-approve flag",
+                "and a short 'x' quote.",
+            ],
+            probes,
         )
 
     def test_unquoted_extract_still_produces_a_probe(self):
@@ -125,12 +153,40 @@ class ProbeTests(unittest.TestCase):
             "Cloud environments page, network access section; short bit"
         )
         self.assertEqual(
-            ["cloud environments page, network access section"], probes
+            [
+                "cloud environments page, network access section",
+                "short bit",
+            ],
+            probes,
+        )
+
+    def test_probes_cover_long_tails_and_every_unquoted_segment(self):
+        genuine = " ".join(f"genuine-{index}" for index in range(40))
+        fabricated = "The company secretly sold customer records to advertisers"
+        probes = source_fidelity.probe_strings(
+            f'{genuine}; "A genuine quoted observation"; {fabricated}.'
+        )
+
+        self.assertTrue(
+            any("customer records" in probe for probe in probes),
+            probes,
+        )
+        self.assertTrue(
+            any("genuine-20" in probe for probe in probes),
+            probes,
+        )
+        self.assertTrue(
+            any("genuine quoted observation" in probe for probe in probes),
+            probes,
+        )
+        self.assertTrue(
+            all(len(probe) <= source_fidelity.MAX_PROBE_CHARACTERS for probe in probes)
         )
 
     def test_empty_extract_produces_no_probe(self):
         self.assertEqual([], source_fidelity.probe_strings(None))
         self.assertEqual([], source_fidelity.probe_strings("   "))
+        self.assertEqual([], source_fidelity.probe_strings("... ; , 。"))
 
 
 class SafeTargetTests(unittest.TestCase):
@@ -179,7 +235,30 @@ class SafeTargetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source_fidelity.default_fetcher("file:///etc/hosts")
 
-    def test_codex_public_dns_mapping_is_trusted_only_for_https_runtime_egress(self):
+    def test_default_fetcher_retries_transient_tls_disconnects(self):
+        response = (
+            200,
+            {"content-type": "text/html"},
+            b"<p>Example Domain</p>",
+        )
+        with mock.patch.object(
+            source_fidelity,
+            "_request_pinned",
+            side_effect=[
+                ssl.SSLEOFError("transient one"),
+                ssl.SSLEOFError("transient two"),
+                response,
+            ],
+        ) as request:
+            fetched = source_fidelity.default_fetcher(
+                "https://example.com/",
+                resolver=self.public_resolver,
+            )
+
+        self.assertEqual("example domain", source_fidelity.strip_markup(fetched.text))
+        self.assertEqual(3, request.call_count)
+
+    def test_benchmark_dns_mapping_cannot_be_enabled_by_environment_variables(self):
         def codex_resolver(_host, _port, **_kwargs):
             return [(2, 1, 6, "", ("198.18.5.201", 443))]
 
@@ -188,13 +267,9 @@ class SafeTargetTests(unittest.TestCase):
             {"CODEX_THREAD_ID": "thread", "CODEX_SHELL": "1"},
             clear=True,
         ):
-            target = source_fidelity.validate_public_http_url(
-                "https://example.com/", resolver=codex_resolver
-            )
-            self.assertEqual(("198.18.5.201",), target.addresses)
             with self.assertRaises(ValueError):
                 source_fidelity.validate_public_http_url(
-                    "http://example.com/", resolver=codex_resolver
+                    "https://example.com/", resolver=codex_resolver
                 )
         with mock.patch.dict(source_fidelity.os.environ, {}, clear=True):
             with self.assertRaises(ValueError):
@@ -248,6 +323,30 @@ class SamplingTests(unittest.TestCase):
 
 
 class FidelityTests(unittest.TestCase):
+    def test_hidden_source_text_cannot_verify_a_probe(self):
+        value = ledger()
+        value["sources"] = value["sources"][:1]
+        value["claims"] = value["claims"][:1]
+        value["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+            "The vendor sold customer records."
+        )
+        result = source_fidelity.check_source_fidelity(
+            value,
+            fetcher=fake_fetcher(
+                {
+                    "https://example.org/pricing": (
+                        "<template>The vendor sold customer records.</template>"
+                        "<p>Visible page.</p>"
+                    )
+                }
+            ),
+            online=True,
+            sample_size=0,
+        )
+
+        self.assertEqual("failed", result["status"], result["checks"])
+        self.assertEqual("mismatch", result["checks"][0]["status"])
+
     def test_receipt_replay_allows_adjacent_utc_and_local_report_dates(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
@@ -358,6 +457,36 @@ class FidelityTests(unittest.TestCase):
             errors,
         )
 
+    def test_genuine_quote_cannot_hide_a_fabricated_unquoted_tail(self):
+        value = ledger()
+        value["sources"] = value["sources"][:1]
+        value["claims"] = value["claims"][:1]
+        value["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+            '"A genuine quoted observation"; '
+            "The company secretly sold customer records to advertisers."
+        )
+        result = source_fidelity.check_source_fidelity(
+            value,
+            fetcher=fake_fetcher(
+                {
+                    "https://example.org/pricing": (
+                        "<p>A genuine quoted observation</p>"
+                    )
+                }
+            ),
+            online=True,
+            sample_size=0,
+        )
+
+        self.assertEqual("failed", result["status"], result["checks"])
+        self.assertTrue(
+            any(
+                "customer records" in check.get("detail", "")
+                for check in result["checks"]
+            ),
+            result["checks"],
+        )
+
     def test_unreachable_source_is_recorded_not_passed(self):
         result = source_fidelity.check_source_fidelity(
             ledger(),
@@ -405,6 +534,97 @@ class FidelityTests(unittest.TestCase):
             written = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual("skipped", written["status"])
             self.assertEqual(1, written["schema_version"])
+
+    def test_cli_out_cannot_overwrite_ledger_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = Path(directory) / "ledger.json"
+            original = json.dumps(ledger()).encode()
+            ledger_path.write_bytes(original)
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr):
+                code = source_fidelity.main(
+                    [
+                        str(ledger_path),
+                        "--out",
+                        str(ledger_path),
+                        "--sample-size",
+                        "0",
+                    ]
+                )
+
+            self.assertEqual(1, code)
+            self.assertEqual(original, ledger_path.read_bytes())
+            self.assertIn("must be separate from ledger", stderr.getvalue())
+
+    def test_cli_out_refuses_existing_file_without_explicit_force(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            out = work / "result.json"
+            out.write_text("keep this", encoding="utf-8")
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr):
+                code = source_fidelity.main(
+                    [str(ledger_path), "--out", str(out), "--sample-size", "0"]
+                )
+
+            self.assertEqual(1, code)
+            self.assertEqual("keep this", out.read_text(encoding="utf-8"))
+            self.assertIn("already exists", stderr.getvalue())
+
+    def test_cli_force_output_replaces_only_unrelated_result_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            out = work / "result.json"
+            out.write_text("replace this", encoding="utf-8")
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr):
+                code = source_fidelity.main(
+                    [
+                        str(ledger_path),
+                        "--out",
+                        str(out),
+                        "--force-output",
+                        "--sample-size",
+                        "0",
+                    ]
+                )
+
+            self.assertEqual(2, code)
+            self.assertEqual(
+                "skipped",
+                json.loads(out.read_text(encoding="utf-8"))["status"],
+            )
+            self.assertEqual(0o600, out.stat().st_mode & 0o777)
+
+    def test_cli_force_output_never_waives_input_collision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = Path(directory) / "ledger.json"
+            original = json.dumps(ledger()).encode()
+            ledger_path.write_bytes(original)
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr):
+                code = source_fidelity.main(
+                    [
+                        str(ledger_path),
+                        "--out",
+                        str(ledger_path),
+                        "--force-output",
+                        "--sample-size",
+                        "0",
+                    ]
+                )
+
+            self.assertEqual(1, code)
+            self.assertEqual(original, ledger_path.read_bytes())
+            self.assertIn("must be separate from ledger", stderr.getvalue())
 
     def test_cli_never_treats_an_offline_pass_as_success(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -485,6 +705,101 @@ class FidelityTests(unittest.TestCase):
                 )
             self.assertTrue(
                 any("live source" in error.casefold() for error in errors),
+                errors,
+            )
+
+    def test_live_revalidation_rejects_changed_evidentiary_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            receipt_path = work / "source-receipt.json"
+            with mock_production_transport(
+                receipt_responses(),
+                module=source_fidelity,
+            ):
+                source_fidelity.issue_source_fidelity_receipt(
+                    ledger_path,
+                    receipt_path,
+                    sample_size=0,
+                )
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            changed_responses = receipt_responses()
+            changed_responses["example.org"] = (
+                200,
+                {"content-type": "text/html"},
+                (
+                    PRICING_PAGE
+                    + "<p>CORRECTION: the prior pricing result is invalid "
+                    "and retracted.</p>"
+                ).encode(),
+            )
+            with mock_production_transport(
+                changed_responses,
+                module=source_fidelity,
+            ):
+                errors = (
+                    source_fidelity.validate_source_fidelity_receipt_online(
+                        ledger_path,
+                        receipt,
+                    )
+                )
+
+            self.assertTrue(
+                any("context changed" in error.casefold() for error in errors),
+                errors,
+            )
+
+    def test_live_revalidation_rejects_a_distant_correction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            value = ledger()
+            filler = " stable filler" * 100
+            responses = receipt_responses()
+            responses["example.org"] = (
+                200,
+                {"content-type": "text/html"},
+                (PRICING_PAGE + f"<p>{filler}</p>").encode(),
+            )
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(value), encoding="utf-8")
+            receipt_path = work / "source-receipt.json"
+            with mock_production_transport(
+                responses,
+                module=source_fidelity,
+            ):
+                source_fidelity.issue_source_fidelity_receipt(
+                    ledger_path,
+                    receipt_path,
+                    sample_size=0,
+                )
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            responses["example.org"] = (
+                200,
+                {"content-type": "text/html"},
+                (
+                    PRICING_PAGE
+                    + f"<p>{filler}</p>"
+                    + "<h1>CORRECTION</h1><p>The prior pricing result is "
+                    "invalid and retracted.</p>"
+                ).encode(),
+            )
+            with mock_production_transport(
+                responses,
+                module=source_fidelity,
+            ):
+                errors = (
+                    source_fidelity.validate_source_fidelity_receipt_online(
+                        ledger_path,
+                        receipt,
+                    )
+                )
+
+            self.assertTrue(
+                any(
+                    "source document changed" in error.casefold()
+                    for error in errors
+                ),
                 errors,
             )
 

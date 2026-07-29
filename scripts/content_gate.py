@@ -8,23 +8,38 @@ import os
 import re
 import sys
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 try:
+    from .artifact_safety import artifact_collision_errors
+    from .html_policy import (
+        SAFE_ATTRIBUTES,
+        SAFE_TAGS,
+        safe_image_destination,
+        safe_link_destination,
+    )
+    from .report_blocks import validation_report_blocks
     from .validate_ledger import validate_references, validate_schema
     from .validate_report import (
         SOURCE_HEADINGS,
         _h2_sections,
-        _mask_fenced_code,
         validate_report_against_ledger,
     )
 except ImportError:
+    from artifact_safety import artifact_collision_errors
+    from html_policy import (
+        SAFE_ATTRIBUTES,
+        SAFE_TAGS,
+        safe_image_destination,
+        safe_link_destination,
+    )
+    from report_blocks import validation_report_blocks
     from validate_ledger import validate_references, validate_schema
     from validate_report import (
         SOURCE_HEADINGS,
         _h2_sections,
-        _mask_fenced_code,
         validate_report_against_ledger,
     )
 
@@ -112,51 +127,168 @@ def _section_review_errors(report_text, review):
     return errors
 
 
-def _rendered_markdown_visual_references(report_text):
-    """Return image references that visible report Markdown can render."""
-    visible = _mask_fenced_code(report_text)
-    visible = re.sub(r"<!--.*?-->", " ", visible, flags=re.DOTALL)
-    visible = re.sub(r"`[^`\n]*`", " ", visible)
-    references = []
-    for match in re.finditer(
-        r"!\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)\n]+))",
-        visible,
-    ):
-        references.append(match.group(1) or match.group(2))
-    references.extend(
-        match.group(1)
-        for match in re.finditer(
-            r"""(?i)<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>""",
-            visible,
-        )
+class _RenderedImageParser(HTMLParser):
+    """Collect renderer inputs and reject anything outside its safe policy."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.images = []
+        self.links = []
+        self.policy_violations = []
+        self.user_facing_attributes = []
+
+    def _record_element(self, tag, attrs):
+        if tag not in SAFE_TAGS:
+            self.policy_violations.append(f"tag <{tag}>")
+        values = {}
+        for name, value in attrs:
+            name = name.casefold()
+            if name not in SAFE_ATTRIBUTES.get(tag, frozenset()):
+                self.policy_violations.append(f"attribute {name} on <{tag}>")
+                continue
+            if tag == "img" and name in {"src", "alt", "title"} and value is not None:
+                values[name] = value
+            if (
+                value is not None
+                and (
+                    (tag == "img" and name in {"alt", "title"})
+                    or (tag == "a" and name == "title")
+                )
+            ):
+                self.user_facing_attributes.append(
+                    {"tag": tag, "attribute": name, "value": value}
+                )
+            if tag == "a" and name == "href" and value is not None:
+                self.links.append(value)
+        if tag == "img":
+            self.images.append(values)
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.casefold()
+        self._record_element(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._record_element(tag.casefold(), attrs)
+
+
+def _rendered_markdown_model(report_text):
+    """Parse renderer-preserved images and user-facing attributes."""
+    try:
+        import markdown
+    except ModuleNotFoundError:
+        return None, [
+            "Image validation needs Markdown. Install dependencies with "
+            "'python3 -m pip install -r requirements.txt'."
+        ]
+    renderer = markdown.Markdown(
+        extensions=["tables", "fenced_code", "toc"],
+        extension_configs={"toc": {"toc_depth": "2-3"}},
+        output_format="html5",
     )
-    return references
+    parser = _RenderedImageParser()
+    try:
+        parser.feed(renderer.convert(report_text))
+        parser.close()
+    except Exception as exc:
+        return None, [f"Report images could not be parsed for review: {exc}"]
+    return parser, []
 
 
-def _rendered_markdown_visual_paths(report_text):
+def _is_nonlocal_image_reference(reference):
+    parsed = urlparse(str(reference).strip())
+    return (
+        parsed.scheme.casefold() == "data"
+        or not safe_image_destination(reference)
+    )
+
+
+def rendered_markdown_visual_paths(report_text):
     """Discover local raster paths that Markdown can render."""
     paths = set()
-    for reference in _rendered_markdown_visual_references(report_text):
+    rendered, _errors = _rendered_markdown_model(report_text)
+    for image in rendered.images if rendered is not None else []:
+        reference = image.get("src")
+        if not reference or _is_nonlocal_image_reference(reference):
+            continue
         parsed = urlparse(reference.strip())
-        if parsed.scheme or reference.startswith(("#", "data:")):
+        if reference.startswith("#"):
             continue
         paths.add(Path(unquote(parsed.path)).as_posix())
     return paths
 
 
-def _approved_visual_assets(report_path, report_text, review):
+def _user_facing_attribute_errors(report_text, attributes):
+    """Forbid renderer metadata from asserting anything absent from gated prose."""
+    gated_units = [
+        _normalized(block.text)
+        for block in validation_report_blocks(report_text)
+        if block.text
+    ]
+    errors = []
+    for record in attributes:
+        value = _normalized(record.get("value", ""))
+        if value and not any(value in unit for unit in gated_units):
+            errors.append(
+                "Renderer-preserved accessibility text must repeat "
+                "evidence-gated report prose "
+                f"({record.get('tag')} {record.get('attribute')}): {value[:120]}"
+            )
+    return errors
+
+
+def _approved_visual_assets(
+    report_path,
+    report_text,
+    review,
+    *,
+    allowed_link_urls=(),
+):
     """Validate reviewed local visuals and return receipt-safe bindings."""
     report_root = Path(report_path).resolve().parent
     approved = []
-    errors = []
-    if any(
-        urlparse(reference.strip()).scheme.casefold() == "data"
-        for reference in _rendered_markdown_visual_references(report_text)
-    ):
-        errors.append(
-            "Embedded data images are not allowed in report Markdown; "
-            "use a reviewed local raster asset."
+    rendered, errors = _rendered_markdown_model(report_text)
+    images = rendered.images if rendered is not None else []
+    if rendered is not None:
+        allowed_link_urls = set(allowed_link_urls)
+        for violation in sorted(set(rendered.policy_violations)):
+            errors.append(
+                "Raw HTML outside Alexandria's renderer allowlist is not "
+                f"allowed in report Markdown: {violation}."
+            )
+        for reference in rendered.links:
+            value = reference.strip()
+            if not safe_link_destination(value):
+                errors.append(
+                    "Unsafe or non-web link destination is not allowed in "
+                    f"report Markdown: {reference}"
+                )
+            elif (
+                not value.startswith("#")
+                and value not in allowed_link_urls
+            ):
+                errors.append(
+                    "Rendered report link is not present in the evidence "
+                    f"ledger: {reference}"
+                )
+    for image in images:
+        reference = image.get("src")
+        if reference and _is_nonlocal_image_reference(reference):
+            if urlparse(reference.strip()).scheme.casefold() == "data":
+                errors.append(
+                    "Embedded data images are not allowed in report Markdown; "
+                    "use a reviewed local raster asset."
+                )
+            else:
+                errors.append(
+                    "Nonlocal image references are not allowed in report Markdown: "
+                    f"{reference}"
+                )
+    errors.extend(
+        _user_facing_attribute_errors(
+            report_text,
+            rendered.user_facing_attributes if rendered is not None else [],
         )
+    )
     seen = set()
     for record in review.get("visual_assets", []):
         if not isinstance(record, dict):
@@ -198,13 +330,18 @@ def _approved_visual_assets(report_path, report_text, review):
         if record.get("disposition") != "approved":
             errors.append(f"Visual asset is not approved: {raw_path}.")
             continue
-        approved.append({"path": normalized_path, "sha256": digest})
-    discovered = _rendered_markdown_visual_paths(report_text)
+        approved.append(
+            {
+                "path": normalized_path,
+                "sha256": digest,
+                "usage": record.get("usage"),
+            }
+        )
+    discovered = rendered_markdown_visual_paths(report_text)
     body_approvals = {
-        record.get("path")
-        for record in review.get("visual_assets", [])
-        if isinstance(record, dict)
-        and record.get("usage") in {"body", "body_and_cover"}
+        record["path"]
+        for record in approved
+        if record.get("usage") in {"body", "body_and_cover"}
     }
     for path in sorted(discovered - body_approvals):
         errors.append(f"Unapproved visual asset in report Markdown: {path}.")
@@ -245,6 +382,7 @@ def run_content_gate(
     receipt_path,
     *,
     source_fidelity_receipt_path=None,
+    force=False,
 ):
     """Return errors; on success write a receipt bound to every input."""
     report_path = Path(report_path).resolve()
@@ -261,6 +399,22 @@ def run_content_gate(
     source_fidelity_receipt_path = Path(
         source_fidelity_receipt_path
     ).resolve()
+    collisions = artifact_collision_errors(
+        {
+            "final report": report_path,
+            "evidence ledger": ledger_path,
+            "content review": review_note_path,
+            "source-fidelity receipt": source_fidelity_receipt_path,
+        },
+        {"content receipt": receipt_path},
+    )
+    if collisions:
+        return collisions
+    if receipt_path.exists() and not force:
+        return [
+            f"Content receipt already exists: {receipt_path}. "
+            "Use --force to replace it."
+        ]
     source_receipt, source_errors = _read_json(
         source_fidelity_receipt_path,
         "Source-fidelity receipt",
@@ -324,8 +478,27 @@ def run_content_gate(
         report_path,
         report_text,
         review,
+        allowed_link_urls={
+            source.get("url")
+            for source in ledger.get("sources", [])
+            if isinstance(source, dict) and source.get("url")
+        },
     )
     errors.extend(visual_asset_errors)
+    errors.extend(
+        artifact_collision_errors(
+            {
+                f"approved visual asset {index}": (
+                    report_path.parent / record["path"]
+                )
+                for index, record in enumerate(
+                    approved_visual_assets,
+                    start=1,
+                )
+            },
+            {"content receipt": receipt_path},
+        )
+    )
     if not _same_bound_name(review.get("report_path"), report_path):
         errors.append("Content review belongs to a different final report.")
     if review.get("report_sha256") != report_hash:
@@ -508,6 +681,21 @@ def validate_content_receipt(
                 f"Content gate recheck failed: {error}"
                 for error in rerun_errors
             )
+            if not rerun_errors:
+                regenerated_receipt, regenerated_errors = _read_json(
+                    regenerated,
+                    "Regenerated content receipt",
+                )
+                errors.extend(regenerated_errors)
+                if (
+                    regenerated_receipt is not None
+                    and receipt.get("approved_visual_assets")
+                    != regenerated_receipt.get("approved_visual_assets")
+                ):
+                    errors.append(
+                        "Content receipt visual asset approvals differ from "
+                        "the completed content review."
+                    )
     return errors
 
 
@@ -532,6 +720,11 @@ def main(argv=None):
         required=True,
         help="passing source-fidelity receipt bound to the evidence ledger",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing content-gate receipt",
+    )
     args = parser.parse_args(argv)
 
     errors = run_content_gate(
@@ -540,6 +733,7 @@ def main(argv=None):
         args.review_note,
         args.receipt,
         source_fidelity_receipt_path=args.source_fidelity_receipt,
+        force=args.force,
     )
     if errors:
         for error in errors:

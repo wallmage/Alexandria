@@ -42,127 +42,20 @@ jobs:
       - name: Validate evidence ledger
         run: python scripts/validate_ledger.py tests/fixtures/evidence-ledger.json
 
-      - name: Build Rewild-gated PDF fixtures
-        run: python tests/build_gated_fixtures.py /tmp/alexandria-fixtures
-
-      - name: Render and validate English PDF
-        run: |
-          python scripts/md_to_pdf.py \
-            /tmp/alexandria-fixtures/en/report.md \
-            /tmp/alexandria-sample.pdf \
-            --lang en \
-            --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
-            --ledger /tmp/alexandria-fixtures/en/ledger.json \
-            --source-fidelity-receipt /tmp/alexandria-fixtures/en/source-fidelity-receipt.json \
-            --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json
-          python scripts/validate_report.py \
-            /tmp/alexandria-fixtures/en/report.md \
-            --ledger /tmp/alexandria-fixtures/en/ledger.json \
-            --rewild-receipt /tmp/alexandria-fixtures/en/receipt.json \
-            --source-fidelity-receipt /tmp/alexandria-fixtures/en/source-fidelity-receipt.json \
-            --content-receipt /tmp/alexandria-fixtures/en/content-receipt.json \
-            --pdf /tmp/alexandria-sample.pdf \
-            --expected-lang en \
-            --min-words 7500 \
-            --max-words 15000 \
-            --min-sources 1 \
-            --min-sections 4 \
-            --min-pages 3 \
-            --min-text-chars 300 \
-            --min-links 1
-
       - name: Render and validate all templates in every supported language
         if: matrix.python-version == '3.12'
-        run: |
-          for lang in en zh-CN zh-HK; do
-            if [ "$lang" = "en" ]; then
-              limits=(--min-words 7500 --max-words 15000 --min-text-chars 300)
-            else
-              limits=(--min-chars 5000 --max-chars 10000 --min-text-chars 100)
-            fi
-            for template in executive spectrum atlas horizon maison blueprint terrain orbit sunbeam current apricot; do
-              output="/tmp/alexandria-${lang}-${template}.pdf"
-              python scripts/md_to_pdf.py \
-                "/tmp/alexandria-fixtures/${lang}/report.md" \
-                "$output" \
-                --lang "$lang" \
-                --template "$template" \
-                --rewild-receipt "/tmp/alexandria-fixtures/${lang}/receipt.json" \
-                --ledger "/tmp/alexandria-fixtures/${lang}/ledger.json" \
-                --source-fidelity-receipt "/tmp/alexandria-fixtures/${lang}/source-fidelity-receipt.json" \
-                --content-receipt "/tmp/alexandria-fixtures/${lang}/content-receipt.json"
-              python scripts/validate_report.py \
-                "/tmp/alexandria-fixtures/${lang}/report.md" \
-                --ledger "/tmp/alexandria-fixtures/${lang}/ledger.json" \
-                --rewild-receipt "/tmp/alexandria-fixtures/${lang}/receipt.json" \
-                --source-fidelity-receipt "/tmp/alexandria-fixtures/${lang}/source-fidelity-receipt.json" \
-                --content-receipt "/tmp/alexandria-fixtures/${lang}/content-receipt.json" \
-                --pdf "$output" \
-                --expected-lang "$lang" \
-                "${limits[@]}" \
-                --min-sources 1 \
-                --min-sections 4 \
-                --min-pages 3 \
-                --min-links 1
-            done
-          done
+        run: python tests/ci_render_matrix.py /tmp/alexandria-ci
 
-      - name: Render and validate Hong Kong PDF
+      - name: Verify live production source transport
+        if: matrix.python-version == '3.12'
         run: |
-          python scripts/md_to_pdf.py \
-            /tmp/alexandria-fixtures/zh-HK/report.md \
-            /tmp/alexandria-sample.zh-HK.pdf \
-            --lang zh-HK \
-            --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json \
-            --ledger /tmp/alexandria-fixtures/zh-HK/ledger.json \
-            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-HK/source-fidelity-receipt.json \
-            --content-receipt /tmp/alexandria-fixtures/zh-HK/content-receipt.json
-          python scripts/validate_report.py \
-            /tmp/alexandria-fixtures/zh-HK/report.md \
-            --ledger /tmp/alexandria-fixtures/zh-HK/ledger.json \
-            --rewild-receipt /tmp/alexandria-fixtures/zh-HK/receipt.json \
-            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-HK/source-fidelity-receipt.json \
-            --content-receipt /tmp/alexandria-fixtures/zh-HK/content-receipt.json \
-            --pdf /tmp/alexandria-sample.zh-HK.pdf \
-            --expected-lang zh-HK \
-            --min-chars 5000 \
-            --max-chars 10000 \
-            --min-sources 1 \
-            --min-sections 4 \
-            --min-pages 3 \
-            --min-text-chars 100 \
-            --min-links 1
-
-      - name: Render and validate Simplified Chinese PDF
-        run: |
-          python scripts/md_to_pdf.py \
-            /tmp/alexandria-fixtures/zh-CN/report.md \
-            /tmp/alexandria-sample.zh-CN.pdf \
-            --lang zh-CN \
-            --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json \
-            --ledger /tmp/alexandria-fixtures/zh-CN/ledger.json \
-            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-CN/source-fidelity-receipt.json \
-            --content-receipt /tmp/alexandria-fixtures/zh-CN/content-receipt.json
-          python scripts/validate_report.py \
-            /tmp/alexandria-fixtures/zh-CN/report.md \
-            --ledger /tmp/alexandria-fixtures/zh-CN/ledger.json \
-            --rewild-receipt /tmp/alexandria-fixtures/zh-CN/receipt.json \
-            --source-fidelity-receipt /tmp/alexandria-fixtures/zh-CN/source-fidelity-receipt.json \
-            --content-receipt /tmp/alexandria-fixtures/zh-CN/content-receipt.json \
-            --pdf /tmp/alexandria-sample.zh-CN.pdf \
-            --expected-lang zh-CN \
-            --min-chars 5000 \
-            --max-chars 10000 \
-            --min-sources 1 \
-            --min-sections 4 \
-            --min-pages 3 \
-            --min-text-chars 100 \
-            --min-links 1
+          python -c "from scripts.source_fidelity import default_fetcher; result = default_fetcher('https://example.com/'); assert 'Example Domain' in result.text"
 
       - name: Rasterize all sample pages
+        if: matrix.python-version == '3.12'
         run: |
           python scripts/render_pdf_pages.py \
-            /tmp/alexandria-sample.zh-CN.pdf \
+            /tmp/alexandria-ci/pdfs/zh-CN-executive.pdf \
             /tmp/alexandria-pages \
             --dpi 96
           test "$(find /tmp/alexandria-pages -name 'page-*.png' | wc -l)" -ge 3

@@ -24,7 +24,7 @@ import re
 import stat
 import sys
 import tempfile
-from datetime import datetime
+from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, unquote_to_bytes, urlparse
@@ -35,7 +35,17 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 try:
-    from .content_gate import validate_content_receipt
+    from .artifact_safety import artifact_collision_errors
+    from .content_gate import (
+        rendered_markdown_visual_paths,
+        validate_content_receipt,
+    )
+    from .html_policy import (
+        SAFE_ATTRIBUTES,
+        SAFE_TAGS,
+        safe_image_destination,
+        safe_link_destination,
+    )
     from .pdf_templates import (
         BUNDLED_TEMPLATE_IMAGES,
         TEMPLATE_CHOICES,
@@ -47,22 +57,30 @@ try:
         select_adaptive_companion,
         select_template,
     )
-    from .render_binding import (
-        binding_meta_tag,
-        build_render_receipt,
-        expected_render_binding,
-    )
     from .report_blocks import visible_report_blocks
+    from .report_contract import (
+        canonical_visible_text,
+        localized_date,
+        report_length_policy,
+    )
     from .report_contract import detect_language as detect_report_language
-    from .report_contract import localized_date, report_length_policy
-    from .source_fidelity import validate_source_fidelity_receipt_online
     from .validate_report import (
         _is_safe_identity_label,
         validate_markdown,
         validate_rewild_receipt,
     )
 except ImportError:
-    from content_gate import validate_content_receipt
+    from artifact_safety import artifact_collision_errors
+    from content_gate import (
+        rendered_markdown_visual_paths,
+        validate_content_receipt,
+    )
+    from html_policy import (
+        SAFE_ATTRIBUTES,
+        SAFE_TAGS,
+        safe_image_destination,
+        safe_link_destination,
+    )
     from pdf_templates import (
         BUNDLED_TEMPLATE_IMAGES,
         TEMPLATE_CHOICES,
@@ -74,15 +92,13 @@ except ImportError:
         select_adaptive_companion,  # noqa: F401 -- intentional public helper
         select_template,
     )
-    from render_binding import (
-        binding_meta_tag,
-        build_render_receipt,
-        expected_render_binding,
-    )
     from report_blocks import visible_report_blocks
+    from report_contract import (
+        canonical_visible_text,
+        localized_date,
+        report_length_policy,
+    )
     from report_contract import detect_language as detect_report_language
-    from report_contract import localized_date, report_length_policy
-    from source_fidelity import validate_source_fidelity_receipt_online
     from validate_report import (
         _is_safe_identity_label,
         validate_markdown,
@@ -90,24 +106,8 @@ except ImportError:
     )
 
 LANG_CHOICES = ("auto", "en", "zh-CN", "zh-HK")
-SAFE_TAGS = {
-    "a", "b", "blockquote", "br", "code", "del", "div", "em", "h1", "h2",
-    "h3", "h4", "h5", "h6", "hr", "i", "img", "li", "ol", "p", "pre",
-    "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
-}
 SUPPRESSED_CONTENT_TAGS = {
     "script", "style", "template", "noscript", "iframe", "object", "embed"
-}
-SAFE_ATTRIBUTES = {
-    "a": {"href", "title"},
-    "img": {"src", "alt", "title"},
-    "h1": {"id"},
-    "h2": {"id"},
-    "h3": {"id"},
-    "h4": {"id"},
-    "h5": {"id"},
-    "h6": {"id"},
-    "code": {"class"},
 }
 LOCAL_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 BUNDLED_FONT_SUFFIXES = {".ttf"}
@@ -199,14 +199,20 @@ class SafeHTMLParser(HTMLParser):
         for name, value in attrs:
             if name not in allowed or value is None:
                 continue
-            if tag == "a" and name == "href":
-                parsed = urlparse(value)
-                if not (value.startswith("#") or parsed.scheme in {"http", "https"}):
-                    continue
-            if tag == "img" and name == "src":
-                parsed = urlparse(value)
-                if parsed.scheme not in {"", "file", "data"}:
-                    continue
+            if name in {"alt", "title"}:
+                value = canonical_visible_text(value)
+            if (
+                tag == "a"
+                and name == "href"
+                and not safe_link_destination(value)
+            ):
+                continue
+            if (
+                tag == "img"
+                and name == "src"
+                and not safe_image_destination(value)
+            ):
+                continue
             safe_attrs.append(f' {name}="{html.escape(value, quote=True)}"')
         self.parts.append(f"<{tag}{''.join(safe_attrs)}>")
 
@@ -227,7 +233,9 @@ class SafeHTMLParser(HTMLParser):
     def handle_data(self, data):
         if self.suppressed_depth:
             return
-        self.parts.append(html.escape(data, quote=False))
+        self.parts.append(
+            html.escape(canonical_visible_text(data), quote=False)
+        )
 
     def handle_entityref(self, name):
         if self.suppressed_depth:
@@ -327,6 +335,98 @@ def decode_image_data_url(url):
     return decoded
 
 
+def _read_bounded_descriptor(file_fd, resource_path):
+    file_stat = os.fstat(file_fd)
+    if not stat.S_ISREG(file_stat.st_mode):
+        raise ValueError(f"Asset must be a regular file: {resource_path}")
+    if file_stat.st_size > MAX_ASSET_BYTES:
+        raise ValueError(
+            f"Asset exceeds the {MAX_ASSET_BYTES}-byte limit: {resource_path}"
+        )
+    chunks = []
+    remaining = MAX_ASSET_BYTES + 1
+    while remaining:
+        chunk = os.read(file_fd, min(1024 * 1024, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    contents = b"".join(chunks)
+    if len(contents) > MAX_ASSET_BYTES:
+        raise ValueError(
+            f"Asset exceeds the {MAX_ASSET_BYTES}-byte limit: {resource_path}"
+        )
+    return contents
+
+
+def _is_link_or_reparse(file_stat):
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(file_stat, "st_file_attributes", 0)
+    return stat.S_ISLNK(file_stat.st_mode) or bool(
+        reparse_flag and attributes & reparse_flag
+    )
+
+
+def _read_bounded_regular_file_fallback(
+    resource_path,
+    allowed_root,
+    relative_path,
+):
+    """Use same-handle validation where descriptor-relative open is absent."""
+    final_stat = None
+    current = allowed_root
+    try:
+        for index, component in enumerate(relative_path.parts):
+            current = current / component
+            component_stat = os.lstat(current)
+            if _is_link_or_reparse(component_stat):
+                raise ValueError(
+                    f"Asset path contains a symbolic link: {resource_path}"
+                )
+            if index < len(relative_path.parts) - 1 and not stat.S_ISDIR(
+                component_stat.st_mode
+            ):
+                raise ValueError(
+                    f"Asset path contains a non-directory: {resource_path}"
+                )
+            final_stat = component_stat
+
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOINHERIT", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        file_fd = os.open(resource_path, flags)
+        try:
+            opened_stat = os.fstat(file_fd)
+            if final_stat is None or _is_link_or_reparse(final_stat):
+                raise ValueError(
+                    f"Asset must not be a symbolic link: {resource_path}"
+                )
+            path_identity = (
+                getattr(final_stat, "st_dev", None),
+                getattr(final_stat, "st_ino", None),
+            )
+            opened_identity = (
+                getattr(opened_stat, "st_dev", None),
+                getattr(opened_stat, "st_ino", None),
+            )
+            if (
+                all(value is not None for value in path_identity)
+                and all(value is not None for value in opened_identity)
+                and path_identity != opened_identity
+            ):
+                raise ValueError(
+                    f"Asset changed while it was being opened: {resource_path}"
+                )
+            return _read_bounded_descriptor(file_fd, resource_path)
+        finally:
+            os.close(file_fd)
+    except FileNotFoundError as exc:
+        raise ValueError(f"Asset not found: {resource_path}") from exc
+
+
 def read_bounded_regular_file(resource_path, allowed_root):
     """Read one regular file beneath a root without following symlinks."""
     resource_path = Path(os.path.abspath(resource_path))
@@ -342,7 +442,11 @@ def read_bounded_regular_file(resource_path, allowed_root):
     directory_flag = getattr(os, "O_DIRECTORY", None)
     nonblocking_flag = getattr(os, "O_NONBLOCK", 0)
     if no_follow is None or directory_flag is None:
-        raise RuntimeError("Safe local asset loading is not supported on this platform.")
+        return _read_bounded_regular_file_fallback(
+            resource_path,
+            allowed_root,
+            relative_path,
+        )
 
     descriptors = []
     try:
@@ -375,28 +479,7 @@ def read_bounded_regular_file(resource_path, allowed_root):
             raise
         descriptors.append(file_fd)
 
-        file_stat = os.fstat(file_fd)
-        if not stat.S_ISREG(file_stat.st_mode):
-            raise ValueError(f"Asset must be a regular file: {resource_path}")
-        if file_stat.st_size > MAX_ASSET_BYTES:
-            raise ValueError(
-                f"Asset exceeds the {MAX_ASSET_BYTES}-byte limit: {resource_path}"
-            )
-
-        chunks = []
-        remaining = MAX_ASSET_BYTES + 1
-        while remaining:
-            chunk = os.read(file_fd, min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        contents = b"".join(chunks)
-        if len(contents) > MAX_ASSET_BYTES:
-            raise ValueError(
-                f"Asset exceeds the {MAX_ASSET_BYTES}-byte limit: {resource_path}"
-            )
-        return contents
+        return _read_bounded_descriptor(file_fd, resource_path)
     except FileNotFoundError as exc:
         raise ValueError(f"Asset not found: {resource_path}") from exc
     finally:
@@ -1982,6 +2065,7 @@ def validate_content_for_render(
     receipt_path,
     lang,
     source_fidelity_receipt_path,
+    render_inputs=None,
 ):
     """Reject rendering unless the exact report and ledger passed content review."""
     if not ledger_path:
@@ -2003,31 +2087,29 @@ def validate_content_for_render(
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Content quality receipt could not be read: {exc}") from exc
     expected_lang = receipt.get("report_lang") if lang == "auto" else lang
-    errors = validate_content_receipt(
-        input_path,
-        ledger_path,
-        receipt,
-        source_fidelity_receipt_path=source_fidelity_receipt_path,
-        expected_lang=expected_lang,
-    )
-    if not errors:
+    if render_inputs is not None:
         try:
-            source_receipt = json.loads(
-                Path(source_fidelity_receipt_path).read_text(
-                    encoding="utf-8"
-                )
+            validate_render_report_date(
+                input_path,
+                ledger_path,
+                expected_lang,
+                render_inputs,
             )
-        except (OSError, json.JSONDecodeError) as exc:
-            errors.append(
-                f"Source-fidelity receipt could not be re-read: {exc}"
-            )
+        except ValueError as exc:
+            errors = [str(exc)]
         else:
-            errors.extend(
-                validate_source_fidelity_receipt_online(
-                    ledger_path,
-                    source_receipt,
-                )
-            )
+            errors = []
+    else:
+        errors = []
+    errors.extend(
+        validate_content_receipt(
+            input_path,
+            ledger_path,
+            receipt,
+            source_fidelity_receipt_path=source_fidelity_receipt_path,
+            expected_lang=expected_lang,
+        )
+    )
     if errors:
         raise ValueError("Content quality production gate failed: " + " ".join(errors))
 
@@ -2102,6 +2184,54 @@ RENDER_INPUT_KEYS = frozenset(
         "cover_image",
     }
 )
+
+
+def validate_render_report_date(input_path, ledger_path, report_lang, render_inputs):
+    """Bind the visible localized date to the gated report and ledger day."""
+    if not isinstance(render_inputs, dict):
+        raise ValueError("Render report date requires complete render inputs.")
+    try:
+        ledger = json.loads(Path(ledger_path).read_text(encoding="utf-8"))
+    except (OSError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Render report date could not verify the evidence ledger: {exc}"
+        ) from exc
+    ledger_value = ledger.get("report_date") if isinstance(ledger, dict) else None
+    try:
+        ledger_day = (
+            date.fromisoformat(ledger_value)
+            if isinstance(ledger_value, str)
+            else None
+        )
+    except ValueError:
+        ledger_day = None
+    if ledger_day is None or ledger_day.isoformat() != ledger_value:
+        raise ValueError(
+            "Render report date requires a strict ISO date in the evidence ledger."
+        )
+    try:
+        expected = localized_date(report_lang, ledger_day)
+    except ValueError as exc:
+        raise ValueError(
+            "Render report date requires a supported report language."
+        ) from exc
+    try:
+        report_text = Path(input_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Render report date could not read the report: {exc}") from exc
+    _title, gated_date, _standfirst = extract_report_header(report_text)
+    if gated_date != expected:
+        raise ValueError(
+            "Render report date must use the strict locale format and match "
+            f"the gated report and ledger date: {expected}."
+        )
+    requested = render_inputs.get("report_date")
+    if requested is not None and requested != expected:
+        raise ValueError(
+            "Render report date must use the strict locale format and match "
+            f"the gated report and ledger date: {expected}."
+        )
+    return expected
 
 
 def _validated_gated_override(name, value, gated_texts):
@@ -2222,8 +2352,11 @@ def validate_visual_asset_approvals(
     input_path,
     render_assets,
     content_receipt_path,
+    *,
+    report_text=None,
+    cover_image=None,
 ):
-    """Reconcile every rendered report image with the content approval set."""
+    """Reconcile rendered paths, hashes, and use sites with content approval."""
     try:
         receipt = json.loads(
             Path(content_receipt_path).read_text(encoding="utf-8")
@@ -2258,6 +2391,54 @@ def validate_visual_asset_approvals(
         raise ValueError(
             "Content receipt contains an unused visual asset approval: " + paths
         )
+    if receipt.get("schema_version") != 2:
+        return
+
+    body_paths = rendered_markdown_visual_paths(report_text or "")
+    cover_path = None
+    if cover_image is not None:
+        try:
+            cover_path = (
+                Path(cover_image)
+                .resolve()
+                .relative_to(report_root)
+                .as_posix()
+            )
+        except ValueError:
+            cover_path = None
+    actual_usages = {}
+    for path, digest in actual:
+        in_body = path in body_paths
+        on_cover = path == cover_path
+        if in_body and on_cover:
+            usage = "body_and_cover"
+        elif in_body:
+            usage = "body"
+        elif on_cover:
+            usage = "cover"
+        else:
+            continue
+        actual_usages[(path, digest)] = usage
+    reviewed_usages = {
+        (record.get("path"), record.get("sha256")): record.get("usage")
+        for record in receipt.get("approved_visual_assets", [])
+        if isinstance(record, dict)
+    }
+    mismatched = sorted(
+        (
+            path,
+            reviewed_usages.get((path, digest)),
+            usage,
+        )
+        for (path, digest), usage in actual_usages.items()
+        if reviewed_usages.get((path, digest)) != usage
+    )
+    if mismatched:
+        details = ", ".join(
+            f"{path} reviewed as {reviewed}, rendered as {actual_usage}"
+            for path, reviewed, actual_usage in mismatched
+        )
+        raise ValueError("Visual asset usage does not match content review: " + details)
 
 
 def prepare_pdf_render(
@@ -2269,7 +2450,7 @@ def prepare_pdf_render(
     source_fidelity_receipt,
     render_inputs,
 ):
-    """Build the exact bound HTML from current gated artifacts and inputs."""
+    """Build render-ready HTML from the gated report and reviewed assets."""
     input_path = Path(input_path).resolve()
     md_text, resolved_inputs = resolve_render_inputs(
         input_path,
@@ -2284,28 +2465,14 @@ def prepare_pdf_render(
         input_path,
         render_assets,
         content_receipt,
-    )
-    render_binding = expected_render_binding(
-        input_path,
-        ledger,
-        rewild_receipt,
-        content_receipt,
-        source_fidelity_receipt,
-        render_inputs=resolved_inputs,
-        rendered_html=rendered_html,
-        assets=render_assets,
-    )
-    bound_html = rendered_html.replace(
-        "</head>",
-        binding_meta_tag(render_binding) + "</head>",
-        1,
+        report_text=md_text,
+        cover_image=resolved_inputs["cover_image"],
     )
     return {
         "render_inputs": resolved_inputs,
         "rendered_html": rendered_html,
-        "bound_html": bound_html,
+        "bound_html": rendered_html,
         "assets": render_assets,
-        "binding": render_binding,
     }
 
 
@@ -2339,20 +2506,33 @@ def render_pdf(
     ledger=None,
     content_receipt=None,
     source_fidelity_receipt=None,
-    render_receipt=None,
     keep_html=False,
     force=False,
 ):
     """Render one Markdown file and return the output PDF path."""
     input_path, output_path = validate_paths(input_path, output_path, force=force)
-    validate_rewild_for_render(input_path, rewild_receipt, lang)
-    validate_content_for_render(
-        input_path,
-        ledger,
-        content_receipt,
-        lang,
-        source_fidelity_receipt,
+    cover_path = None
+    if cover_image:
+        cover_path = Path(cover_image)
+        if not cover_path.is_absolute():
+            cover_path = input_path.parent / cover_path
+    debug_path = html_debug_path(output_path) if keep_html else None
+    collisions = artifact_collision_errors(
+        {
+            "Markdown report": input_path,
+            "evidence ledger": ledger,
+            "Rewild receipt": rewild_receipt,
+            "content receipt": content_receipt,
+            "source-fidelity receipt": source_fidelity_receipt,
+            "cover image": cover_path,
+        },
+        {
+            "output PDF": output_path,
+            "HTML debug artifact": debug_path,
+        },
     )
+    if collisions:
+        raise ValueError("Artifact path collision: " + " ".join(collisions))
     requested_render_inputs = {
         "title": title,
         "subtitle": subtitle,
@@ -2364,6 +2544,15 @@ def render_pdf(
         "report_date": report_date,
         "cover_image": cover_image,
     }
+    validate_rewild_for_render(input_path, rewild_receipt, lang)
+    validate_content_for_render(
+        input_path,
+        ledger,
+        content_receipt,
+        lang,
+        source_fidelity_receipt,
+        render_inputs=requested_render_inputs,
+    )
     prepared = prepare_pdf_render(
         input_path,
         ledger=ledger,
@@ -2372,34 +2561,41 @@ def render_pdf(
         source_fidelity_receipt=source_fidelity_receipt,
         render_inputs=requested_render_inputs,
     )
+    asset_collisions = artifact_collision_errors(
+        {
+            f"render asset {index}": record.get("path")
+            for index, record in enumerate(prepared["assets"], start=1)
+            if isinstance(record, dict) and record.get("path")
+        },
+        {
+            "output PDF": output_path,
+            "HTML debug artifact": debug_path,
+        },
+    )
+    if asset_collisions:
+        raise ValueError(
+            "Artifact path collision: " + " ".join(asset_collisions)
+        )
     rendered_html = prepared["bound_html"]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    render_receipt_path = (
-        Path(render_receipt)
-        if render_receipt is not None
-        else output_path.with_suffix(".render.json")
-    )
-    render_receipt_path = Path(os.path.abspath(render_receipt_path))
-    if render_receipt_path in {input_path, output_path}:
-        raise ValueError(
-            "Render receipt must be separate from the Markdown and PDF files."
-        )
-    if render_receipt_path.exists() and not force:
-        raise ValueError(
-            "Render receipt already exists; refusing to overwrite: "
-            f"{render_receipt_path}"
-        )
-    render_receipt_path.parent.mkdir(parents=True, exist_ok=True)
     if keep_html:
         debug_path = html_debug_path(output_path)
         try:
-            with debug_path.open("x", encoding="utf-8") as debug_file:
+            debug_fd = os.open(
+                debug_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            with os.fdopen(debug_fd, "w", encoding="utf-8") as debug_file:
                 debug_file.write(rendered_html)
         except FileExistsError as exc:
             raise ValueError(
                 f"HTML debug artifact already exists; refusing to overwrite: {debug_path}"
             ) from exc
+        except Exception:
+            debug_path.unlink(missing_ok=True)
+            raise
         print(f"[OK] HTML generated: {debug_path}")
 
     with tempfile.NamedTemporaryFile(
@@ -2416,46 +2612,10 @@ def render_pdf(
             asset_root=input_path.parent,
         )
         temp_path.replace(output_path)
-        os.chmod(output_path, 0o644)
     finally:
         temp_path.unlink(missing_ok=True)
-    receipt_data = build_render_receipt(
-        output_path,
-        input_path,
-        ledger,
-        rewild_receipt,
-        content_receipt,
-        source_fidelity_receipt,
-        binding=prepared["binding"],
-        render_inputs=prepared["render_inputs"],
-        rendered_html=prepared["rendered_html"],
-        assets=prepared["assets"],
-    )
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        prefix=f".{render_receipt_path.stem}-",
-        suffix=".json",
-        dir=render_receipt_path.parent,
-        delete=False,
-    ) as receipt_handle:
-        json.dump(
-            receipt_data,
-            receipt_handle,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-        receipt_handle.write("\n")
-        temp_receipt_path = Path(receipt_handle.name)
-    try:
-        temp_receipt_path.replace(render_receipt_path)
-        os.chmod(render_receipt_path, 0o644)
-    finally:
-        temp_receipt_path.unlink(missing_ok=True)
     size_kb = output_path.stat().st_size / 1024
     print(f"[OK] PDF generated: {output_path} ({size_kb:.1f} KB)")
-    print(f"[OK] Render receipt: {render_receipt_path}")
     return output_path
 
 
@@ -2528,11 +2688,6 @@ def main():
         help="passing live-source receipt bound to the evidence ledger",
     )
     parser.add_argument(
-        "--render-receipt",
-        default=None,
-        help="Output provenance receipt (default: PDF path with .render.json)",
-    )
-    parser.add_argument(
         "--keep-html",
         action="store_true",
         help="Keep the intermediate HTML file beside the PDF",
@@ -2561,7 +2716,6 @@ def main():
             ledger=args.ledger,
             content_receipt=args.content_receipt,
             source_fidelity_receipt=args.source_fidelity_receipt,
-            render_receipt=args.render_receipt,
             keep_html=args.keep_html,
             force=args.force,
         )

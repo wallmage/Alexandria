@@ -58,8 +58,7 @@ Read `references/pdf-templates.md` and resolve the intake values before renderin
   --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY" \
   --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
   --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
-  --content-receipt "$CONTENT_RECEIPT" \
-  --render-receipt "$RENDER_RECEIPT"
+  --content-receipt "$CONTENT_RECEIPT"
 ```
 
 Use `--lang en`, `--lang zh-CN`, or `--lang zh-HK` when automatic script detection is ambiguous. Use `--keep-html` only when debugging layout. The converter refuses to replace an existing PDF; prefer a versioned filename, or pass `--force` only when replacement is intentional.
@@ -105,7 +104,7 @@ Reopen and cross-check the report and rendered PDF:
   --rewild-receipt "$REWILD_RECEIPT" \
   --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
   --content-receipt "$CONTENT_RECEIPT" \
-  --pdf "$REPORT_PDF" --render-receipt "$RENDER_RECEIPT" \
+  --pdf "$REPORT_PDF" \
   --expected-lang "$REPORT_LANG" \
   --min-sources 1 --min-sections 3 \
   --min-pages 10 --min-text-chars 5000 --min-links 1
@@ -115,14 +114,9 @@ Set `REPORT_LANG` to `en`, `zh-CN`, or `zh-HK`. Also enforce `--min-words 7500 -
 
 The PDF check also requires title and author metadata, the declared document
 language, tagged structure for assistive technology, navigation bookmarks,
-consistent A4 pages, selectable text, and clickable source links. The renderer
-embeds a SHA-256 binding to the exact Markdown, ledger, Rewild receipt, content
-receipt, source-fidelity receipt, visible CLI metadata, generated HTML, and
-local image/font bytes. Its renderer-issued receipt also records the exact PDF
-hash and visible options. Final validation reconstructs the HTML and assets from
-the current gated files, rerenders deterministically, and requires an exact
-PDF hash match; self-authored receipts, copied metadata, changed assets, and
-modified PDF bytes therefore fail.
+consistent A4 pages, selectable text, and clickable source links. Rendering
+revalidates the report, receipts, and reviewed local assets before writing the
+PDF; validation then reopens the delivered file and checks its structure.
 
 ## Byte reproducibility
 

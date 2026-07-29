@@ -126,7 +126,6 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("--source-fidelity-receipt", result.stdout)
         self.assertIn("--content-receipt", result.stdout)
         self.assertIn("--ledger", result.stdout)
-        self.assertIn("--render-receipt", result.stdout)
 
     def test_rejects_non_pdf_output_before_loading_render_dependencies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -214,6 +213,18 @@ Body.
         # a sentence carried more than one citation.
         self.assertIn('<sup class="source-ref">01</sup>', rendered)
         self.assertNotIn("[01]", rendered)
+
+    def test_markdown_link_title_survives_in_rendered_html(self):
+        rendered = self.converter.md_to_html(
+            "# Title\n\n> 28 July 2026\n\n"
+            "## Finding\n\n"
+            '[evidence](https://example.com/a "Reviewed tooltip").\n\n'
+            "## Sources\n\n- [Source A](https://example.com/a)",
+            lang="en",
+            template="executive",
+        )
+
+        self.assertIn('title="Reviewed tooltip"', rendered)
 
     def test_image_covers_have_contrast_protection_for_all_overlay_text(self):
         css = self.converter.build_css(
@@ -435,6 +446,43 @@ Body.
             )
 
             with self.assertRaisesRegex(ValueError, "symbolic link"):
+                fetcher(linked.as_uri())
+
+    def test_local_image_safe_fallback_without_posix_open_flags(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            image = root / "figure.png"
+            expected = encoded_raster("PNG")
+            image.write_bytes(expected)
+            fetcher = self.converter.make_url_fetcher(
+                root, default_fetcher=lambda url: {"string": url}
+            )
+
+            with (
+                mock.patch.object(self.converter.os, "O_NOFOLLOW", None),
+                mock.patch.object(self.converter.os, "O_DIRECTORY", None),
+            ):
+                fetched = fetcher(image.as_uri())
+
+            self.assertEqual(expected, fetched["string"])
+            self.assertEqual("image/png", fetched["mime_type"])
+
+    def test_local_image_fallback_rejects_symbolic_links(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target.png"
+            target.write_bytes(encoded_raster("PNG"))
+            linked = root / "linked.png"
+            linked.symlink_to(target.name)
+            fetcher = self.converter.make_url_fetcher(
+                root, default_fetcher=lambda url: {"string": url}
+            )
+
+            with (
+                mock.patch.object(self.converter.os, "O_NOFOLLOW", None),
+                mock.patch.object(self.converter.os, "O_DIRECTORY", None),
+                self.assertRaisesRegex(ValueError, "symbolic link"),
+            ):
                 fetcher(linked.as_uri())
 
     @unittest.skipUnless(hasattr(os, "mkfifo"), "requires POSIX FIFOs")
@@ -1106,7 +1154,67 @@ Body.
             self.assertEqual(calls["base_url"], source.parent.resolve())
             self.assertIs(calls["pdf_tags"], True)
             self.assertTrue(output.exists())
-            self.assertEqual(0o644, os.stat(output).st_mode & 0o777)
+            self.assertEqual(0o600, os.stat(output).st_mode & 0o777)
+
+    def test_render_never_widens_a_restrictive_umask(self):
+        class FakeHTML:
+            def __init__(self, **_kwargs):
+                pass
+
+            def write_pdf(self, target, **_options):
+                Path(target).write_bytes(b"%PDF-1.7\n")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            output = temp / "report.pdf"
+            source.write_text("# Report\n", encoding="utf-8")
+            previous_umask = os.umask(0o077)
+            try:
+                with mock.patch.object(
+                    self.converter,
+                    "load_weasyprint_html",
+                    return_value=FakeHTML,
+                ):
+                    self.render_pdf(source, output, confidential=True)
+            finally:
+                os.umask(previous_umask)
+
+            self.assertEqual(0o600, output.stat().st_mode & 0o777)
+
+    def test_confidential_debug_html_is_owner_only_under_normal_umask(self):
+        class FakeHTML:
+            def __init__(self, **_kwargs):
+                pass
+
+            def write_pdf(self, target, **_options):
+                Path(target).write_bytes(b"%PDF-1.7\n")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            output = temp / "report.pdf"
+            source.write_text("# Report\n", encoding="utf-8")
+            previous_umask = os.umask(0o022)
+            try:
+                with mock.patch.object(
+                    self.converter,
+                    "load_weasyprint_html",
+                    return_value=FakeHTML,
+                ):
+                    self.render_pdf(
+                        source,
+                        output,
+                        confidential=True,
+                        keep_html=True,
+                    )
+            finally:
+                os.umask(previous_umask)
+
+            self.assertEqual(
+                0o600,
+                output.with_suffix(".html").stat().st_mode & 0o777,
+            )
 
     def test_failed_render_preserves_existing_pdf(self):
         class FailingHTML:
@@ -1157,39 +1265,6 @@ Body.
 
             with self.assertRaisesRegex(ValueError, "Rewild gate receipt"):
                 self.converter.render_pdf(source, output)
-
-    def test_rendered_pdf_records_the_exact_gated_artifact_binding(self):
-        from pypdf import PdfReader
-
-        from scripts.render_binding import (
-            file_sha256,
-            validate_render_receipt,
-        )
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            source = temp / "report.md"
-            output = temp / "report.pdf"
-            source.write_text("# Report\n\n## Finding\n\nEvidence.", encoding="utf-8")
-            self.render_pdf(source, output)
-            metadata = PdfReader(output).metadata or {}
-            receipt = json.loads(
-                output.with_suffix(".render.json").read_text(encoding="utf-8")
-            )
-            output_hash = file_sha256(output)
-            receipt_errors = validate_render_receipt(
-                output,
-                receipt,
-                source,
-                temp / "ledger.json",
-                temp / "rewild-receipt.json",
-                temp / "content-receipt.json",
-                temp / "source-fidelity-receipt.json",
-                pdf_binding=metadata.get("/Keywords"),
-            )
-        self.assertEqual(receipt["binding"], metadata.get("/Keywords"))
-        self.assertEqual(output_hash, receipt["pdf_sha256"])
-        self.assertEqual([], receipt_errors)
 
     def test_assertive_title_or_subtitle_absent_from_markdown_cannot_render(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1283,126 +1358,6 @@ Body.
                 self.converter.extract_report_header(md_text),
             )
 
-    def test_visible_subtitle_changes_the_render_binding(self):
-        from pypdf import PdfReader
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            source = temp / "report.md"
-            source.write_text(
-                "# Report\n\n## Finding\n\n"
-                "First subtitle\n\nSecond subtitle\n\nEvidence.",
-                encoding="utf-8",
-            )
-            artifacts = {
-                "rewild_receipt": temp / "rewild.json",
-                "ledger": temp / "ledger.json",
-                "content_receipt": temp / "content.json",
-                "source_fidelity_receipt": temp / "source.json",
-            }
-            for name, path in artifacts.items():
-                path.write_text(
-                    (
-                        json.dumps({"approved_visual_assets": []})
-                        if name == "content_receipt"
-                        else name
-                    ),
-                    encoding="utf-8",
-                )
-            bindings = []
-            with (
-                mock.patch.object(
-                    self.converter,
-                    "validate_rewild_for_render",
-                    return_value=None,
-                ),
-                mock.patch.object(
-                    self.converter,
-                    "validate_content_for_render",
-                    return_value=None,
-                ),
-            ):
-                for index, subtitle in enumerate(("First subtitle", "Second subtitle")):
-                    output = temp / f"report-{index}.pdf"
-                    self.converter.render_pdf(
-                        source,
-                        output,
-                        subtitle=subtitle,
-                        **artifacts,
-                    )
-                    bindings.append(
-                        (PdfReader(output).metadata or {}).get("/Keywords")
-                    )
-        self.assertNotEqual(bindings[0], bindings[1])
-
-    def test_local_image_bytes_change_the_render_binding(self):
-        from PIL import Image
-        from pypdf import PdfReader
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            source = temp / "report.md"
-            image = temp / "figure.png"
-            source.write_text(
-                "# Report\n\n## Finding\n\n![Figure](figure.png)",
-                encoding="utf-8",
-            )
-            artifacts = {
-                "rewild_receipt": temp / "rewild.json",
-                "ledger": temp / "ledger.json",
-                "content_receipt": temp / "content.json",
-                "source_fidelity_receipt": temp / "source.json",
-            }
-            for name, path in artifacts.items():
-                path.write_text(
-                    (
-                        json.dumps({"approved_visual_assets": []})
-                        if name == "content_receipt"
-                        else name
-                    ),
-                    encoding="utf-8",
-                )
-            bindings = []
-            with (
-                mock.patch.object(
-                    self.converter,
-                    "validate_rewild_for_render",
-                    return_value=None,
-                ),
-                mock.patch.object(
-                    self.converter,
-                    "validate_content_for_render",
-                    return_value=None,
-                ),
-            ):
-                for index, color in enumerate(("red", "blue")):
-                    Image.new("RGB", (8, 8), color=color).save(image)
-                    artifacts["content_receipt"].write_text(
-                        json.dumps(
-                            {
-                                "approved_visual_assets": [
-                                    {
-                                        "path": "figure.png",
-                                        "sha256": hashlib.sha256(
-                                            image.read_bytes()
-                                        ).hexdigest(),
-                                    }
-                                ]
-                            }
-                        ),
-                        encoding="utf-8",
-                    )
-                    output = temp / f"image-report-{index}.pdf"
-                    self.converter.render_pdf(
-                        source,
-                        output,
-                        **artifacts,
-                    )
-                    bindings.append(
-                        (PdfReader(output).metadata or {}).get("/Keywords")
-                    )
-        self.assertNotEqual(bindings[0], bindings[1])
-
     def test_unapproved_custom_cover_image_cannot_render(self):
         from PIL import Image
 
@@ -1448,6 +1403,7 @@ Body.
                                 "sha256": hashlib.sha256(
                                     cover.read_bytes()
                                 ).hexdigest(),
+                                "usage": "cover",
                             }
                         ]
                     }
@@ -1462,6 +1418,114 @@ Body.
                 content_receipt=content_receipt,
             )
             self.assertTrue(output.exists())
+
+    def test_visual_approval_usage_cannot_be_promoted_or_demoted_at_render(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            source = temp / "report.md"
+            image = temp / "figure.png"
+            Image.new("RGB", (1000, 600), "white").save(image)
+            digest = hashlib.sha256(image.read_bytes()).hexdigest()
+            source.write_text(
+                "# Report\n\n## Finding\n\n![](figure.png)",
+                encoding="utf-8",
+            )
+            assets = [
+                {
+                    "path": image.resolve(),
+                    "sha256": digest,
+                }
+            ]
+
+            for reviewed_usage, cover_image in (
+                ("cover", None),
+                ("body", image),
+                ("body_and_cover", None),
+            ):
+                with self.subTest(
+                    reviewed_usage=reviewed_usage,
+                    cover_image=bool(cover_image),
+                ):
+                    receipt = temp / f"{reviewed_usage}.json"
+                    receipt.write_text(
+                        json.dumps(
+                            {
+                                "schema_version": 2,
+                                "approved_visual_assets": [
+                                    {
+                                        "path": "figure.png",
+                                        "sha256": digest,
+                                        "usage": reviewed_usage,
+                                    }
+                                ],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "usage does not match",
+                    ):
+                        self.converter.validate_visual_asset_approvals(
+                            source,
+                            assets,
+                            receipt,
+                            report_text=source.read_text(encoding="utf-8"),
+                            cover_image=cover_image,
+                        )
+
+    def test_render_date_must_match_report_and_ledger_in_strict_locale_format(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            report = temp / "report.md"
+            ledger = temp / "ledger.json"
+            report.write_text(
+                "# Report\n\n> 29 July 2026\n\n## Finding\n\nEvidence.",
+                encoding="utf-8",
+            )
+            ledger.write_text(
+                json.dumps({"report_date": "2026-07-29"}),
+                encoding="utf-8",
+            )
+            base_inputs = {
+                "report_date": "29 July 2026",
+            }
+
+            self.converter.validate_render_report_date(
+                report,
+                ledger,
+                "en",
+                base_inputs,
+            )
+            for report_date, requested_date in (
+                ("July 29, 2026", "29 July 2026"),
+                ("29 July 2026", "July 29, 2026"),
+                ("29 July 2026", "28 July 2026"),
+            ):
+                with self.subTest(
+                    report_date=report_date,
+                    requested_date=requested_date,
+                ):
+                    report.write_text(
+                        (
+                            "# Report\n\n"
+                            f"> {report_date}\n\n"
+                            "## Finding\n\nEvidence."
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "report date",
+                    ):
+                        self.converter.validate_render_report_date(
+                            report,
+                            ledger,
+                            "en",
+                            {"report_date": requested_date},
+                        )
 
     def test_unapproved_markdown_body_image_cannot_render(self):
         from PIL import Image

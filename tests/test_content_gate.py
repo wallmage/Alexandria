@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -173,6 +174,45 @@ class ContentGateTests(unittest.TestCase):
             )
             self.assertFalse(receipt.exists())
 
+    def test_content_receipt_cannot_overwrite_a_gate_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, _receipt, source_receipt = self.make_case(
+                directory
+            )
+            original = report.read_bytes()
+
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                report,
+                source_fidelity_receipt_path=source_receipt,
+            )
+
+            self.assertTrue(
+                any("must be separate" in error for error in errors),
+                errors,
+            )
+            self.assertEqual(original, report.read_bytes())
+
+    def test_existing_unrelated_content_receipt_needs_force(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            receipt.write_text("personal notes", encoding="utf-8")
+
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+
+            self.assertTrue(any("already exists" in error for error in errors), errors)
+            self.assertEqual("personal notes", receipt.read_text(encoding="utf-8"))
+
     def test_clean_review_writes_a_bound_receipt_and_revalidates(self):
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, receipt, source_receipt = self.make_case(directory)
@@ -238,11 +278,25 @@ class ContentGateTests(unittest.TestCase):
                     {
                         "path": "cover.png",
                         "sha256": file_sha256(cover),
+                        "usage": "cover",
                     }
                 ],
                 result["approved_visual_assets"],
             )
 
+            result["approved_visual_assets"][0]["usage"] = "body"
+            errors = validate_content_receipt(
+                report,
+                ledger,
+                result,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertTrue(
+                any("visual asset approvals" in error.lower() for error in errors),
+                errors,
+            )
+
+            result["approved_visual_assets"][0]["usage"] = "cover"
             cover.write_bytes(b"ALICE STOLE FUNDS")
             errors = validate_content_receipt(
                 report,
@@ -307,6 +361,21 @@ class ContentGateTests(unittest.TestCase):
                 ),
             )
 
+            original = body_image.read_bytes()
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                body_image,
+                source_fidelity_receipt_path=source_receipt,
+                force=True,
+            )
+            self.assertTrue(
+                any("must be separate" in error for error in errors),
+                errors,
+            )
+            self.assertEqual(original, body_image.read_bytes())
+
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, receipt, source_receipt = self.make_case(
                 directory
@@ -368,6 +437,193 @@ class ContentGateTests(unittest.TestCase):
                 any("embedded data image" in error.lower() for error in errors),
                 errors,
             )
+
+    def test_every_rendered_nonlocal_image_form_is_rejected(self):
+        cases = {
+            "inline HTTP": "![Chart](https://example.com/chart.png)",
+            "protocol relative": "![Chart](//example.com/chart.png)",
+            "reference style": (
+                "![Chart][figure]\n\n"
+                "[figure]: https://example.com/chart.png"
+            ),
+            "raw quoted HTML": (
+                '<img src="https://example.com/chart.png" alt="">'
+            ),
+            "raw unquoted HTML": (
+                "<img src=https://example.com/chart.png alt=>"
+            ),
+            "raw data HTML": (
+                '<img src=data:image/png;base64,QUxJQ0U= alt="">'
+            ),
+            "self-closing suppressed tag": (
+                "<script/><img src=data:image/png;base64,QUxJQ0U= "
+                'alt="Alice stole funds">'
+            ),
+        }
+        for name, image_markup in cases.items():
+            with self.subTest(image_form=name), tempfile.TemporaryDirectory() as directory:
+                report, ledger, review, receipt, source_receipt = self.make_case(
+                    directory
+                )
+                report.write_text(
+                    report.read_text(encoding="utf-8").replace(
+                        "## Outlook",
+                        f"{image_markup}\n\n## Outlook",
+                    ),
+                    encoding="utf-8",
+                )
+                note = json.loads(review.read_text(encoding="utf-8"))
+                note["report_sha256"] = file_sha256(report)
+                review.write_text(json.dumps(note), encoding="utf-8")
+
+                errors = run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                )
+
+                self.assertTrue(
+                    any(
+                        "nonlocal image" in error.lower()
+                        or "embedded data image" in error.lower()
+                        for error in errors
+                    ),
+                    errors,
+                )
+                self.assertFalse(receipt.exists())
+
+    def test_image_accessibility_text_cannot_add_an_ungated_assertion(self):
+        for attribute in ("alt", "title"):
+            with self.subTest(attribute=attribute), tempfile.TemporaryDirectory() as directory:
+                report, ledger, review, receipt, source_receipt = self.make_case(
+                    directory
+                )
+                image = Path(directory) / "figure.png"
+                image.write_bytes(b"reviewed image")
+                report.write_text(
+                    report.read_text(encoding="utf-8").replace(
+                        "## Outlook",
+                        (
+                            f'<img src=figure.png {attribute}="Alice stole funds">'
+                            "\n\n## Outlook"
+                        ),
+                    ),
+                    encoding="utf-8",
+                )
+                note = json.loads(review.read_text(encoding="utf-8"))
+                note["report_sha256"] = file_sha256(report)
+                note["visual_assets"] = [
+                    {
+                        "path": "figure.png",
+                        "sha256": file_sha256(image),
+                        "usage": "body",
+                        "visible_text_and_claims_review": (
+                            "The image accessibility text was reviewed."
+                        ),
+                        "disposition": "approved",
+                    }
+                ]
+                review.write_text(json.dumps(note), encoding="utf-8")
+
+                errors = run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                )
+
+                self.assertTrue(
+                    any("accessibility text" in error.lower() for error in errors),
+                    errors,
+                )
+                self.assertFalse(receipt.exists())
+
+    def test_link_tooltip_cannot_add_an_ungated_assertion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            report_text, replacements = re.subn(
+                r"\[Record\]\((https://[^)]+)\)",
+                r'[Record](\1 "Alice Smith stole customer funds")',
+                report.read_text(encoding="utf-8"),
+                count=1,
+            )
+            self.assertEqual(1, replacements)
+            report.write_text(report_text, encoding="utf-8")
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["report_sha256"] = file_sha256(report)
+            review.write_text(json.dumps(note), encoding="utf-8")
+
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+
+            self.assertTrue(
+                any("accessibility text" in error.lower() for error in errors),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_unsafe_links_and_active_html_are_rejected_from_markdown(self):
+        cases = {
+            "javascript link": "[Record](javascript:alert(1))",
+            "data link": "[Record](data:text/html,unsafe)",
+            "file link": "[Record](file:///etc/passwd)",
+            "unledgered raw link": (
+                '<a href="https://attacker.example/">Record</a>'
+            ),
+            "raw script": '<script src="https://attacker.example/x.js"></script>',
+            "raw iframe": '<iframe src="https://attacker.example/"></iframe>',
+            "raw form": '<form action="https://attacker.example/"></form>',
+            "raw video": '<video src="https://attacker.example/x.mp4"></video>',
+            "event handler": '<img src="missing.png" onerror="alert(1)">',
+            "meta refresh": (
+                '<meta http-equiv="refresh" '
+                'content="0;url=https://attacker.example/">'
+            ),
+        }
+        for name, markup in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                report, ledger, review, receipt, source_receipt = self.make_case(
+                    directory
+                )
+                report.write_text(
+                    report.read_text(encoding="utf-8").replace(
+                        "## Outlook",
+                        f"{markup}\n\n## Outlook",
+                    ),
+                    encoding="utf-8",
+                )
+                note = json.loads(review.read_text(encoding="utf-8"))
+                note["report_sha256"] = file_sha256(report)
+                review.write_text(json.dumps(note), encoding="utf-8")
+
+                errors = run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                )
+
+                self.assertTrue(
+                    any(
+                        "link destination" in error.lower()
+                        or "not present in the evidence ledger" in error.lower()
+                        or "renderer allowlist" in error.lower()
+                        for error in errors
+                    ),
+                    errors,
+                )
+                self.assertFalse(receipt.exists())
 
     def test_low_score_and_false_required_check_block_the_gate(self):
         with tempfile.TemporaryDirectory() as directory:

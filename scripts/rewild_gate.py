@@ -14,6 +14,12 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from artifact_safety import artifact_collision_errors  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 FIDELITY_NOTES_SCHEMA = ROOT / "references" / "rewild-fidelity-notes.schema.json"
 PROFILES = {
@@ -1291,13 +1297,30 @@ def run_gate(
     receipt_path,
     waiver_path=None,
     fidelity_notes_path=None,
+    force=False,
 ):
     """Return errors; write a receipt only after the exact report passes."""
     report_path = Path(report_path).resolve()
     source_path = Path(source_path).resolve()
     review_note_path = Path(review_note_path).resolve()
     receipt_path = Path(receipt_path).resolve()
-    errors = []
+    errors = artifact_collision_errors(
+        {
+            "final report": report_path,
+            "pre-Rewild source": source_path,
+            "blind-review note": review_note_path,
+            "style waivers": waiver_path,
+            "fidelity notes": fidelity_notes_path,
+        },
+        {"Rewild receipt": receipt_path},
+    )
+    if errors:
+        return errors
+    if receipt_path.exists() and not force:
+        return [
+            f"Rewild receipt already exists: {receipt_path}. "
+            "Use --force to replace it."
+        ]
     if report_lang not in PROFILES:
         return [f"Unsupported report language: {report_lang}"]
     for label, path in (
@@ -1602,6 +1625,11 @@ def build_parser():
         help="JSON acknowledgments for review-mandated intentional edits",
     )
     parser.add_argument("--receipt", required=True, help="gate receipt JSON to write")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing Rewild receipt",
+    )
     return parser
 
 
@@ -1615,6 +1643,7 @@ def main(argv=None):
         receipt_path=args.receipt,
         waiver_path=args.style_waivers,
         fidelity_notes_path=args.fidelity_notes,
+        force=args.force,
     )
     if errors:
         for error in errors:

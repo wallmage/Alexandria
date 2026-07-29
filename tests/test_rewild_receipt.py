@@ -1125,6 +1125,43 @@ class GateFailClosedTests(unittest.TestCase):
             )
             self.assertFalse(receipt.exists())
 
+    def test_receipt_cannot_overwrite_a_gate_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source, review, _receipt = self.build_clean(work)
+            original = report.read_bytes()
+
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=report,
+            )
+
+            self.assertTrue(
+                any("must be separate" in error for error in errors),
+                errors,
+            )
+            self.assertEqual(original, report.read_bytes())
+
+    def test_existing_unrelated_receipt_needs_force(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source, review, receipt = self.build_clean(work)
+            receipt.write_text("personal notes", encoding="utf-8")
+
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+
+            self.assertTrue(any("already exists" in error for error in errors), errors)
+            self.assertEqual("personal notes", receipt.read_text(encoding="utf-8"))
+
     def test_heuristic_exemption_budget_is_enforced(self):
         names = (
             "alpha",

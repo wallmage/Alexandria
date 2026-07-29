@@ -165,13 +165,20 @@ class RepositoryContractTests(unittest.TestCase):
         workflow = (
             ROOT / ".github" / "workflows" / "test.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn("tests/build_gated_fixtures.py", workflow)
-        self.assertGreaterEqual(workflow.count("--rewild-receipt"), 6)
+        matrix = (ROOT / "tests" / "ci_render_matrix.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("tests/ci_render_matrix.py", workflow)
+        self.assertIn("build_case", matrix)
+        self.assertIn("md_to_pdf.render_pdf", matrix)
+        self.assertIn("validate_report.main", matrix)
+        self.assertIn("rewild_receipt", matrix)
+        self.assertIn("mock_production_transport", matrix)
         for template in (
             "executive", "spectrum", "atlas", "horizon", "maison",
             "blueprint", "terrain", "orbit", "sunbeam", "current", "apricot",
         ):
-            self.assertIn(template, workflow)
+            self.assertIn(template, matrix)
         self.assertIn("pip_audit", workflow)
 
     def test_content_quality_gate_is_bundled_required_and_ci_exercised(self):
@@ -184,6 +191,9 @@ class RepositoryContractTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(
             encoding="utf-8"
         )
+        matrix = (ROOT / "tests" / "ci_render_matrix.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertTrue(quality.is_file())
         self.assertTrue(schema_path.is_file())
@@ -194,10 +204,9 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("--source-fidelity-receipt", skill)
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
-        self.assertGreaterEqual(workflow.count("--content-receipt"), 3)
-        self.assertGreaterEqual(
-            workflow.count("--source-fidelity-receipt"), 3
-        )
+        self.assertIn("tests/ci_render_matrix.py", workflow)
+        self.assertIn("content_receipt", matrix)
+        self.assertIn("source_fidelity_receipt", matrix)
 
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self.assertEqual(2, schema["properties"]["schema_version"]["const"])

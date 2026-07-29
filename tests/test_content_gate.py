@@ -174,6 +174,32 @@ class ContentGateTests(unittest.TestCase):
             )
             self.assertFalse(receipt.exists())
 
+    def test_aligned_markdown_table_passes_the_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            report.write_text(
+                report.read_text(encoding="utf-8").replace(
+                    "|---|---|", "|:---|---:|"
+                ),
+                encoding="utf-8",
+            )
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["report_sha256"] = file_sha256(report)
+            review.write_text(json.dumps(note), encoding="utf-8")
+
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+
+            self.assertEqual([], errors)
+            self.assertTrue(receipt.exists())
+
     def test_content_receipt_cannot_overwrite_a_gate_input(self):
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, _receipt, source_receipt = self.make_case(

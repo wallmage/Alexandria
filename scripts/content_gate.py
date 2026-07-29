@@ -52,6 +52,10 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
 EVIDENCE_LEDGER_SCHEMA = ROOT / "references" / "evidence-ledger.schema.json"
+_TABLE_ALIGNMENT_STYLE_RE = re.compile(
+    r"text-align:\s*(?:left|right|center)\s*;?",
+    re.IGNORECASE,
+)
 
 
 def file_sha256(path):
@@ -143,6 +147,13 @@ class _RenderedImageParser(HTMLParser):
         values = {}
         for name, value in attrs:
             name = name.casefold()
+            if (
+                tag in {"th", "td"}
+                and name == "style"
+                and value is not None
+                and _TABLE_ALIGNMENT_STYLE_RE.fullmatch(value.strip())
+            ):
+                continue
             if name not in SAFE_ATTRIBUTES.get(tag, frozenset()):
                 self.policy_violations.append(f"attribute {name} on <{tag}>")
                 continue

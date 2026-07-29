@@ -83,7 +83,7 @@ Read `references/research-protocol.md` and `references/content-quality.md`. Crea
 1. a reader contract and governing question;
 2. a prioritized coverage map derived from the selected archetype;
 3. direct, corroborating, and disconfirming query plans;
-4. a version-3 evidence ledger using `references/evidence-ledger.schema.json`;
+4. a version-4 evidence ledger using `references/evidence-ledger.schema.json`;
 5. an explicit list of unresolved questions and their effect on the verdict.
 
 For parallel research, assign exclusive coverage and disjoint ID ranges. Each
@@ -362,8 +362,9 @@ Read `references/pdf-production.md`. Use the supplied scripts and pinned depende
 ```
 
 Reuse the Step 7 environment. Existing output requires `--force`; prefer a
-versioned filename. Validation deterministically rerenders from gated inputs
-and receipt options, rejecting forged, stale, or modified PDFs.
+versioned filename. PDF validation reopens the file and checks page count,
+extractable text, clickable links, metadata, accessibility tags, document
+language, page geometry, bookmarks, and mechanical page-quality findings.
 
 Repeat the language-specific hard length flags from Step 7 in the PDF validation command: `--min-words 7500 --max-words 15000` for English, or `--min-chars 5000 --max-chars 10000` for either Chinese variant. The converter independently rejects a missing, stale, wrong-language, or short-report receipt before loading the render engine.
 

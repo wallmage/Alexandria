@@ -283,10 +283,8 @@ def _word_phrase_value(phrase):
     # a key: the digit scanner emits n:1, never n:1.0.
     return int(value) if float(value).is_integer() else value
 
-#: Units that turn a spelled-out number into an asserted measurement rather
-#: than an ordinary prose count. A bare count ("three CVEs", "five surfaces")
-#: is normal writing and must stay silent, but any number carrying a unit is a
-#: figure, and spelling it out must not be cheaper than writing the digits.
+#: Historical vocabulary from the retired magnitude-specific word-number
+#: check. The current scanner treats all spelled-out numbers as evidence-only.
 _MAGNITUDE_UNITS = (
     # proportion and multiple
     r"%|per ?cents?|percents?|percentage ?points?|basis ?points?|pc|pct"
@@ -321,11 +319,6 @@ _FRACTION_WORD_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: An article may sit between the number and its unit ("half a percent").
-_MAGNITUDE_UNIT_RE = re.compile(
-    r"[\s  -]*(?:(?:an?|per)[\s  -]+)?(?:" + _MAGNITUDE_UNITS + r")\b",
-    re.IGNORECASE,
-)
 _MONTH_NAME_DATE_RE = re.compile(
     r"(?i)\b(?:([0-9]{1,2})\s+)?(" + "|".join(sorted(_MONTHS, key=len, reverse=True))
     + r")\.?\s+(?:([0-9]{1,2})(?:st|nd|rd|th)?,?\s+)?([0-9]{4})\b"
@@ -361,18 +354,6 @@ def _registrable_domain(value):
     return ".".join(labels[-2:])
 
 
-def _domain_family_names(url):
-    """Return the family names a source may use without a justification."""
-    domain = _registrable_domain(url)
-    if not domain:
-        return set()
-    names = {_normalized_family(domain)}
-    leading = domain.split(".")[0]
-    if leading:
-        names.add(_normalized_family(leading))
-    return {name for name in names if name}
-
-
 def _normalize_number(raw):
     text = re.sub(r"[,  \s]", "", str(raw))
     if "." in text:
@@ -405,9 +386,9 @@ def _normalize_dates(text):
 def _scan_quantities(text):
     """Yield (display, claim_forms, evidence_forms, is_word) for a string.
 
-    Ledger IDs, URLs, and spelled-out numbers are handled deliberately:
-    identifiers and URLs never become obligations, and a spelled-out number
-    can satisfy a digit obligation but never creates one.
+    URLs and ledger IDs are ignored. Other identifiers, dates, versions, and
+    digit forms create obligations; spelled-out numbers can satisfy matching
+    digit obligations but never create obligations themselves.
     """
     working = _URL_RE.sub(" ", str(text or ""))
     working = _LEDGER_ID_RE.sub(" ", working)
@@ -943,19 +924,6 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
             "that the extract does not carry."
         )
     return errors
-
-
-def assertion_obligations(text):
-    """Return externally checkable assertions carried by one report unit."""
-    folded = _text(text).casefold()
-    obligations = [
-        f"quantity {display!r}"
-        for display, _ in quantitative_obligations(text)
-    ]
-    for label, pattern, _ in (*DIRECTION_ASSERTIONS, *STATUS_ASSERTIONS):
-        if _has_affirmative_match(pattern, folded):
-            obligations.append(label)
-    return obligations
 
 
 def _as_date(value):

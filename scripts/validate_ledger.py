@@ -342,6 +342,29 @@ _CJK_ABBREVIATED_TAIL_RE = re.compile(
 #: both worked examples ("三個漏洞", "十八個月"); broadening it is deferred.
 _CJK_COUNT_CLASSIFIERS = frozenset({"個", "个"})
 
+#: Measure units that open with a small-unit numeral character (千 = kilo-,
+#: 百 = hecto- or "per hundred"). These are the only places where a unit and a
+#: numeral share a character, so the scanner cannot see "五千瓦" as 5 kilowatts
+#: without knowing the unit exists -- and "三點五千瓦" looked like a bare
+#: decimal followed by unrecognized prose, which the classifier gate above then
+#: silenced, so a kilowatt reading asserted no figure at all.
+#:
+#: Deliberately an explicit list rather than a 千/百 rule: those characters are
+#: ordinary place values everywhere else ("五千戶" is 5,000 households, not
+#: 5 kilo-households), so only units known to carry the prefix may split.
+#: Simplified and traditional spellings both, since either script may appear.
+_CJK_COMPOUND_MEASURE_UNITS = tuple(
+    sorted(
+        (
+            "千瓦時", "千瓦时", "千瓦", "千米", "千克", "千噸", "千吨",
+            "千卡", "千字", "百分點", "百分点", "百公里", "百萬像素", "百万像素",
+        ),
+        key=len,
+        reverse=True,
+    )
+)
+_CJK_COMPOUND_UNIT_LOOKAHEAD = max(len(unit) for unit in _CJK_COMPOUND_MEASURE_UNITS)
+
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
 _LEDGER_ID_RE = re.compile(
     _NOT_WORD_BEFORE + r"[CS][0-9]{1,7}" + _NOT_WORD_AFTER
@@ -520,6 +543,30 @@ def _scaled_phrase_is_ambiguous(phrase):
         and len(phrase) > 1
         and phrase[1] in _CJK_SCALE_WORDS
     )
+
+
+def _cjk_compound_unit_split(span, tail):
+    """Split a known 千-/百-headed measure unit off a Han numeral run.
+
+    Returns (numeral, unit, absorbed) -- the part of the run that is actually a
+    figure, the unit that follows it, and whether the unit's leading 千/百 was
+    swallowed by the run -- or None when no known unit follows.
+
+    Two shapes occur, because the numeral pattern stops at a fractional digit
+    but is greedy over whole numbers. A decimal leaves the whole unit in the
+    tail ("三點五" + "千瓦"), and the figure is unambiguously the run itself:
+    3.5 kilowatts. A whole number swallows the unit's first character
+    ("五千" + "瓦"), and the split is genuinely ambiguous in writing -- 5 kW and
+    5,000 W are the same physical quantity written two ways -- so the caller
+    offers both readings instead of guessing, which still forces the claim to
+    find *a* figure in the evidence.
+    """
+    for unit in _CJK_COMPOUND_MEASURE_UNITS:
+        if tail.startswith(unit):
+            return span, unit, False
+        if span.endswith(unit[0]) and tail.startswith(unit[1:]):
+            return span[:-1], unit, True
+    return None
 
 
 def _scaled_number_forms(phrase):
@@ -845,6 +892,21 @@ def _scan_quantities(text):
                 return (span, set(), set(), True)
             forms = _scaled_number_forms(span)
             return (span, forms, set(forms), False)
+        # A 千-/百-headed measure unit is quantitative context in its own right,
+        # and it is the one place a unit and a numeral share a character (see
+        # _cjk_compound_unit_split). Both shapes reached the classifier gate
+        # below with an unrecognized unit character in the tail and asserted
+        # nothing, so "功率三點五千瓦" accepted any figure at all -- or none.
+        unit_split = _cjk_compound_unit_split(
+            span, working[match.end() : match.end() + _CJK_COMPOUND_UNIT_LOOKAHEAD]
+        )
+        if unit_split is not None and unit_split[0]:
+            numeral, unit, absorbed = unit_split
+            forms = {f"n:{_han_numeral_string(numeral)}"}
+            if absorbed:
+                forms.add(f"n:{_han_numeral_string(span)}")
+            display = span + (unit[1:] if absorbed else unit)
+            return (display, forms, set(forms), False)
         # No scale word: an ordinary count, gated on a following classifier
         # the same way "三個漏洞" and "十八個月" are in the brief. Bare "一" is
         # excluded unconditionally: it is Chinese's indefinite article

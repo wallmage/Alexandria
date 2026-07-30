@@ -2602,6 +2602,10 @@ class ChineseWordNumberScanTests(unittest.TestCase):
             ("十八萬", "十八万"),
             ("三點五萬", "三点五万"),
             ("3萬5千", "3万5千"),
+            ("三點五千瓦", "三点五千瓦"),
+            ("一點五百分點", "一点五百分点"),
+            ("五千噸", "五千吨"),
+            ("五千瓦時", "五千瓦时"),
         )
         for traditional, simplified in pairs:
             with self.subTest(traditional=traditional, simplified=simplified):
@@ -2609,6 +2613,127 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                     validate_ledger.quantitative_evidence(traditional),
                     validate_ledger.quantitative_evidence(simplified),
                 )
+
+    def test_han_decimal_before_a_compound_unit_is_an_evidence_obligation(self):
+        # 千 (kilo-) and 百 (per-hundred) head real measure units, and those are
+        # the only characters a unit and a numeral share. The numeral run
+        # stopped at its fractional digit, leaving "千瓦" as prose the scanner
+        # did not recognize, so the classifier gate silenced the figure: a
+        # claim of 三點五千瓦 asserted nothing and accepted any extract at all.
+        # A decimal settles the split, so exactly one reading is obligated.
+        for phrase, expected in (
+            ("功率三點五千瓦。", ("三點五千瓦", "3.5")),
+            ("距離兩點五千米。", ("兩點五千米", "2.5")),
+            ("重量一點二千克。", ("一點二千克", "1.2")),
+            ("增加一點五百分點。", ("一點五百分點", "1.5")),
+            ("時速三點五百公里。", ("三點五百公里", "3.5")),
+            ("能耗零點八千瓦時。", ("零點八千瓦時", "0.8")),
+            ("摄入一点五千卡。", ("一点五千卡", "1.5")),
+        ):
+            display, value = expected
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    [(display, {f"n:{value}"})],
+                    validate_ledger.quantitative_obligations(phrase),
+                )
+        for extract in ("實測功率為 3.5 千瓦。", "實測功率為三點五千瓦。"):
+            with self.subTest(extract=extract):
+                self.assertEqual(
+                    [],
+                    validate_ledger.evidence_coverage_errors(
+                        {
+                            "claim_id": "C920",
+                            "kind": "fact",
+                            "claim": "水泵組的功率為三點五千瓦。",
+                            "extract_or_location": extract,
+                        }
+                    ),
+                )
+        # The two rejections the silence used to allow: a fabricated figure at
+        # the unit's own scale (3,500 is watts, not the 3.5 the claim states)
+        # and an extract carrying no figure whatsoever.
+        for extract in ("實測功率為3500。", "本頁概述產品。"):
+            with self.subTest(extract=extract):
+                errors = validate_ledger.evidence_coverage_errors(
+                    {
+                        "claim_id": "C920",
+                        "kind": "fact",
+                        "claim": "水泵組的功率為三點五千瓦。",
+                        "extract_or_location": extract,
+                    }
+                )
+                self.assertTrue(any("quantity" in error for error in errors), errors)
+
+    def test_whole_number_before_a_compound_unit_offers_both_readings(self):
+        # Without a decimal the split is genuinely ambiguous in writing: 五千瓦
+        # is 五千 + 瓦 (5,000 watts) or 五 + 千瓦 (5 kilowatts), the same
+        # physical quantity written two ways. One token carrying both readings
+        # accepts a correct extract in either notation while still refusing an
+        # extract with no figure -- which is what the old silence allowed.
+        for phrase, expected in (
+            ("功率五千瓦。", ("五千瓦", {"n:5", "n:5000"})),
+            ("距離八千米。", ("八千米", {"n:8", "n:8000"})),
+            ("產量五千噸。", ("五千噸", {"n:5", "n:5000"})),
+            ("耗电五千瓦时。", ("五千瓦时", {"n:5", "n:5000"})),
+            ("摄入两千卡。", ("两千卡", {"n:2", "n:2000"})),
+        ):
+            display, forms = expected
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    [(display, forms)],
+                    validate_ledger.quantitative_obligations(phrase),
+                )
+        for extract in (
+            "銘牌標示 5 千瓦。",
+            "銘牌標示 5,000 瓦。",
+            "銘牌標示五千瓦。",
+        ):
+            with self.subTest(extract=extract):
+                self.assertEqual(
+                    [],
+                    validate_ledger.evidence_coverage_errors(
+                        {
+                            "claim_id": "C921",
+                            "kind": "fact",
+                            "claim": "水泵組的功率為五千瓦。",
+                            "extract_or_location": extract,
+                        }
+                    ),
+                )
+        for extract in ("銘牌標示 800 瓦。", "本頁概述產品。"):
+            with self.subTest(extract=extract):
+                errors = validate_ledger.evidence_coverage_errors(
+                    {
+                        "claim_id": "C921",
+                        "kind": "fact",
+                        "claim": "水泵組的功率為五千瓦。",
+                        "extract_or_location": extract,
+                    }
+                )
+                self.assertTrue(any("quantity" in error for error in errors), errors)
+
+    def test_compound_unit_split_leaves_plain_readings_alone(self):
+        # The split is confined to an explicit unit list, because 千/百 are
+        # ordinary place values everywhere else. Each phrase below must keep
+        # the reading it already had.
+        for phrase, expected in (
+            ("增加了1.5百分點。", [("1.5", {"n:1.5"})]),      # digit form
+            ("增加兩個百分點。", [("兩", {"n:2"})]),           # classifier count
+            ("四年升了七点四个百分点", [("七点四", {"n:7.4"})]),
+            ("營收三點五萬。", [("三點五萬", {"n:35000"})]),    # scale word
+            ("第二期覆蓋五千戶。", []),      # 千 as a place value: 5,000 households
+            ("消耗的千瓦電力較低。", []),     # a unit with no figure in front
+            ("漏损集中在哪几百米上。", []),   # 百米 is not on the list
+            ("油耗以每百公里計算。", []),
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    expected, validate_ledger.quantitative_obligations(phrase)
+                )
+        # And the idiom guards are untouched: none of these opens a unit.
+        for phrase in ("萬一", "千萬不要", "千萬分之一", "十分感謝", "第三次"):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
 
     def test_golden_ledgers_still_pass_with_han_numeral_scanning(self):
         for name in ("en", "zh-CN", "zh-HK"):

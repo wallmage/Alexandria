@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -291,7 +292,47 @@ _HAN_DECIMAL_DIGIT_CHARS = "".join(sorted(_HAN_DIGIT_VALUES))
 _HAN_DECIMAL_SUFFIX = (
     "(?:[" + _HAN_DECIMAL_MARKER_CHARS + "][" + _HAN_DECIMAL_DIGIT_CHARS + "]+)?"
 )
-_HAN_NUMBER_RE = re.compile("[" + _HAN_NUMERAL_CHARS + "]+" + _HAN_DECIMAL_SUFFIX)
+
+#: Scale words on their own, for the places a pattern needs to see one without
+#: the rest of the numeral vocabulary.
+_CJK_SCALE_CHARS = "".join(sorted(_CJK_SCALE_WORDS))
+
+#: A scale word may follow the decimal suffix: "三點五萬" is 35,000 the way
+#: "3.5萬" already is. Without this trailing group the numeral run ended at the
+#: fractional digit, the scale word was left to match as a run of its own, and
+#: that bare run then failed the leading-quantity guard below -- so a Han
+#: decimal magnitude asserted no figure at all.
+_HAN_NUMBER_RE = re.compile(
+    "[" + _HAN_NUMERAL_CHARS + "]+"
+    + _HAN_DECIMAL_SUFFIX
+    + "[" + _CJK_SCALE_CHARS + "]?"
+)
+
+#: A number written with digits for the leading group and Han for the rest
+#: ("3萬5千" = 35,000, "3萬" + "5千"). Scanned as one run before the digit
+#: scanner can take the "3萬" off the front and leave "5" behind as a second,
+#: unrelated figure. Only runs that mix the two scripts and carry material
+#: after their scale word are claimed here; "6800萬" and pure Han numerals
+#: stay with _NUMBER_RE and _HAN_NUMBER_RE respectively. The 之 exclusion
+#: keeps the percent and fraction markers ("百分之35") with the patterns that
+#: understand them.
+_CJK_MIXED_NUMBER_RE = re.compile(
+    _NOT_WORD_BEFORE + r"(?<![.,之])"
+    + r"(?:[0-9]|[" + _HAN_NUMERAL_CHARS + r"])+"
+)
+
+#: A run ending in bare digits after its scale word is an abbreviation: the
+#: trailing digits fill the places below the scale rather than the ones place,
+#: so "3萬5" is 35,000 (not 30,005) and "十八萬五" is 185,000. The reading is
+#: genuinely ambiguous in writing, so both are offered as acceptable forms
+#: (see _scaled_number_forms). An explicit 零/〇 placeholder settles it the
+#: other way ("十萬零一" is 100,001), so those are excluded from the tail.
+_CJK_ABBREVIATED_TAIL_RE = re.compile(
+    "([" + _CJK_SCALE_CHARS + "])"
+    + "((?:[0-9]|["
+    + "".join(sorted(set(_HAN_DIGIT_VALUES) - {chr(0x96F6), chr(0x3007)}))
+    + r"])+)$"
+)
 
 #: Chinese measure words gated as sufficient context for a spelled-out count,
 #: mirroring how English scans every spelled count ("three CVEs", "ten
@@ -380,11 +421,23 @@ def _han_phrase_value(phrase):
     pending digit within the current group ("十八" -> 1*10 + 8 = 18), and a
     scale word closes the group and adds it to the running total ("三千萬" ->
     (3*1000)*10000 = 30,000,000, "六億" -> 6*100,000,000).
+
+    A run of ASCII digits counts as one pending digit, so a phrase that writes
+    its leading group with digits and the rest in Han ("3萬5千") resolves as the
+    single number it denotes rather than as two.
     """
     total = 0
     group = 0
     current = None
-    for char in phrase:
+    pending = ""
+
+    for char in phrase + " ":
+        if "0" <= char <= "9":
+            pending += char
+            continue
+        if pending:
+            current = int(pending)
+            pending = ""
         if char in _HAN_DIGIT_VALUES:
             current = _HAN_DIGIT_VALUES[char]
         elif char in _HAN_SMALL_UNIT_VALUES:
@@ -397,6 +450,19 @@ def _han_phrase_value(phrase):
     return total + group + (current or 0)
 
 
+def _scaled_decimal_string(raw, scale):
+    """Multiply a decimal string by a scale word's factor exactly.
+
+    Decimal, not float: "零點八億" is 80,000,000, and 0.8 * 10**8 in binary
+    floating point is 80000000.00000001, which normalizes to a figure no
+    extract will ever carry.
+    """
+    value = Decimal(raw) * scale
+    if value == value.to_integral_value():
+        return str(int(value))
+    return format(value.normalize(), "f")
+
+
 def _han_numeral_string(phrase):
     """Return the normalized digit string a (possibly decimal) Han phrase denotes.
 
@@ -407,22 +473,76 @@ def _han_numeral_string(phrase):
     The result is passed through _normalize_number so a Han decimal and its
     digit-form equivalent land on the same key regardless of trailing zeros
     ("三十五點五零" and "35.50" both normalize to "35.5").
+
+    A scale word after the fractional digits multiplies the decimal, the way it
+    would in digit form: "三點五萬" is 35,000 exactly as "3.5萬" is. The two
+    machineries did not compose before, so a Han decimal magnitude asserted
+    nothing.
     """
     for marker in _HAN_DECIMAL_MARKER_CHARS:
         if marker in phrase:
-            whole, _, fraction = phrase.partition(marker)
-            fraction_digits = "".join(
-                str(_HAN_DIGIT_VALUES[char])
-                for char in fraction
-                if char in _HAN_DIGIT_VALUES
-            )
+            whole, _, rest = phrase.partition(marker)
+            fraction_digits = ""
+            scale = 1
+            for char in rest:
+                if char in _CJK_SCALE_WORDS:
+                    scale *= _CJK_SCALE_WORDS[char]
+                elif char in _HAN_DIGIT_VALUES and scale == 1:
+                    fraction_digits += str(_HAN_DIGIT_VALUES[char])
             raw = (
                 f"{_han_phrase_value(whole)}.{fraction_digits}"
                 if fraction_digits
                 else str(_han_phrase_value(whole))
             )
+            if scale != 1:
+                raw = _scaled_decimal_string(raw, scale)
             return _normalize_number(raw)
     return _normalize_number(str(_han_phrase_value(phrase)))
+
+
+def _scaled_phrase_is_ambiguous(phrase):
+    """True when a scaled phrase opens with an implied 1 rather than a figure.
+
+    "萬一" ("just in case") and the adverb "千萬" ("by all means") read as
+    10,000 and 10,000,000 only if the missing leading quantity is filled in the
+    way English fills it for a bare "a million". Chinese idiom makes that
+    reading wrong far too often, so a scaled figure has to carry its own
+    leading quantity. 十/百 count as one ("十八萬" is 180,000, "百萬" is a
+    million); it is specifically a phrase that opens *on* the scale word, or the
+    adverb 千萬/千億, that stays silent.
+    """
+    if not phrase:
+        return True
+    if phrase[0] in _CJK_SCALE_WORDS:
+        return True
+    return (
+        phrase[0] == chr(0x5343)
+        and len(phrase) > 1
+        and phrase[1] in _CJK_SCALE_WORDS
+    )
+
+
+def _scaled_number_forms(phrase):
+    """Acceptable digit forms for one scaled number run.
+
+    Normally the single value the run denotes. A run ending in bare digits
+    after its scale word is ambiguous in writing -- "3萬5" is 35,000 read as an
+    abbreviation and 30,005 read strictly by place value -- so both readings are
+    offered: the run still has to find *a* matching figure in the evidence, but
+    a correct extract is not rejected over a reading the writer did not intend.
+    """
+    forms = {f"n:{_han_numeral_string(phrase)}"}
+    match = _CJK_ABBREVIATED_TAIL_RE.search(phrase)
+    if match:
+        digits = "".join(
+            str(_HAN_DIGIT_VALUES[char]) if char in _HAN_DIGIT_VALUES else char
+            for char in match.group(2)
+        )
+        place = _CJK_SCALE_WORDS[match.group(1)] // 10 ** len(digits)
+        if place:
+            head = _han_phrase_value(phrase[: match.start(2)])
+            forms.add(f"n:{head + int(digits) * place}")
+    return forms
 
 
 #: Historical vocabulary from the retired magnitude-specific word-number
@@ -692,6 +812,27 @@ def _scan_quantities(text):
         forms = {f"n:{value}"}
         return (match.group(0), forms, set(forms), False)
 
+    def mixed_number(match):
+        # "3萬5千" is one number (35,000). Left to _NUMBER_RE it lost its tail:
+        # the scan asserted 30,000 and a separate 5, which rejected the correct
+        # "35,000" and passed a fabricated extract carrying "30000" and "5".
+        span = match.group(0)
+        if not any("0" <= char <= "9" for char in span):
+            return None  # pure Han: _HAN_NUMBER_RE's job
+        scale_at = next(
+            (index for index, char in enumerate(span) if char in _CJK_SCALE_WORDS),
+            None,
+        )
+        if scale_at is None or scale_at == len(span) - 1:
+            # No scale word, or nothing after it ("6800萬"): _NUMBER_RE already
+            # reads those correctly, including the "6800 萬" spaced form it
+            # accepts and this contiguous run cannot see.
+            return None
+        if _scaled_phrase_is_ambiguous(span):
+            return None
+        forms = _scaled_number_forms(span)
+        return (span, forms, set(forms), False)
+
     def han_number(match):
         span = match.group(0)
         if any(char in _CJK_SCALE_WORDS for char in span):
@@ -699,10 +840,10 @@ def _scan_quantities(text):
             # implied 1 the way a bare "million" would in English ("Revenue
             # reached a million dollars"); unlike English, that implied 1
             # collides with real idioms, so a scaled figure needs a leading
-            # digit that already makes it unambiguous ("三千萬", "六億").
-            if span[0] not in _HAN_DIGIT_VALUES:
+            # quantity of its own ("三千萬", "十八萬", "六億").
+            if _scaled_phrase_is_ambiguous(span):
                 return (span, set(), set(), True)
-            forms = {f"n:{_han_numeral_string(span)}"}
+            forms = _scaled_number_forms(span)
             return (span, forms, set(forms), False)
         # No scale word: an ordinary count, gated on a following classifier
         # the same way "三個漏洞" and "十八個月" are in the brief. Bare "一" is
@@ -721,6 +862,7 @@ def _scan_quantities(text):
     take(_ISO_DATE_RE, iso_date)
     take(_ISO_MONTH_RE, iso_month)
     take(_VERSION_RE, version)
+    take(_CJK_MIXED_NUMBER_RE, mixed_number)
     take(_NUMBER_RE, number)
     take(_WORD_NUMBER_RE, word_number)
     take(_CJK_ORDINAL_RE, han_ordinal)

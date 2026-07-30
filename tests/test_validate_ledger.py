@@ -2270,6 +2270,172 @@ class ChineseWordNumberScanTests(unittest.TestCase):
             )
         )
 
+    def test_ten_leading_scale_magnitude_is_an_evidence_obligation(self):
+        # 十 supplies a leading quantity of its own ("十八萬" is 1*10 + 8, then
+        # times 10,000), so these are figures exactly as "三千萬" is. The guard
+        # for "萬一"/"千萬" demanded a bare *digit* at the head, and 十 is a
+        # place-value unit rather than a digit -- so every 十-leading magnitude
+        # walked past the whole check with no obligation at all.
+        for phrase, expected in (
+            ("十萬", 100_000),
+            ("十八萬", 180_000),
+            ("二十五萬", 250_000),
+            ("十五億", 1_500_000_000),
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    {f"n:{expected}"},
+                    validate_ledger.quantitative_evidence(phrase),
+                )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C906",
+                    "kind": "fact",
+                    "claim": "全區已安裝十八萬個智慧水錶。",
+                    "extract_or_location": "全區已安裝180,000個智慧水錶。",
+                }
+            ),
+        )
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C906",
+                "kind": "fact",
+                "claim": "全區已安裝十八萬個智慧水錶。",
+                "extract_or_location": "全區已安裝18,000個智慧水錶。",
+            }
+        )
+        self.assertTrue(any("quantity" in error for error in errors), errors)
+
+    def test_han_decimal_before_a_scale_word_is_an_evidence_obligation(self):
+        # The decimal machinery (點/点) and the scale machinery have to compose:
+        # "三點五萬" is 35,000 exactly as "3.5萬" is. They did not, so the
+        # numeral run stopped at the fractional digit, the scale word was left
+        # to match alone, and a Han decimal magnitude asserted nothing.
+        for phrase, expected in (
+            ("三點五萬", 35_000),
+            ("三点五万", 35_000),
+            ("零點八億", 80_000_000),
+            ("一點二五億", 125_000_000),
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    {f"n:{expected}"},
+                    validate_ledger.quantitative_evidence(phrase),
+                )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C907",
+                    "kind": "fact",
+                    "claim": "本期損失三點五萬元。",
+                    "extract_or_location": "本期損失35,000元。",
+                }
+            ),
+        )
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C907",
+                "kind": "fact",
+                "claim": "本期損失三點五萬元。",
+                "extract_or_location": "本期損失3.5元。",
+            }
+        )
+        self.assertTrue(any("quantity" in error for error in errors), errors)
+
+    def test_mixed_digit_and_han_compound_is_one_number(self):
+        # "3萬5千" is 35,000. The digit scanner took "3萬" off the front and
+        # left "5" behind, so the claim asserted 30,000 *and* 5: it rejected its
+        # own correct evidence ("35,000件") and accepted a fabricated extract
+        # that merely carried 30000 and 5 somewhere.
+        for phrase, expected in (
+            ("3萬5千", 35_000),
+            ("5萬3千", 53_000),
+            ("1萬2千3百", 12_300),
+            ("三萬5千", 35_000),
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    [(phrase, {f"n:{expected}"})],
+                    validate_ledger.quantitative_obligations(phrase),
+                )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C908",
+                    "kind": "fact",
+                    "claim": "庫存達3萬5千件。",
+                    "extract_or_location": "庫存為35,000件。",
+                }
+            ),
+        )
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C908",
+                "kind": "fact",
+                "claim": "庫存達3萬5千件。",
+                "extract_or_location": "庫存為30000件，另有5件待驗。",
+            }
+        )
+        self.assertTrue(any("quantity" in error for error in errors), errors)
+
+    def test_an_abbreviated_compound_offers_both_readings(self):
+        # Bare digits after a scale word are genuinely ambiguous in writing:
+        # "3萬5" is 35,000 read as an abbreviation and 30,005 read strictly by
+        # place value. One token carrying both readings keeps the obligation
+        # alive without rejecting a correct extract over the reading the writer
+        # did not intend -- unlike the two wrong tokens this used to produce.
+        self.assertEqual(
+            {"n:35000", "n:30005"},
+            validate_ledger.quantitative_evidence("3萬5"),
+        )
+        self.assertEqual(
+            {"n:185000", "n:180005"},
+            validate_ledger.quantitative_evidence("十八萬五"),
+        )
+        # An explicit 零 placeholder settles the reading: 十萬零一 is 100,001.
+        self.assertEqual(
+            {"n:100001"},
+            validate_ledger.quantitative_evidence("十萬零一"),
+        )
+        obligations = validate_ledger.quantitative_obligations("庫存達3萬5件。")
+        self.assertEqual(["3萬5"], [display for display, _ in obligations])
+        for extract in ("庫存為35,000件。", "庫存為30,005件。"):
+            with self.subTest(extract=extract):
+                self.assertEqual(
+                    [],
+                    validate_ledger.evidence_coverage_errors(
+                        {
+                            "claim_id": "C909",
+                            "kind": "fact",
+                            "claim": "庫存達3萬5件。",
+                            "extract_or_location": extract,
+                        }
+                    ),
+                )
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C909",
+                "kind": "fact",
+                "claim": "庫存達3萬5件。",
+                "extract_or_location": "庫存為30000件。",
+            }
+        )
+        self.assertTrue(any("quantity" in error for error in errors), errors)
+
+    def test_a_scale_word_without_a_leading_quantity_stays_silent(self):
+        # The counterpart to the 十-leading fix: opening *on* the scale word,
+        # or the adverb 千萬, still creates nothing, mixed scripts included.
+        for phrase in ("萬一", "千萬", "億", "萬五千"):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
+        # Mixed scripts take the same exit: the digit is read as a digit, the
+        # way English reads a bare "5", and no scaled figure is invented for it.
+        self.assertEqual({"n:5"}, validate_ledger.quantitative_evidence("萬5千"))
+
     def test_han_scale_word_matches_the_digit_form_and_vice_versa(self):
         self.assertEqual(
             [],
@@ -2433,6 +2599,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
             ("六億", "六亿"),
             ("兩個漏洞", "两个漏洞"),
             ("十萬零一", "十万零一"),
+            ("十八萬", "十八万"),
+            ("三點五萬", "三点五万"),
+            ("3萬5千", "3万5千"),
         )
         for traditional, simplified in pairs:
             with self.subTest(traditional=traditional, simplified=simplified):

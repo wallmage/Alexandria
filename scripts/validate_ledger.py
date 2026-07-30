@@ -255,6 +255,52 @@ _CJK_SCALE_WORDS = {
     "億": 100000000, "亿": 100000000,
 }
 
+#: Han digits used inside a spelled-out Chinese number. 兩/两 ("two" before a
+#: classifier or a unit, as in "兩個"/"兩億") folds into the same value as 二:
+#: nothing here needs the grammatical distinction, only the figure.
+_HAN_DIGIT_VALUES = {
+    "零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "两": 2,
+    "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}
+
+#: 十/百/千 multiply the pending digit the way "hundred" does in
+#: _word_phrase_value: "十八" is 1*10 + 8, not two unrelated numbers. Standing
+#: alone at the head of a phrase they denote one unit of themselves ("十萬"
+#: opens at 1*10), mirroring _word_phrase_value's `current if current else 1`.
+_HAN_SMALL_UNIT_VALUES = {"十": 10, "百": 100, "千": 1000}
+
+#: Every character a Han numeral phrase can be built from, for use inside a
+#: character class. Kept as one set so _HAN_NUMBER_RE and the ordinal,
+#: percent, fraction, and cheng patterns below all recognize the same span.
+_HAN_NUMERAL_CHARS = "".join(
+    sorted(
+        set(_HAN_DIGIT_VALUES) | set(_HAN_SMALL_UNIT_VALUES) | set(_CJK_SCALE_WORDS)
+    )
+)
+
+#: The decimal-point marker ("三十五點五" = 35.5, "零點八" = 0.8). Unlike a
+#: whole-number phrase, every digit after it is read one at a time rather
+#: than multiplied by a place-value unit ("點五" is .5, not 十/百/千/萬/億
+#: acting on 五), so the suffix only ever admits bare digit characters. Kept
+#: out of _HAN_NUMERAL_CHARS itself: folding 點/点 into the base character
+#: class would let it stand alone (as in "兩點到四點" = "two o'clock to four
+#: o'clock"), so it is only recognized as a suffix directly after a numeral
+#: run and only when at least one digit follows it.
+_HAN_DECIMAL_MARKER_CHARS = chr(0x9EDE) + chr(0x70B9)
+_HAN_DECIMAL_DIGIT_CHARS = "".join(sorted(_HAN_DIGIT_VALUES))
+_HAN_DECIMAL_SUFFIX = (
+    "(?:[" + _HAN_DECIMAL_MARKER_CHARS + "][" + _HAN_DECIMAL_DIGIT_CHARS + "]+)?"
+)
+_HAN_NUMBER_RE = re.compile("[" + _HAN_NUMERAL_CHARS + "]+" + _HAN_DECIMAL_SUFFIX)
+
+#: Chinese measure words gated as sufficient context for a spelled-out count,
+#: mirroring how English scans every spelled count ("three CVEs", "ten
+#: engineers") but Chinese numerals are far more idiomatic outside a numeric
+#: context ("一起", "一些", "二手", "十分"): requiring a classifier keeps those
+#: silent without a stoplist. Deliberately narrow to 個/个, the classifier in
+#: both worked examples ("三個漏洞", "十八個月"); broadening it is deferred.
+_CJK_COUNT_CLASSIFIERS = frozenset({"個", "个"})
+
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
 _LEDGER_ID_RE = re.compile(
     _NOT_WORD_BEFORE + r"[CS][0-9]{1,7}" + _NOT_WORD_AFTER
@@ -326,6 +372,59 @@ def _word_phrase_value(phrase):
     # a key: the digit scanner emits n:1, never n:1.0.
     return int(value) if float(value).is_integer() else value
 
+def _han_phrase_value(phrase):
+    """Assemble a Han-numeral phrase into the value it denotes.
+
+    Mirrors _word_phrase_value's grouping, but Chinese groups by 10,000
+    (萬/万) and 100,000,000 (億/亿) rather than by 1,000: 十/百/千 multiply the
+    pending digit within the current group ("十八" -> 1*10 + 8 = 18), and a
+    scale word closes the group and adds it to the running total ("三千萬" ->
+    (3*1000)*10000 = 30,000,000, "六億" -> 6*100,000,000).
+    """
+    total = 0
+    group = 0
+    current = None
+    for char in phrase:
+        if char in _HAN_DIGIT_VALUES:
+            current = _HAN_DIGIT_VALUES[char]
+        elif char in _HAN_SMALL_UNIT_VALUES:
+            group += (current if current is not None else 1) * _HAN_SMALL_UNIT_VALUES[char]
+            current = None
+        elif char in _CJK_SCALE_WORDS:
+            total += (group + (current or 0)) * _CJK_SCALE_WORDS[char]
+            group = 0
+            current = None
+    return total + group + (current or 0)
+
+
+def _han_numeral_string(phrase):
+    """Return the normalized digit string a (possibly decimal) Han phrase denotes.
+
+    A 點/点 marker splits the phrase into a whole part, resolved the normal
+    way through _han_phrase_value, and a fractional part read digit-by-digit
+    ("三十五點五" -> whole 35, fraction "5" -> "35.5"; "零點八" -> "0.8"), never
+    through a place-value unit: "點五" is always .5, not 十/百/千 acting on 五.
+    The result is passed through _normalize_number so a Han decimal and its
+    digit-form equivalent land on the same key regardless of trailing zeros
+    ("三十五點五零" and "35.50" both normalize to "35.5").
+    """
+    for marker in _HAN_DECIMAL_MARKER_CHARS:
+        if marker in phrase:
+            whole, _, fraction = phrase.partition(marker)
+            fraction_digits = "".join(
+                str(_HAN_DIGIT_VALUES[char])
+                for char in fraction
+                if char in _HAN_DIGIT_VALUES
+            )
+            raw = (
+                f"{_han_phrase_value(whole)}.{fraction_digits}"
+                if fraction_digits
+                else str(_han_phrase_value(whole))
+            )
+            return _normalize_number(raw)
+    return _normalize_number(str(_han_phrase_value(phrase)))
+
+
 #: Historical vocabulary from the retired magnitude-specific word-number
 #: check. Spelled-out counts create obligations equivalent to their digit
 #: forms; vague number-like words such as "dozens" do not.
@@ -361,6 +460,47 @@ _FRACTION_WORD_RE = re.compile(
     r"[\s\u00a0\u202f-]*(?:halves|halfs?|thirds?|quarters?|fifths?|sixths?"
     r"|sevenths?|eighths?|ninths?|tenths?)\b",
     re.IGNORECASE,
+)
+
+#: Ordinal marker: a position, not a figure. English gets this exclusion for
+#: free only incidentally, when an ordinal-unit word follows "the" (see
+#: word_number's _UNIT_CONTEXT_RE check); the Chinese marker character is
+#: unambiguous, so it is excluded outright and matched first, before anything
+#: below can see the numeral that follows it.
+_CJK_ORDINAL_MARKER = chr(0x7B2C)
+_CJK_ORDINAL_RE = re.compile(re.escape(_CJK_ORDINAL_MARKER) + "[" + _HAN_NUMERAL_CHARS + "]+")
+
+#: Percent marker (literally "out of a hundred, ..."): a figure exactly the
+#: way "12%" is. Matched and blanked before _CJK_FRACTION_RE below, because
+#: the percent marker itself contains the fraction pattern's connector
+#: substring, and would otherwise parse as a fraction over 100 and lose its
+#: obligation entirely. The captured group admits the decimal suffix so
+#: "百分之三十五點五" resolves to 35.5, not a truncated 35.
+_CJK_PERCENT_MARKER = chr(0x767E) + chr(0x5206) + chr(0x4E4B)
+_CJK_PERCENT_RE = re.compile(
+    re.escape(_CJK_PERCENT_MARKER)
+    + "([" + _HAN_NUMERAL_CHARS + "]+" + _HAN_DECIMAL_SUFFIX + ")"
+)
+
+#: A bare "X <connector> Y" is a proportion ("three-connector-two" = 2/3),
+#: mirroring _FRACTION_WORD_RE's exclusion of "two-thirds": emitting either
+#: side matched the wrong value in an extract, so it asserts no figure at all.
+_CJK_FRACTION_CONNECTOR = chr(0x5206) + chr(0x4E4B)
+_CJK_FRACTION_RE = re.compile(
+    "[" + _HAN_NUMERAL_CHARS + "]+"
+    + re.escape(_CJK_FRACTION_CONNECTOR)
+    + "[" + _HAN_NUMERAL_CHARS + "]+"
+)
+
+#: The cheng ("tenths") percent marker: "six-cheng-eight" is 68%, cheng being
+#: tenths, so a trailing digit after it is read as ones (6*10 + 8); "three
+#: cheng" alone is 30%. The leading digit also admits "ten" ("ten-cheng" =
+#: 100%); the trailing one is a bare 0-9 digit, never a unit.
+_CJK_CHENG_MARKER = chr(0x6210)
+_CJK_CHENG_RE = re.compile(
+    "([" + "".join(sorted(set(_HAN_DIGIT_VALUES) | {chr(0x5341)})) + "])"
+    + re.escape(_CJK_CHENG_MARKER)
+    + "([" + "".join(sorted(_HAN_DIGIT_VALUES)) + "])?"
 )
 
 _MONTH_NAME_DATE_RE = re.compile(
@@ -535,12 +675,59 @@ def _scan_quantities(text):
             False,
         )
 
+    def han_ordinal(match):
+        return (match.group(0), set(), set(), True)
+
+    def han_percent(match):
+        forms = {f"n:{_han_numeral_string(match.group(1))}"}
+        return (match.group(0), forms, set(forms), False)
+
+    def han_fraction(match):
+        return (match.group(0), set(), set(), True)
+
+    def han_cheng(match):
+        value = _han_phrase_value(match.group(1)) * 10 + (
+            _HAN_DIGIT_VALUES[match.group(2)] if match.group(2) else 0
+        )
+        forms = {f"n:{value}"}
+        return (match.group(0), forms, set(forms), False)
+
+    def han_number(match):
+        span = match.group(0)
+        if any(char in _CJK_SCALE_WORDS for char in span):
+            # "萬一" and the adverb "千萬" ("by all means") open with an
+            # implied 1 the way a bare "million" would in English ("Revenue
+            # reached a million dollars"); unlike English, that implied 1
+            # collides with real idioms, so a scaled figure needs a leading
+            # digit that already makes it unambiguous ("三千萬", "六億").
+            if span[0] not in _HAN_DIGIT_VALUES:
+                return (span, set(), set(), True)
+            forms = {f"n:{_han_numeral_string(span)}"}
+            return (span, forms, set(forms), False)
+        # No scale word: an ordinary count, gated on a following classifier
+        # the same way "三個漏洞" and "十八個月" are in the brief. Bare "一" is
+        # excluded unconditionally: it is Chinese's indefinite article
+        # ("一個" = "a", not "1"), a role English gives to a separate word
+        # ("a"/"an") that never appears in _NUMBER_WORDS.
+        if span == "一":
+            return (span, set(), set(), True)
+        tail = working[match.end() : match.end() + 1]
+        if tail not in _CJK_COUNT_CLASSIFIERS:
+            return (span, set(), set(), True)
+        forms = {f"n:{_han_numeral_string(span)}"}
+        return (span, forms, set(forms), False)
+
     take(_IDENTIFIER_RE, identifier)
     take(_ISO_DATE_RE, iso_date)
     take(_ISO_MONTH_RE, iso_month)
     take(_VERSION_RE, version)
     take(_NUMBER_RE, number)
     take(_WORD_NUMBER_RE, word_number)
+    take(_CJK_ORDINAL_RE, han_ordinal)
+    take(_CJK_PERCENT_RE, han_percent)
+    take(_CJK_FRACTION_RE, han_fraction)
+    take(_CJK_CHENG_RE, han_cheng)
+    take(_HAN_NUMBER_RE, han_number)
     return tokens
 
 
@@ -716,6 +903,26 @@ _ASSERTION_MEASURE_WORDS = {
     "trillion", "bn", "mn",
 }
 
+#: The Latin-script carrier branch above already drops English number and
+#: measure words before comparing subjects; the CJK-bigram fallback needs the
+#: same exclusion; otherwise a spelled-out Chinese figure ("百分之三十五") is
+#: pure CJK and reads as carrier vocabulary in its own right, while the same
+#: figure in digit form ("35%") contributes nothing to the fallback's
+#: `[㐀-鿿]` scan. Two claim/evidence pairs that state the same
+#: figure in different notation then compare a numeral-bigram carrier against
+#: an unrelated preamble ("報告稱") and never overlap. Excluding every
+#: character _scan_quantities treats as part of a Chinese number keeps the
+#: fallback comparing actual subject words on both sides, matching how a
+#: digit-form figure was already excluded for free.
+_CJK_CARRIER_NOISE_CHARS = frozenset(
+    _HAN_NUMERAL_CHARS
+    + _CJK_ORDINAL_MARKER
+    + _CJK_PERCENT_MARKER
+    + _CJK_FRACTION_CONNECTOR
+    + _CJK_CHENG_MARKER
+    + _HAN_DECIMAL_MARKER_CHARS
+)
+
 
 def _assertion_match_is_affirmative(text, match):
     """Reject denied assertions and status words used only as proposal nouns."""
@@ -780,7 +987,11 @@ def _assertion_carrier_tokens(text, match):
     }
     if words:
         return words
-    cjk = "".join(re.findall(r"[\u3400-\u9fff]", sentence))
+    cjk = "".join(
+        char
+        for char in re.findall(r"[\u3400-\u9fff]", sentence)
+        if char not in _CJK_CARRIER_NOISE_CHARS
+    )
     return {
         cjk[index : index + 2]
         for index in range(max(0, len(cjk) - 1))

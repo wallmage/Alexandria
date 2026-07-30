@@ -724,6 +724,16 @@ def trim_summary(value, limit=145):
     return f"{shortened}…"
 
 
+# The plain contents page (executive, spectrum, atlas, and any template that
+# falls through to the default layout) carries no per-page marker or chrome,
+# so it fits more one-line entries per sheet than the decorated templates'
+# twelve. Sixteen is the largest count observed to render on one 245mm page
+# with the base .toc-entry sizing across those templates; past that the list
+# must split across balanced, separately headed pages instead of overflowing
+# onto an unlabeled one.
+DEFAULT_TOC_MAX_PER_PAGE = 16
+
+
 def balanced_toc_chunks(items, max_per_page):
     """Split TOC entries into evenly filled pages.
 
@@ -771,21 +781,24 @@ def build_toc_html(html_body, lang="en", template="executive"):
             "Contents",
             "A clear map of the report’s argument, evidence, and conclusions.",
             "Analysis, evidence, and implications.",
+            "Contents / continued",
         ),
         "zh-CN": (
             "报告导航",
             "目录",
             "按章节查看报告的论点、证据与结论。",
             "本章的分析、证据与启示。",
+            "目录 / 续",
         ),
         "zh-HK": (
             "報告導航",
             "目錄",
             "按章節查看報告的論點、證據與結論。",
             "本章的分析、證據與啟示。",
+            "目錄 / 續",
         ),
     }[lang]
-    kicker, toc_title, toc_intro, _fallback_summary = labels
+    kicker, toc_title, toc_intro, _fallback_summary, toc_continued = labels
 
     items = []
     for item_index, match in enumerate(sections, 1):
@@ -1018,14 +1031,32 @@ def build_toc_html(html_body, lang="en", template="executive"):
             )
         return "".join(pages)
 
-    return (
-        '<section class="toc-page">'
-        f'<div class="toc-kicker">{html.escape(kicker)}</div>'
-        f'<h2 class="toc-title">{html.escape(toc_title)}</h2>'
-        f'<p class="toc-intro">{html.escape(toc_intro)}</p>'
-        f'<div class="toc-list">{"".join(items)}</div>'
-        "</section>"
-    )
+    # A report with enough H2 sections outgrows a single sheet. Left to CSS
+    # overflow, the tail of the list spills onto a following page that carries
+    # no heading at all, and that unlabeled page reads as near-blank to the
+    # quality gate (and looks broken to a reader). Pre-splitting into balanced,
+    # separately headed pages -- the same fix already applied to the decorated
+    # and horizon templates below -- keeps every contents page self-labeled.
+    chunks = balanced_toc_chunks(items, DEFAULT_TOC_MAX_PER_PAGE)
+    pages = []
+    for page_index, chunk in enumerate(chunks):
+        is_first = page_index == 0
+        title_text = toc_title if is_first else toc_continued
+        pages.append(
+            '<section class="toc-page'
+            + ("" if is_first else " toc-cont")
+            + '">'
+            f'<div class="toc-kicker">{html.escape(kicker)}</div>'
+            f'<h2 class="toc-title">{html.escape(title_text)}</h2>'
+            + (
+                f'<p class="toc-intro">{html.escape(toc_intro)}</p>'
+                if is_first
+                else ""
+            )
+            + f'<div class="toc-list">{"".join(chunk)}</div>'
+            + "</section>"
+        )
+    return "".join(pages)
 
 
 # Longest card the opener's overlapping dark panel can carry without pushing

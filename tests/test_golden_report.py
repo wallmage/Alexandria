@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts import md_to_pdf, validate_report  # noqa: E402
+from scripts import md_to_pdf, pdf_quality, validate_report  # noqa: E402
 from scripts.content_gate import run_content_gate  # noqa: E402
 from scripts.gate_severity import hard_errors  # noqa: E402
 from scripts.report_contract import localized_date  # noqa: E402
@@ -276,6 +276,194 @@ class GoldenReportPipelineTests(unittest.TestCase):
         for case in available_cases():
             with self.subTest(lang=case["lang"]):
                 self._run_case(case, schema)
+
+    def test_a_long_contents_list_paginates_without_a_blank_page(self):
+        """A report with many H2 sections must not spill an unlabeled,
+        near-blank continuation page off the back of the contents list.
+
+        Reducing the golden English fixture to 14 H2 sections previously
+        worked around this: at ~20 sections the single, unchunked contents
+        block overflowed onto a following page that carried a handful of
+        leftover entries and no heading, which the PDF quality gate correctly
+        flagged as near-blank. The fix paginates the contents list into
+        balanced, separately headed pages before it ever reaches layout, so a
+        legitimately long report must render clean.
+        """
+        case = next(case for case in CASES if case["name"] == "en")
+        case_root = GOLDEN_ROOT / case["name"]
+        if not (case_root / "report.md").is_file():
+            self.skipTest("English golden fixture is not checked in.")
+        schema = json.loads(DEFAULT_SCHEMA.read_text(encoding="utf-8"))
+
+        report_text = (case_root / "report.md").read_text(encoding="utf-8")
+        # Every H3 in the fixture is a subsection of some H2; promoting them
+        # all turns the golden report's 14 H2 sections into 20, reproducing
+        # the section count that triggered the defect, without inventing new
+        # prose that would need its own ledger and fidelity coverage.
+        many_sections_text = re.sub(r"(?m)^### ", "## ", report_text)
+        h2_count = len(re.findall(r"(?m)^## ", many_sections_text))
+        self.assertGreaterEqual(
+            h2_count, 20, "fixture no longer promotes to enough H2 sections"
+        )
+
+        pdf = self._render_case_with_report_text(
+            case, schema, many_sections_text
+        )
+
+        findings, _ = pdf_quality.check_pdf(pdf)
+        self.assertEqual(
+            [],
+            [f.format() for f in findings if f.severity == "error"],
+            "a long contents list must render with zero hard PDF findings",
+        )
+        near_blank = [
+            f for f in findings if f.check in ("blank_page", "sparse_page")
+        ]
+        self.assertEqual(
+            [],
+            [f.format() for f in near_blank],
+            "the contents continuation page must not read as near-blank",
+        )
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(pdf))
+        contents_pages = [
+            page
+            for page in reader.pages[:4]
+            if "contents" in (page.extract_text() or "").casefold()
+        ]
+        self.assertGreaterEqual(
+            len(contents_pages),
+            2,
+            "expected the contents list to span more than one labeled page",
+        )
+
+    def _render_case_with_report_text(self, case, schema, report_text):
+        """Run the full delivery pipeline for ``case`` against ``report_text``
+        instead of the checked-in fixture text, and return the rendered PDF
+        path (inside a directory the caller's test owns via ``addCleanup``).
+        """
+        case_root = GOLDEN_ROOT / case["name"]
+        ledger = case_root / "ledger.json"
+        ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [],
+            validate_schema(ledger_data, schema)
+            + validate_references(ledger_data),
+        )
+        report_day = date.fromisoformat(ledger_data["report_date"])
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        work = Path(directory.name)
+        report = work / "report.md"
+        report.write_text(report_text, encoding="utf-8")
+        source = work / "pre-rewild.md"
+        blind_review = work / "blind-review.json"
+        rewild_receipt = work / "rewild-receipt.json"
+        source_receipt = work / "source-fidelity-receipt.json"
+        content_review = work / "content-review.json"
+        content_receipt = work / "content-receipt.json"
+        pdf = work / "report.pdf"
+
+        final_text, source_text = case["rewrite"]
+        self.assertIn(final_text, report_text)
+        source.write_text(
+            report_text.replace(final_text, source_text, 1),
+            encoding="utf-8",
+        )
+        blind_review_note(blind_review, report=report, source=source, case=case)
+
+        with mock_production_transport(transport_responses(ledger_data)):
+            self.assertEqual(
+                [],
+                hard_errors(
+                    run_gate(
+                        report,
+                        source,
+                        report_lang=case["lang"],
+                        review_note_path=blind_review,
+                        receipt_path=rewild_receipt,
+                    )
+                ),
+            )
+
+            issue_source_fidelity_receipt(ledger, source_receipt, now=report_day)
+
+            content_review_note(
+                content_review,
+                report=report,
+                ledger_path=ledger,
+                report_text=report_text,
+                case=case,
+            )
+            self.assertEqual(
+                [],
+                hard_errors(
+                    run_content_gate(
+                        report,
+                        ledger,
+                        content_review,
+                        content_receipt,
+                        source_fidelity_receipt_path=source_receipt,
+                    )
+                ),
+            )
+
+            receipt_flags = [
+                "--ledger",
+                str(ledger),
+                "--rewild-receipt",
+                str(rewild_receipt),
+                "--source-fidelity-receipt",
+                str(source_receipt),
+                "--content-receipt",
+                str(content_receipt),
+                "--expected-lang",
+                case["lang"],
+                "--min-sections",
+                "3",
+                "--min-sources",
+                "1",
+                *case["length_flags"],
+            ]
+
+            self.assertEqual(
+                0, validate_report.main([str(report), *receipt_flags])
+            )
+
+            md_to_pdf.render_pdf(
+                report,
+                pdf,
+                lang=case["lang"],
+                template="executive",
+                rewild_receipt=rewild_receipt,
+                ledger=ledger,
+                source_fidelity_receipt=source_receipt,
+                content_receipt=content_receipt,
+                report_date=localized_date(case["lang"], report_day),
+            )
+            self.assertTrue(pdf.is_file())
+
+            self.assertEqual(
+                0,
+                validate_report.main(
+                    [
+                        str(report),
+                        *receipt_flags,
+                        "--pdf",
+                        str(pdf),
+                        "--min-pages",
+                        "10",
+                        "--min-links",
+                        "1",
+                        "--min-text-chars",
+                        case["min_text_chars"],
+                    ]
+                ),
+            )
+        return pdf
 
     def _run_case(self, case, schema):
         case_root = GOLDEN_ROOT / case["name"]

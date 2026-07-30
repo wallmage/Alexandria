@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -2116,6 +2117,423 @@ class ChineseQuantityScanTests(unittest.TestCase):
             )
             with self.subTest(ledger=name):
                 self.assertEqual([], validate_ledger.validate_references(ledger))
+
+
+class ChineseWordNumberScanTests(unittest.TestCase):
+    """Han-numeral word forms, checked with English word-numbers as parity.
+
+    English spells a count or a magnitude the same way ("three CVEs", "fifty
+    percent") and scans both, excluding only ordinal-in-unit-context and
+    fraction words. Chinese numerals double as grammatical filler far more
+    often ("一起", "十分", "萬一"), so the same "scan everything" rule would
+    manufacture obligations out of ordinary prose. Each test below either
+    mirrors an English behavior directly or documents the narrower,
+    context-gated substitute and why it is narrower.
+    """
+
+    def test_han_percent_is_an_evidence_obligation(self):
+        # "百分之十二" is 12%, exactly as "12%" is: satisfiable by a digit
+        # extract and vice versa, symmetric like every other quantity form.
+        self.assertEqual({"n:12"}, validate_ledger.quantitative_evidence("百分之十二"))
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "违约率达百分之十二。",
+                    "extract_or_location": "违约率为12%。",
+                }
+            ),
+        )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "违约率达12%。",
+                    "extract_or_location": "违约率为百分之十二。",
+                }
+            ),
+        )
+
+    def test_han_percent_decimal_is_an_evidence_obligation(self):
+        # 點/点 is the decimal point; every digit after it is read on its own
+        # ("三十五點五" -> 35.5, "零點八" -> 0.8), never through a place-value
+        # unit. Before this, the decimal was silently dropped: "百分之三十五
+        # 點五" resolved to a truncated 35, which rejected its own correct
+        # evidence and let a genuinely wrong "35%" through instead.
+        for phrase, expected in (("三十五點五", "35.5"), ("零點八", "0.8")):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    {f"n:{expected}"},
+                    validate_ledger.quantitative_evidence("百分之" + phrase),
+                )
+        # Word-decimal claim, matching digit-decimal evidence: accepted.
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C910",
+                    "kind": "fact",
+                    "claim": "增長百分之三十五點五。",
+                    "extract_or_location": "報告稱增長35.5%。",
+                }
+            ),
+        )
+        # Word-decimal claim against a truncated digit extract: the figure is
+        # genuinely different (35.5 != 35), so this must still be rejected --
+        # on the quantity, not manufacture an unrelated direction error.
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C910",
+                "kind": "fact",
+                "claim": "增長百分之三十五點五。",
+                "extract_or_location": "報告稱增長35%。",
+            }
+        )
+        self.assertTrue(any("quantity" in error for error in errors), errors)
+        self.assertFalse(any("direction" in error for error in errors), errors)
+        # Digit-decimal claim, matching word-decimal evidence: symmetric.
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C910",
+                    "kind": "fact",
+                    "claim": "增長35.5%。",
+                    "extract_or_location": "報告稱增長百分之三十五點五。",
+                }
+            ),
+        )
+
+    def test_han_cheng_percent_is_an_evidence_obligation(self):
+        # 成 is tenths: "六成八" is 68%, "三成" alone is 30%.
+        for phrase, expected in (("六成八", 68), ("三成", 30), ("一成二", 12)):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    {f"n:{expected}"},
+                    validate_ledger.quantitative_evidence(phrase),
+                )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "產銷差水量的六成八歸因於管網漏損。",
+                    "extract_or_location": "產銷差水量的68%歸因於管網漏損。",
+                }
+            ),
+        )
+        self.assertTrue(
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "產銷差水量的六成八歸因於管網漏損。",
+                    "extract_or_location": "產銷差水量的12%歸因於管網漏損。",
+                }
+            )
+        )
+
+    def test_han_scale_magnitude_is_an_evidence_obligation(self):
+        # "三千萬"/"六億" are figures exactly as "3000萬"/"6億" already are;
+        # the leading digit (三/六) is what makes them unambiguous (see the
+        # idiom tests below for the case without one).
+        for phrase, expected in (("三千萬", 30_000_000), ("六億", 600_000_000)):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    {f"n:{expected}"},
+                    validate_ledger.quantitative_evidence(phrase),
+                )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "年度成本將增加三千萬元。",
+                    "extract_or_location": "年度成本將增加30,000,000元。",
+                }
+            ),
+        )
+        self.assertTrue(
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "年度成本將增加三千萬元。",
+                    "extract_or_location": "年度成本將增加三億元。",
+                }
+            )
+        )
+
+    def test_han_scale_word_matches_the_digit_form_and_vice_versa(self):
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "第二期覆蓋四萬二千戶。",
+                    "extract_or_location": "第二期覆蓋42,000戶。",
+                }
+            ),
+        )
+
+    def test_han_plain_count_is_an_evidence_obligation(self):
+        # Mirrors English's spelled counts ("three CVEs", "ten engineers"):
+        # a Han count gated on the 個/个 classifier behaves the same way.
+        for claim in (
+            "研究人員揭露三個漏洞。",
+            "第一期換表已完成十八個月。",
+            "服務公司過去三年掉十一個百分點。",
+        ):
+            with self.subTest(claim=claim):
+                self.assertTrue(
+                    validate_ledger.evidence_coverage_errors(
+                        {
+                            "claim_id": "C901",
+                            "kind": "fact",
+                            "claim": claim,
+                            "extract_or_location": "本頁概述產品。",
+                        }
+                    )
+                )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C901",
+                    "kind": "fact",
+                    "claim": "研究人員揭露三個漏洞。",
+                    "extract_or_location": "報告記錄3個漏洞。",
+                }
+            ),
+        )
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C901",
+                    "kind": "fact",
+                    "claim": "第一期換表已完成十八個月。",
+                    "extract_or_location": "第一期換表已完成18個月。",
+                }
+            ),
+        )
+
+    def test_han_count_rejects_a_different_value(self):
+        self.assertTrue(
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C901",
+                    "kind": "fact",
+                    "claim": "研究人員揭露三個漏洞。",
+                    "extract_or_location": "報告記錄5個漏洞。",
+                }
+            )
+        )
+
+    def test_han_ordinals_do_not_create_obligations(self):
+        # "第三"/"第十八" name a position, not a figure, mirroring the
+        # exclusion English fractions and ordinal-units get.
+        for phrase in ("第三", "第十八", "第一級"):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C902",
+                    "kind": "fact",
+                    "claim": "投資委員會將在第三次會議上表決。",
+                    "extract_or_location": "本頁概述產品。",
+                }
+            ),
+        )
+
+    def test_han_fractions_do_not_create_obligations(self):
+        # "三分之二" denotes 2/3, mirroring English's "two-thirds": neither
+        # side of the fraction becomes an obligation.
+        for phrase in ("三分之二", "十分之九", "四年之內增加約三分之二"):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C903",
+                    "kind": "fact",
+                    "claim": "產能約佔全公司三分之二。",
+                    "extract_or_location": "本頁概述產品。",
+                }
+            ),
+        )
+
+    def test_bare_yi_is_not_a_count_but_larger_numerals_are(self):
+        # "一個" is Chinese's indefinite article ("一個漏洞" reads as "a bug",
+        # not "1 bug"), the role English gives to "a"/"an" -- words that never
+        # appear in _NUMBER_WORDS. Nothing else in the digit table is
+        # grammaticalized this way, so "兩個"/"三個" still count.
+        self.assertEqual(set(), validate_ledger.quantitative_evidence("一個漏洞"))
+        self.assertEqual({"n:2"}, validate_ledger.quantitative_evidence("兩個漏洞"))
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C904",
+                    "kind": "fact",
+                    "claim": "委員會每年開放一個撥款窗口。",
+                    "extract_or_location": "本頁概述產品。",
+                }
+            ),
+        )
+
+    def test_idiomatic_numerals_stay_silent(self):
+        # Every phrase below uses a numeral character idiomatically, not as a
+        # figure. None has a classifier, scale word with a leading digit, or
+        # percent/fraction marker behind it, so none creates an obligation --
+        # the context guards exclude them without a stoplist.
+        for phrase in (
+            "萬一",       # "just in case"
+            "千萬不要",     # "by all means, don't" (the adverb, not 10,000,000)
+            "十分感謝",     # "very" (thankful)
+            "大家一起努力",  # "together"
+            "還有一些問題",  # "some"
+            "情況一般",     # "so-so" / ordinary
+            "一旦發生",     # "once/if"
+            "這是二手貨",    # "secondhand"
+            "亞洲國家之一",  # "one of the ..."
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
+        for claim in (
+            "委員會決定千萬不要在本季度換表。",
+            "沅安計量技術研究所提醒，這批表萬一失準會影響回收期。",
+        ):
+            with self.subTest(claim=claim):
+                self.assertEqual(
+                    [],
+                    validate_ledger.evidence_coverage_errors(
+                        {
+                            "claim_id": "C905",
+                            "kind": "fact",
+                            "claim": claim,
+                            "extract_or_location": "本頁概述產品。",
+                        }
+                    ),
+                )
+
+    def test_simplified_and_traditional_forms_agree(self):
+        pairs = (
+            ("三千萬", "三千万"),
+            ("六億", "六亿"),
+            ("兩個漏洞", "两个漏洞"),
+            ("十萬零一", "十万零一"),
+        )
+        for traditional, simplified in pairs:
+            with self.subTest(traditional=traditional, simplified=simplified):
+                self.assertEqual(
+                    validate_ledger.quantitative_evidence(traditional),
+                    validate_ledger.quantitative_evidence(simplified),
+                )
+
+    def test_golden_ledgers_still_pass_with_han_numeral_scanning(self):
+        for name in ("en", "zh-CN", "zh-HK"):
+            ledger = json.loads(
+                (
+                    ROOT / "tests" / "fixtures" / "golden" / name / "ledger.json"
+                ).read_text(encoding="utf-8")
+            )
+            with self.subTest(ledger=name):
+                self.assertEqual([], validate_ledger.validate_references(ledger))
+
+
+class DirectionCarrierIgnoresNumeralNoiseTests(unittest.TestCase):
+    """Regression cover for a direction-check false positive on Han numerals.
+
+    evidence_coverage_errors binds a direction word ("增長") to its evidence
+    by comparing "carrier" tokens drawn from the rest of the sentence. When
+    the sentence has no Latin-script words, _assertion_carrier_tokens falls
+    back to 2-character bigrams of every CJK character nearby. That fallback
+    never excluded numerals, so a claim spelling its figure in Han words
+    ("百分之三十五") turned the figure itself into the carrier -- while a
+    digit-form figure ("35%") was never CJK to begin with and contributed
+    nothing. Two claim/evidence pairs stating the identical figure then
+    compared a numeral-bigram carrier ("百分","分之","之三",...) against an
+    unrelated preamble ("報告","告稱"), found no overlap, and raised a
+    direction error despite the evidence saying the same thing. Root cause:
+    the CJK-bigram fallback treated numeral characters as carrier vocabulary
+    instead of excluding them the way English number words already are.
+    """
+
+    def test_han_word_claim_against_digit_evidence_is_accepted(self):
+        # The exact pair the coordinator reported as a false positive.
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C920",
+                    "kind": "fact",
+                    "claim": "增長百分之三十五。",
+                    "extract_or_location": "報告稱增長35%。",
+                }
+            ),
+        )
+
+    def test_adjacent_variants_are_also_accepted(self):
+        for claim, extract in (
+            # Decrease direction, same word-vs-digit asymmetry.
+            ("下降百分之三十五。", "報告稱下降35%。"),
+            # Cheng-percent word form against a digit extract.
+            ("增長六成八。", "報告稱增長68%。"),
+            # Han-word claim against a Han-word extract (no ASCII at all).
+            ("增長百分之三十五。", "報告稱增長百分之三十五。"),
+            # A real subject noun alongside the word-form figure still
+            # matches on that noun, not just the empty-carrier escape.
+            ("營收增長百分之三十五。", "報告稱營收增長35%。"),
+        ):
+            with self.subTest(claim=claim, extract=extract):
+                self.assertEqual(
+                    [],
+                    validate_ledger.evidence_coverage_errors(
+                        {
+                            "claim_id": "C921",
+                            "kind": "fact",
+                            "claim": claim,
+                            "extract_or_location": extract,
+                        }
+                    ),
+                )
+
+    def test_a_genuinely_unsupported_direction_is_still_rejected(self):
+        # The fix must not turn the direction check into a no-op: a claim
+        # asserting an increase against evidence with no increase language at
+        # all (and a different, unrelated subject) is still flagged.
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C922",
+                "kind": "fact",
+                "claim": "營收增長百分之三十五。",
+                "extract_or_location": "成本下降三成。",
+            }
+        )
+        self.assertTrue(any("direction" in error for error in errors), errors)
+
+    def test_carrier_tokens_exclude_numeral_characters(self):
+        # Direct check on the mechanism itself: a sentence built entirely
+        # from a Han-numeral phrase yields no carrier tokens at all, exactly
+        # as a digit-form figure already does, rather than numeral bigrams.
+        match = next(re.finditer("增長", "增長百分之三十五。"))
+        self.assertEqual(
+            set(),
+            validate_ledger._assertion_carrier_tokens(
+                "增長百分之三十五。", match
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -35,11 +35,12 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 try:
-    from .artifact_safety import artifact_collision_errors
+    from .artifact_safety import artifact_collision_errors, publish_temp_file
     from .content_gate import (
         rendered_markdown_visual_paths,
         validate_content_receipt,
     )
+    from .gate_severity import hard_errors
     from .html_policy import (
         SAFE_ATTRIBUTES,
         SAFE_TAGS,
@@ -64,17 +65,19 @@ try:
         report_length_policy,
     )
     from .report_contract import detect_language as detect_report_language
+    from .source_fidelity import validate_source_fidelity_receipt_online
     from .validate_report import (
         _is_safe_identity_label,
         validate_markdown,
         validate_rewild_receipt,
     )
 except ImportError:
-    from artifact_safety import artifact_collision_errors
+    from artifact_safety import artifact_collision_errors, publish_temp_file
     from content_gate import (
         rendered_markdown_visual_paths,
         validate_content_receipt,
     )
+    from gate_severity import hard_errors
     from html_policy import (
         SAFE_ATTRIBUTES,
         SAFE_TAGS,
@@ -99,6 +102,7 @@ except ImportError:
         report_length_policy,
     )
     from report_contract import detect_language as detect_report_language
+    from source_fidelity import validate_source_fidelity_receipt_online
     from validate_report import (
         _is_safe_identity_label,
         validate_markdown,
@@ -550,8 +554,32 @@ def make_url_fetcher(asset_root, default_fetcher=None):
     return secure_fetch
 
 
+def _local_render_resource_key(url, asset_root):
+    """Return a lexical absolute identity without reopening the resource."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"", "file"}:
+        raise ValueError(f"Remote resource blocked during PDF rendering: {url}")
+    raw_path = (
+        url2pathname(unquote(parsed.path))
+        if parsed.scheme == "file"
+        else unquote(parsed.path)
+    )
+    asset_root_input = Path(os.path.abspath(asset_root))
+    asset_root_resolved = asset_root_input.resolve()
+    resource_path = Path(raw_path)
+    if not resource_path.is_absolute():
+        resource_path = asset_root_input / resource_path
+    resource_path = Path(os.path.abspath(resource_path))
+    if resource_path.is_relative_to(asset_root_input):
+        resource_path = (
+            asset_root_resolved
+            / resource_path.relative_to(asset_root_input)
+        )
+    return str(resource_path)
+
+
 def collect_render_assets(rendered_html, asset_root):
-    """Hash every local image/font referenced by the rendered HTML."""
+    """Snapshot every local image/font referenced by the rendered HTML."""
     references = []
     for match in re.finditer(
         r"""(?ix)
@@ -578,23 +606,104 @@ def collect_render_assets(rendered_html, asset_root):
     )
     records = {}
     for reference in references:
-        parsed = urlparse(reference)
-        raw_path = (
-            url2pathname(unquote(parsed.path))
-            if parsed.scheme == "file"
-            else unquote(parsed.path)
-        )
-        resource_path = Path(raw_path)
-        if not resource_path.is_absolute():
-            resource_path = asset_root_input / resource_path
-        resource_path = Path(os.path.abspath(resource_path)).resolve()
         response = fetch(reference)
-        contents = response["string"]
+        contents = bytes(response["string"])
+        resource_key = _local_render_resource_key(reference, asset_root_input)
+        resource_path = Path(resource_key).resolve()
         records[str(resource_path)] = {
             "path": str(resource_path),
             "sha256": hashlib.sha256(contents).hexdigest(),
+            "url_key": resource_key,
+            "mime_type": response["mime_type"],
+            "contents": contents,
         }
     return [records[path] for path in sorted(records)]
+
+
+def make_snapshot_url_fetcher(
+    asset_root,
+    render_assets,
+    default_fetcher=None,
+):
+    """Serve local resources only from bytes captured during preparation."""
+    asset_root_resolved = Path(os.path.abspath(asset_root)).resolve()
+    if not isinstance(render_assets, (list, tuple)):
+        raise ValueError("Prepared render assets must be byte snapshots.")
+    snapshots = {}
+    image_mime_types = frozenset(IMAGE_FORMAT_MIME_TYPES.values())
+    for record in render_assets:
+        if not isinstance(record, dict):
+            raise ValueError("Prepared render assets must be byte snapshots.")
+        raw_path = record.get("path")
+        resource_key = record.get("url_key")
+        contents = record.get("contents")
+        digest = record.get("sha256")
+        mime_type = record.get("mime_type")
+        if (
+            not isinstance(raw_path, str)
+            or not isinstance(resource_key, str)
+            or not isinstance(contents, bytes)
+        ):
+            raise ValueError("Prepared render asset snapshot is incomplete.")
+        resource_path = Path(os.path.abspath(raw_path))
+        is_report_asset = resource_path.is_relative_to(asset_root_resolved)
+        is_bundled_font = (
+            resource_path.is_relative_to(BUNDLED_FONT_ROOT)
+            and resource_path.suffix.lower() in BUNDLED_FONT_SUFFIXES
+        )
+        if not (is_report_asset or is_bundled_font):
+            raise ValueError(
+                f"Prepared render asset is outside an allowed root: {resource_path}"
+            )
+        if is_report_asset:
+            if (
+                resource_path.suffix.lower()
+                not in LOCAL_ASSET_SUFFIXES
+                or mime_type not in image_mime_types
+            ):
+                raise ValueError(
+                    f"Prepared render asset has an invalid type: {resource_path}"
+                )
+        elif mime_type != "font/ttf":
+            raise ValueError(
+                f"Prepared bundled font has an invalid MIME type: {resource_path}"
+            )
+        if hashlib.sha256(contents).hexdigest() != digest:
+            raise ValueError(
+                f"Prepared render asset bytes do not match their hash: {resource_path}"
+            )
+        if resource_key in snapshots:
+            raise ValueError(
+                f"Prepared render asset is duplicated: {resource_path}"
+            )
+        snapshots[resource_key] = (
+            contents,
+            mime_type,
+            resource_path.as_uri(),
+        )
+    data_fetcher = make_url_fetcher(asset_root, default_fetcher)
+
+    def snapshot_fetch(url):
+        if urlparse(url).scheme == "data":
+            return data_fetcher(url)
+        resource_key = _local_render_resource_key(url, asset_root)
+        snapshot = snapshots.get(resource_key)
+        if snapshot is None:
+            raise ValueError(
+                f"Render asset was not captured in the approved snapshot: {url}"
+            )
+        contents, mime_type, redirected_url = snapshot
+        if default_fetcher is not None:
+            return {"string": contents, "mime_type": mime_type}
+        from weasyprint.urls import URLFetcherResponse
+
+        return URLFetcherResponse(
+            redirected_url,
+            body=contents,
+            headers={"Content-Type": mime_type},
+        )
+
+    return snapshot_fetch
 
 
 def detect_language(text):
@@ -2010,8 +2119,14 @@ def validate_cover_image(input_path, cover_image):
     return candidate.relative_to(asset_root).as_posix()
 
 
-def validate_rewild_for_render(input_path, receipt_path, lang):
-    """Reject rendering unless the exact Markdown passed the Rewild gate."""
+def validate_rewild_for_render(
+    input_path,
+    receipt_path,
+    lang,
+    *,
+    report_text=None,
+):
+    """Reject rendering unless one immutable Markdown snapshot passed Rewild."""
     if not receipt_path:
         raise ValueError(
             "A Rewild gate receipt is required. Run scripts/rewild_gate.py first."
@@ -2021,14 +2136,33 @@ def validate_rewild_for_render(input_path, receipt_path, lang):
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Rewild receipt could not be read: {exc}") from exc
+    if report_text is None:
+        try:
+            text = Path(input_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError(f"Rewild report could not be read: {exc}") from exc
+    elif isinstance(report_text, str):
+        text = report_text
+    else:
+        raise ValueError("Reviewed report snapshot must be Unicode text.")
     receipt_lang = receipt.get("report_lang")
     expected_lang = receipt_lang if lang == "auto" else lang
-    errors = validate_rewild_receipt(
-        input_path,
-        receipt,
-        expected_lang=expected_lang,
+    errors = []
+    if (
+        report_text is not None
+        and receipt.get("report_sha256")
+        != hashlib.sha256(text.encode("utf-8")).hexdigest()
+    ):
+        errors.append(
+            "Rewild receipt does not match the reviewed report snapshot."
+        )
+    errors.extend(
+        validate_rewild_receipt(
+            input_path,
+            receipt,
+            expected_lang=expected_lang,
+        )
     )
-    text = input_path.read_text(encoding="utf-8")
     if expected_lang == "en":
         minimum, maximum, _ = report_length_policy(expected_lang)
         errors.extend(
@@ -2055,6 +2189,7 @@ def validate_rewild_for_render(input_path, receipt_path, lang):
         )
     else:
         errors.append("Rewild receipt has no supported report language.")
+    errors = hard_errors(errors)
     if errors:
         raise ValueError("Rewild production gate failed: " + " ".join(errors))
 
@@ -2066,8 +2201,10 @@ def validate_content_for_render(
     lang,
     source_fidelity_receipt_path,
     render_inputs=None,
+    *,
+    report_text=None,
 ):
-    """Reject rendering unless the exact report and ledger passed content review."""
+    """Reject rendering unless one immutable report snapshot passed review."""
     if not ledger_path:
         raise ValueError(
             "An evidence ledger is required for the Content quality gate."
@@ -2087,6 +2224,17 @@ def validate_content_for_render(
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Content quality receipt could not be read: {exc}") from exc
     expected_lang = receipt.get("report_lang") if lang == "auto" else lang
+    errors = []
+    if report_text is not None:
+        if not isinstance(report_text, str):
+            errors.append("Reviewed report snapshot must be Unicode text.")
+        elif (
+            receipt.get("report_sha256")
+            != hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+        ):
+            errors.append(
+                "Content receipt does not match the reviewed report snapshot."
+            )
     if render_inputs is not None:
         try:
             validate_render_report_date(
@@ -2094,13 +2242,10 @@ def validate_content_for_render(
                 ledger_path,
                 expected_lang,
                 render_inputs,
+                report_text=report_text,
             )
         except ValueError as exc:
-            errors = [str(exc)]
-        else:
-            errors = []
-    else:
-        errors = []
+            errors.append(str(exc))
     errors.extend(
         validate_content_receipt(
             input_path,
@@ -2110,8 +2255,34 @@ def validate_content_for_render(
             expected_lang=expected_lang,
         )
     )
+    if not errors:
+        source_receipt_path = Path(source_fidelity_receipt_path)
+        try:
+            source_receipt_bytes = source_receipt_path.read_bytes()
+            source_receipt = json.loads(source_receipt_bytes)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            errors.append(
+                f"Source-fidelity receipt could not be read: {exc}"
+            )
+        else:
+            if (
+                receipt.get("source_fidelity_receipt_sha256")
+                != hashlib.sha256(source_receipt_bytes).hexdigest()
+            ):
+                errors.append(
+                    "Source-fidelity receipt changed after content review."
+                )
+            else:
+                errors.extend(
+                    validate_source_fidelity_receipt_online(
+                        ledger_path,
+                        source_receipt,
+                    )
+                )
+    errors = hard_errors(errors)
     if errors:
         raise ValueError("Content quality production gate failed: " + " ".join(errors))
+    return receipt
 
 
 def deterministic_struct_ids():
@@ -2186,7 +2357,14 @@ RENDER_INPUT_KEYS = frozenset(
 )
 
 
-def validate_render_report_date(input_path, ledger_path, report_lang, render_inputs):
+def validate_render_report_date(
+    input_path,
+    ledger_path,
+    report_lang,
+    render_inputs,
+    *,
+    report_text=None,
+):
     """Bind the visible localized date to the gated report and ledger day."""
     if not isinstance(render_inputs, dict):
         raise ValueError("Render report date requires complete render inputs.")
@@ -2215,11 +2393,20 @@ def validate_render_report_date(input_path, ledger_path, report_lang, render_inp
         raise ValueError(
             "Render report date requires a supported report language."
         ) from exc
-    try:
-        report_text = Path(input_path).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ValueError(f"Render report date could not read the report: {exc}") from exc
-    _title, gated_date, _standfirst = extract_report_header(report_text)
+    if report_text is None:
+        try:
+            checked_report_text = Path(input_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError(
+                f"Render report date could not read the report: {exc}"
+            ) from exc
+    elif isinstance(report_text, str):
+        checked_report_text = report_text
+    else:
+        raise ValueError("Reviewed report snapshot must be Unicode text.")
+    _title, gated_date, _standfirst = extract_report_header(
+        checked_report_text
+    )
     if gated_date != expected:
         raise ValueError(
             "Render report date must use the strict locale format and match "
@@ -2279,7 +2466,7 @@ def _validated_identifier_label(
     return label
 
 
-def resolve_render_inputs(input_path, render_inputs):
+def resolve_render_inputs(input_path, render_inputs, *, report_text=None):
     """Validate and stabilize every visible renderer option."""
     if not isinstance(render_inputs, dict):
         raise ValueError("Render inputs must be an object.")
@@ -2300,7 +2487,12 @@ def resolve_render_inputs(input_path, render_inputs):
         raise ValueError("Render confidentiality must be true or false.")
 
     input_path = Path(input_path).resolve()
-    md_text = input_path.read_text(encoding="utf-8")
+    if report_text is None:
+        md_text = input_path.read_text(encoding="utf-8")
+    elif isinstance(report_text, str):
+        md_text = report_text
+    else:
+        raise ValueError("Reviewed report snapshot must be Unicode text.")
     actual_lang = (
         detect_language(md_text)
         if render_inputs["lang"] == "auto"
@@ -2357,14 +2549,17 @@ def validate_visual_asset_approvals(
     cover_image=None,
 ):
     """Reconcile rendered paths, hashes, and use sites with content approval."""
-    try:
-        receipt = json.loads(
-            Path(content_receipt_path).read_text(encoding="utf-8")
-        )
-    except (OSError, TypeError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"Content receipt could not authorize visual assets: {exc}"
-        ) from exc
+    if isinstance(content_receipt_path, dict):
+        receipt = content_receipt_path
+    else:
+        try:
+            receipt = json.loads(
+                Path(content_receipt_path).read_text(encoding="utf-8")
+            )
+        except (OSError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Content receipt could not authorize visual assets: {exc}"
+            ) from exc
     report_root = Path(input_path).resolve().parent
     actual = {
         (
@@ -2449,12 +2644,15 @@ def prepare_pdf_render(
     content_receipt,
     source_fidelity_receipt,
     render_inputs,
+    report_text=None,
+    content_receipt_data=None,
 ):
     """Build render-ready HTML from the gated report and reviewed assets."""
     input_path = Path(input_path).resolve()
     md_text, resolved_inputs = resolve_render_inputs(
         input_path,
         render_inputs,
+        report_text=report_text,
     )
     rendered_html = md_to_html(md_text, **resolved_inputs)
     render_assets = collect_render_assets(
@@ -2464,7 +2662,11 @@ def prepare_pdf_render(
     validate_visual_asset_approvals(
         input_path,
         render_assets,
-        content_receipt,
+        (
+            content_receipt_data
+            if content_receipt_data is not None
+            else content_receipt
+        ),
         report_text=md_text,
         cover_image=resolved_inputs["cover_image"],
     )
@@ -2484,7 +2686,10 @@ def write_prepared_pdf(prepared, output_path, *, asset_root):
         HTML(
             string=prepared["bound_html"],
             base_url=Path(asset_root).resolve(),
-            url_fetcher=make_url_fetcher(asset_root),
+            url_fetcher=make_snapshot_url_fetcher(
+                asset_root,
+                prepared["assets"],
+            ),
         ).write_pdf(output_path, pdf_tags=True)
     return output_path
 
@@ -2544,15 +2749,37 @@ def render_pdf(
         "report_date": report_date,
         "cover_image": cover_image,
     }
-    validate_rewild_for_render(input_path, rewild_receipt, lang)
-    validate_content_for_render(
+    try:
+        report_bytes = input_path.read_bytes()
+        report_text = report_bytes.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(
+            f"Markdown report could not be snapshotted for rendering: {exc}"
+        ) from exc
+    validate_rewild_for_render(
+        input_path,
+        rewild_receipt,
+        lang,
+        report_text=report_text,
+    )
+    validated_content_receipt = validate_content_for_render(
         input_path,
         ledger,
         content_receipt,
         lang,
         source_fidelity_receipt,
         render_inputs=requested_render_inputs,
+        report_text=report_text,
     )
+    if (
+        not isinstance(validated_content_receipt, dict)
+        or validated_content_receipt.get("report_sha256")
+        != hashlib.sha256(report_bytes).hexdigest()
+    ):
+        raise ValueError(
+            "Markdown report changed before the validated render snapshot "
+            "was bound."
+        )
     prepared = prepare_pdf_render(
         input_path,
         ledger=ledger,
@@ -2560,6 +2787,8 @@ def render_pdf(
         content_receipt=content_receipt,
         source_fidelity_receipt=source_fidelity_receipt,
         render_inputs=requested_render_inputs,
+        report_text=report_text,
+        content_receipt_data=validated_content_receipt,
     )
     asset_collisions = artifact_collision_errors(
         {
@@ -2611,7 +2840,12 @@ def render_pdf(
             temp_path,
             asset_root=input_path.parent,
         )
-        temp_path.replace(output_path)
+        try:
+            publish_temp_file(temp_path, output_path, force=force)
+        except FileExistsError as exc:
+            raise ValueError(
+                f"Output PDF already exists; use --force to replace it: {output_path}"
+            ) from exc
     finally:
         temp_path.unlink(missing_ok=True)
     size_kb = output_path.stat().st_size / 1024

@@ -251,14 +251,17 @@ ALEXANDRIA_REWILD_PYTHON="${ALEXANDRIA_PYTHON:-python3}"
   --review-note "$REWILD_REVIEW_NOTE" --receipt "$REWILD_RECEIPT"
 ```
 
-The checker can run under `python3` before Step 7. The gate reference explains
-`--style-waivers` and `--fidelity-notes`. AI-vocabulary, fidelity, regional,
-and Hong Kong register failures cannot be waived; direction reversals and
-causal corruption cannot be acknowledged.
+The checker can run under `python3` before Step 7. AI-vocabulary, fidelity,
+regional, and Hong Kong register failures cannot be waived; direction reversals
+and causal corruption cannot be acknowledged.
 
 Pass only after resolving fidelity and regional failures, disposing of every
-blind-review finding, justifying retainable style warnings, and restoring any
-lost length with substantive content.
+blind-review finding, and restoring any lost length with substantive content.
+
+Every gate reports two tiers. Fabrication, unsupported quantities, citations,
+source fidelity, person safety, and schema findings block delivery. Style and
+formatting findings print as `WARNING:` and do not, though they still deserve an
+editorial answer. Waive one only to record in the receipt why it stays.
 
 If Rewild takes the report below the minimum length, deepen the research, analysis, counterevidence, or implications, then repeat this gate. Never restore filler or dilute the edit to hit the count. Do not proceed to Step 7 until the Rewild hard gate passes.
 

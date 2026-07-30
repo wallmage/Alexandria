@@ -1,0 +1,686 @@
+{
+  "schema_version": 4,
+  "subject": "澜川市清河片区的供水计量与产销差",
+  "research_question": "清河水务服务公司是否应当在2026年申报窗口内为清河片区第二期智能水表更换投入资本？",
+  "brief": {
+    "intended_reader": "清河水务服务公司投资委员会",
+    "decision_or_use": "决定第二期智能水表更换是否在2026年申报窗口内报送。",
+    "archetype": "system",
+    "report_language": "zh-CN",
+    "editorial_mode": "analytical",
+    "scope": {
+      "time_horizon": "2021年至2027年分摊周期",
+      "geography": "澜川市清河片区的供水管网与用户表位",
+      "inclusions": [
+        "产销差水量与计量记录",
+        "漏损与计量误差的成因拆分",
+        "计量改造成本与现行水价",
+        "投资申报的治理时间表"
+      ],
+      "exclusions": [
+        "清河片区以外的水厂与输水干线",
+        "污水处理与排水收费",
+        "真实主体：报告引用的每一份记录都发布在保留给文档示例的域名上"
+      ]
+    }
+  },
+  "people": [
+    {
+      "person_id": "P1",
+      "name": "沈亦文",
+      "aliases": [],
+      "living_status": "living",
+      "public_role": "public",
+      "relationship": "adjacent"
+    }
+  ],
+  "report_date": "2026-07-28",
+  "coverage": [
+    {
+      "area": "产销差水量",
+      "question": "清河片区丢了多少水，趋势是否稳定？",
+      "priority": "high",
+      "decision_relevance": "不知道丢水的量级，就无法为一次换表投资定规模。",
+      "completion_criteria": "产销差序列由主管部门的计量汇总确定，并有第二份公开材料引用同一口径。",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C1",
+        "C3"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "损失成因拆分",
+      "question": "产销差水量里，管网漏损和表具计量误差各占多少？",
+      "priority": "high",
+      "decision_relevance": "成因决定表位以内的投资能不能压下产销差。",
+      "completion_criteria": "成因拆分来自主管部门的流量记录，并针对一种替代解释做过检验。",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C2",
+        "C6",
+        "C8",
+        "C9"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "计量改造成本",
+      "question": "2027年起的分摊办法下，改造要付多少钱？",
+      "priority": "high",
+      "decision_relevance": "成本区间决定委员会能接受的回收期。",
+      "completion_criteria": "记录上的两个成本估算都写出来，分歧被解释或如实披露。",
+      "owner": "primary",
+      "status": "disputed",
+      "claim_ids": [
+        "C4",
+        "C5",
+        "C10"
+      ],
+      "gap_impact": null,
+      "notes": "供水企业与主管部门对年增成本的估算相差 740 万元，报告两个数都带上。"
+    },
+    {
+      "area": "申报治理",
+      "question": "谁批准计量改造投资，时间表是什么？",
+      "priority": "medium",
+      "decision_relevance": "错过申报窗口的委员会要等一个完整的分摊周期。",
+      "completion_criteria": "审批主体与公开的申报时间表由主管部门自己的记录确认。",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C7"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "用户端低流量份额",
+      "question": "居民全年用水里，有多少水是以机械表容易少计的低流量流过的？",
+      "priority": "medium",
+      "decision_relevance": "低流量份额决定换表实际能回收多少水量。",
+      "completion_criteria": "一份公布用户端逐时流量分布的记录。",
+      "owner": "primary",
+      "status": "gap",
+      "claim_ids": [],
+      "gap_impact": "报告能给出流量点上的超差比例，却无法给出全年可回收水量，因此第二期换表的收益仍然没有证据支撑。",
+      "notes": null
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "S1",
+      "title": "澜川市水务局，清河片区供水计量改造评审报告（2026）",
+      "url": "https://example.com/lcswj/qinghe-metering-review-2026",
+      "publisher": "澜川市水务局",
+      "author": null,
+      "published": "2026-06-18",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "accountable_record",
+      "source_family": "example.com",
+      "roles": [
+        "empirical_data",
+        "historical_record"
+      ],
+      "accountability_basis": "court_or_regulator_record",
+      "limitations": "评审报告按主管部门自己的计量口径描述片区，没有审计供水企业的成本归集。"
+    },
+    {
+      "source_id": "S2",
+      "title": "澜川供水集团，2025年度运营与财务报告",
+      "url": "https://example.org/lcgs/operating-review-2025",
+      "publisher": "澜川供水集团",
+      "author": null,
+      "published": "2026-03-04",
+      "accessed": "2026-07-20",
+      "provenance": "primary_interested",
+      "evidence_type": "official_documentation",
+      "source_family": "example.org",
+      "roles": [
+        "subject_official"
+      ],
+      "accountability_basis": "none",
+      "limitations": "集团正在申请改造补贴，其成本估算是一份有立场的估算。"
+    },
+    {
+      "source_id": "S3",
+      "title": "沅安计量技术研究所，清河片区居民水表计量误差抽检评估",
+      "url": "https://example.net/yuanan/qinghe-meter-error-assessment",
+      "publisher": "沅安计量技术研究所",
+      "author": "柯宛珍",
+      "published": "2025-11-20",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "dataset_or_test",
+      "source_family": "example.net",
+      "roles": [
+        "independent_analysis",
+        "empirical_data"
+      ],
+      "accountability_basis": "none",
+      "limitations": "抽检只在实验室的固定流量点上做，没有测量用户端的流量分布。"
+    },
+    {
+      "source_id": "S4",
+      "title": "澜川晚报，清河片区换表提速，产销差仍未回落",
+      "url": "https://gazette.example/lanchuan/qinghe-water-loss-2026",
+      "publisher": "澜川晚报",
+      "author": "毕承宇",
+      "published": "2026-04-09",
+      "accessed": "2026-07-20",
+      "provenance": "secondary_independent",
+      "evidence_type": "news_report",
+      "source_family": "gazette.example",
+      "roles": [
+        "historical_record"
+      ],
+      "accountability_basis": "named_source_investigation",
+      "limitations": "报道引用主管部门的统计，没有自己测量水量。"
+    },
+    {
+      "source_id": "S5",
+      "title": "澜川市水务局，现行供水价格与计量收费标准",
+      "url": "https://example.com/lcswj/current-water-tariff",
+      "publisher": "澜川市水务局",
+      "author": null,
+      "published": null,
+      "undated_reason": "价格页在每次听证之后持续更新，页面本身不带发布日期。",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "official_documentation",
+      "source_family": "example.com",
+      "roles": [
+        "empirical_data"
+      ],
+      "accountability_basis": "court_or_regulator_record",
+      "limitations": "页面只显示读取当日在执行的价格，不保留历史版本。"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "C1",
+      "claim": "清河片区产销差率从2021年的 14.2% 上升到2025年的 21.6%。",
+      "kind": "fact",
+      "importance": "key",
+      "source_ids": [
+        "S1",
+        "S4"
+      ],
+      "extract_or_location": "清河片区产销差率从2021年的 14.2% 上升到2025年的 21.6%。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "清河片区产销差率从2021年的 14.2% 上升到2025年的 21.6%。"
+        },
+        {
+          "source_id": "S4",
+          "extract_or_location": "水务局的计量汇总显示，清河片区产销差率从2021年的 14.2% 上升到2025年的 21.6%。"
+        }
+      ],
+      "as_of": "2025-12-31",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "清河片区产销差率从2021年的 14.2% 上升到2025年的 21.6%"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "产销差的量级构成换表投资的需求论证。",
+      "what_would_change": "序列被回溯修订，或者2026年半年报的产销差率回落到二成以下。",
+      "triangulation": {
+        "status": "met",
+        "rationale": "主管部门的计量汇总与一份独立报道对同一序列的引用在起止两端一致。"
+      },
+      "resolution": null,
+      "limitations": "两份材料都源自主管部门的计量表，一致性在转述层面，不在测量层面。"
+    },
+    {
+      "claim_id": "C2",
+      "claim": "清河片区夜间最小流量分析把产销差水量的 68% 归因于管网漏损，把 12% 归因于居民表具计量误差。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "清河片区夜间最小流量分析把产销差水量的 68% 归因于管网漏损，把 12% 归因于居民表具计量误差。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "清河片区夜间最小流量分析把产销差水量的 68% 归因于管网漏损，把 12% 归因于居民表具计量误差。"
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "清河片区夜间最小流量分析把产销差水量的 68% 归因于管网漏损，把 12% 归因于居民表具计量误差"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "成因比例决定表位以内的投资能触及多少水量。",
+      "what_would_change": "一份按管段拆开的漏损量，或者用户端流量分布记录推翻夜间用水接近零的假定。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "只有主管部门掌握片区计量口径，拆分比例只有这一份记录。"
+      },
+      "resolution": null,
+      "limitations": "拆分依赖凌晨时段真实用水接近零的假定，该假定没有被独立检验。"
+    },
+    {
+      "claim_id": "C3",
+      "claim": "清河片区计费水量回收率从2022年的 89% 下降到2025年的 78%，主要损失来自城中村段的管网漏损。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S2"
+      ],
+      "extract_or_location": "清河片区计费水量回收率从2022年的 89% 下降到2025年的 78%，主要损失来自城中村段的管网漏损。",
+      "source_evidence": [
+        {
+          "source_id": "S2",
+          "extract_or_location": "清河片区计费水量回收率从2022年的 89% 下降到2025年的 78%，主要损失来自城中村段的管网漏损。"
+        }
+      ],
+      "as_of": "2025-12-31",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "清河片区计费水量回收率从2022年的 89% 下降到2025年的 78%，主要损失来自城中村段的管网漏损"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "回收率是换表投资要缓解的运行症状。",
+      "what_would_change": "一份独立的回收率序列，把损失均匀分布在整个片区。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "回收率只有供水企业自己公布，没有找到独立序列。"
+      },
+      "resolution": null,
+      "limitations": "由正在申请改造补贴的供水企业自行公布。"
+    },
+    {
+      "claim_id": "C4",
+      "claim": "澜川供水集团称，按水务局提出的改造方案，清河片区的计量改造将使其年度成本增加 1860 万元。",
+      "kind": "reported_claim",
+      "importance": "supporting",
+      "source_ids": [
+        "S2"
+      ],
+      "extract_or_location": "按水务局提出的改造方案，清河片区的计量改造将使本集团年度成本增加 1860 万元。",
+      "source_evidence": [
+        {
+          "source_id": "S2",
+          "extract_or_location": "按水务局提出的改造方案，清河片区的计量改造将使本集团年度成本增加 1860 万元。"
+        }
+      ],
+      "as_of": "2026-03-04",
+      "confidence": "low",
+      "status": "disputed",
+      "include_in_report": true,
+      "report_excerpts": [
+        "澜川供水集团称，按水务局提出的改造方案，清河片区的计量改造将使其年度成本增加 1860 万元"
+      ],
+      "supports": [],
+      "contradicts": [
+        "C5"
+      ],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "改造带来的年增成本是这笔投资最大的单项成本输入。",
+      "what_would_change": "一份公开的口径对账，把两个成本基础对起来。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "集团的数字没有旁证，并且与主管部门自己的估算相互矛盾。"
+      },
+      "resolution": "报告两个数字都带上，并说明两方算的不是同一批表；公开记录里没有对账。",
+      "limitations": "评审进行期间由利益相关方公布的估算。"
+    },
+    {
+      "claim_id": "C5",
+      "claim": "澜川市水务局把同一项计量改造对全市供水企业的年增成本估算为 1120 万元。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "澜川市水务局把同一项计量改造对全市供水企业的年增成本估算为 1120 万元。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "澜川市水务局把同一项计量改造对全市供水企业的年增成本估算为 1120 万元。"
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "medium",
+      "status": "disputed",
+      "include_in_report": true,
+      "report_excerpts": [
+        "澜川市水务局把同一项计量改造对全市供水企业的年增成本估算为 1120 万元"
+      ],
+      "supports": [],
+      "contradicts": [
+        "C4"
+      ],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "较低的数字会改变委员会能接受的回收期。",
+      "what_would_change": "一份公开的表批次对账，或者修订后的最终评审结论。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "主管部门的数字孤立存在，并被供水企业的估算所反驳。"
+      },
+      "resolution": "两个估算覆盖的表批次不同，两方都没有公布中间的桥；报告按区间呈现。",
+      "limitations": "主管部门按全市口径定价，不针对单一片区。"
+    },
+    {
+      "claim_id": "C6",
+      "claim": "清河片区产销差的主要成因是管网漏损，而不是居民表具的计量误差。",
+      "kind": "analysis",
+      "importance": "key",
+      "source_ids": [],
+      "source_evidence": [],
+      "as_of": "2026-07-20",
+      "confidence": "medium",
+      "status": "inference",
+      "include_in_report": true,
+      "report_excerpts": [
+        "清河片区产销差的主要成因是管网漏损，而不是居民表具的计量误差"
+      ],
+      "supports": [
+        "C2",
+        "C3",
+        "C8"
+      ],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": "主管部门的流量拆分把绝大部分水量放在管网上，供水企业的回收率序列把损失指向同一段管网，独立抽检只能证明表具在固定流量点上少计，因此表位以内的投资无法触及主要的丢水环节。",
+      "decision_relevance": "如果成因在管网上，表位以内的资本买到的是计费准确，不是产销差改善。",
+      "what_would_change": "一份用户端流量分布记录显示低流量份额很高，或者按管段拆开的漏损量把损失放回表具一侧。",
+      "triangulation": {
+        "status": "met",
+        "rationale": "推论同时靠主管部门的流量拆分和供水企业的回收率序列，两者属于不同的独立性家族。"
+      },
+      "resolution": null,
+      "limitations": "推论依赖夜间时段真实用水接近零的假定，而这项假定只有主管部门自己检验过。"
+    },
+    {
+      "claim_id": "C7",
+      "claim": "自2024年3月起，沈亦文担任澜川市水务局项目评审委员会主任委员；该委员会每年只开放一次申报窗口，10月底截止受理。",
+      "kind": "fact",
+      "importance": "context",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "自2024年3月起，沈亦文担任澜川市水务局项目评审委员会主任委员；该委员会每年只开放一次申报窗口，10月底截止受理。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "自2024年3月起，沈亦文担任澜川市水务局项目评审委员会主任委员；该委员会每年只开放一次申报窗口，10月底截止受理。"
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "自2024年3月起，沈亦文担任澜川市水务局项目评审委员会主任委员；该委员会每年只开放一次申报窗口，10月底截止受理"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [
+        "P1"
+      ],
+      "person_claim_role": "neutral",
+      "person_claim_assessment": {
+        "classification": "neutral",
+        "rationale": "这条记录只写一项公开的任职和它所管的申报时间表，没有指责、没有私人信息，也没有对任职者本人作任何评价性描述。"
+      },
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "申报截止日期决定委员会自己的表决时点。",
+      "what_would_change": "主任委员换人，或者同一年里增开第二个申报窗口。",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "主管部门自己公布的任职与时间表，不需要第二个家族。"
+      },
+      "resolution": null,
+      "limitations": "主管部门对自身治理安排的记录。"
+    },
+    {
+      "claim_id": "C8",
+      "claim": "沅安计量技术研究所抽检清河片区 400 只居民机械水表，其中 46 只在低流量工况下的示值误差超过计量允许误差，最大负偏差为 5.4%。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S3"
+      ],
+      "extract_or_location": "抽检清河片区 400 只居民机械水表，其中 46 只在低流量工况下的示值误差超过计量允许误差，最大负偏差为 5.4%。",
+      "source_evidence": [
+        {
+          "source_id": "S3",
+          "extract_or_location": "抽检清河片区 400 只居民机械水表，其中 46 只在低流量工况下的示值误差超过计量允许误差，最大负偏差为 5.4%。"
+        }
+      ],
+      "as_of": "2025-11-20",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "沅安计量技术研究所抽检清河片区 400 只居民机械水表，其中 46 只在低流量工况下的示值误差超过计量允许误差，最大负偏差为 5.4%"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "表具确实少计水量，会削弱只把钱投向管网的论证。",
+      "what_would_change": "一次覆盖用户实际流量分布的抽检，或者证明这批表在常用流量段合格。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "一家独立机构的一次抽检，没有第二次实测。"
+      },
+      "resolution": null,
+      "limitations": "抽检只覆盖实验室的固定流量点。"
+    },
+    {
+      "claim_id": "C9",
+      "claim": "按抽检结果计算，清河片区居民机械水表在低流量工况下的超差比例约为 11.5%。",
+      "kind": "estimate",
+      "importance": "supporting",
+      "source_ids": [
+        "S3"
+      ],
+      "extract_or_location": "抽检清河片区 400 只居民机械水表，其中 46 只在低流量工况下的示值误差超过计量允许误差，最大负偏差为 5.4%。",
+      "source_evidence": [
+        {
+          "source_id": "S3",
+          "extract_or_location": "抽检清河片区 400 只居民机械水表，其中 46 只在低流量工况下的示值误差超过计量允许误差，最大负偏差为 5.4%。"
+        }
+      ],
+      "assumptions": [
+        "46 只超差表与 400 只抽检表来自同一次抽检，样本没有被重新分层。",
+        "抽检样本对片区在役机械水表的年限与口径分布具有代表性，评估本身没有检验这一点。"
+      ],
+      "derived_assertions": [
+        {
+          "expression": "约为 11.5%",
+          "derivation": "46 只超差表除以 400 只抽检表等于 11.5%，此处按抽检只数直接换算，不外推到片区全部在役表具。"
+        }
+      ],
+      "as_of": "2025-11-20",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "按抽检结果计算，清河片区居民机械水表在低流量工况下的超差比例约为 11.5%"
+      ],
+      "supports": [
+        "C8"
+      ],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": "在抽检自己的只数上做换算，因为评估只给了超差只数，没有给比例，所以记为测算而不是事实。",
+      "decision_relevance": "委员会拿来和成因拆分对比的是比例，不是只数。",
+      "what_would_change": "一次把流量点扩展到用户常用流量段的抽检。",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "这个数字是在一份材料上做的换算，不是一次独立观测。"
+      },
+      "resolution": null,
+      "limitations": "由一次抽检推出，且只在一个流量点上成立。"
+    },
+    {
+      "claim_id": "C10",
+      "claim": "截至2026年7月10日，澜川市居民生活用水第一级综合水价为每立方米 3.85 元。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S5"
+      ],
+      "extract_or_location": "截至2026年7月10日，澜川市居民生活用水第一级综合水价为每立方米 3.85 元。",
+      "source_evidence": [
+        {
+          "source_id": "S5",
+          "extract_or_location": "截至2026年7月10日，澜川市居民生活用水第一级综合水价为每立方米 3.85 元。"
+        }
+      ],
+      "as_of": "2026-07-10",
+      "time_sensitive": true,
+      "verified_at": "2026-07-20",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "截至2026年7月10日，澜川市居民生活用水第一级综合水价为每立方米 3.85 元"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "现行水价是所有回收期计算的起点。",
+      "what_would_change": "一次价格听证之后重置公布价格。",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "由定价机构自己公布的现行价格。"
+      },
+      "resolution": null,
+      "limitations": "价格随听证调整，因此这个数字带着读取日期。"
+    }
+  ],
+  "synthesis": {
+    "central_judgment_claim_ids": [
+      "C1",
+      "C6"
+    ],
+    "counterevidence_claim_ids": [
+      "C8"
+    ],
+    "adversarial_tests": [
+      {
+        "hypothesis": "水丢在表上：把片区在役的机械水表全部换掉，就能把产销差压下来。",
+        "test": "把独立抽检的超差只数与主管部门的成因拆分、供水企业的回收率序列放在一起比对。",
+        "claim_ids": [
+          "C8",
+          "C9",
+          "C2",
+          "C3"
+        ],
+        "outcome": "unresolved",
+        "result": "46 只表在低流量点上超差留在记录上，没有任何材料说明用户全年有多少水从这个流量点流过。",
+        "effect_on_conclusion": "核心判断对流量点上的证据成立，对全年可回收水量明确记为未决。"
+      },
+      {
+        "hypothesis": "计量误差才是产销差的主要成因，管网漏损被高估了。",
+        "test": "检查公开材料里唯一的定量拆分把水量放在哪一侧。",
+        "claim_ids": [
+          "C2",
+          "C6"
+        ],
+        "outcome": "rejected",
+        "result": "记录上唯一的定量拆分把产销差水量的六成八放在管网漏损上。",
+        "effect_on_conclusion": "表位以内的资本按计费准确投资看待，不按产销差改善看待。"
+      }
+    ],
+    "implications": [
+      {
+        "statement": "在管网漏损被压下来之前投出的表位资本，买到的是计费准确，不是水量。",
+        "claim_ids": [
+          "C6"
+        ],
+        "for_whom": "清河水务服务公司投资委员会",
+        "timing": "十月底申报截止之前"
+      },
+      {
+        "statement": "按今天已经丢掉的水量论证的需求，在两个成本估算的任一端都站得住。",
+        "claim_ids": [
+          "C1"
+        ],
+        "for_whom": "清河水务服务公司投资委员会",
+        "timing": "2027年分摊周期"
+      }
+    ],
+    "decisions_or_takeaways": [
+      {
+        "statement": "在2026年窗口里报第一期换表，把第二期挂在城中村段的分区计量试验结果上。",
+        "rationale_claim_ids": [
+          "C6",
+          "C1"
+        ],
+        "tradeoff": "分期申报放弃了管网更新一旦确定就能论证的大方案。",
+        "success_signal": "第一期覆盖的用户计费水量升上去，而同一批小区的夜间最小流量不动。",
+        "failure_signal": "计费水量与夜间最小流量一起变动，说明观测到的变化来自管网工况。"
+      }
+    ],
+    "scenarios": [
+      {
+        "name": "管网更新专项落地",
+        "conditions": [
+          "水务局在2027年计划里安排城中村段管网更新专项。"
+        ],
+        "leading_indicators": [
+          "评审征求意见稿里出现管网更新的专项条目。"
+        ],
+        "disconfirming_indicators": [
+          "最终结论只安排表具更换补贴。"
+        ],
+        "implication": "大方案反而更划算，分期安排应当重新考虑。",
+        "claim_ids": [
+          "C6",
+          "C1"
+        ]
+      }
+    ],
+    "limitations": [
+      "用户端的低流量水量份额没有任何材料测过，超差比例只在一个流量点上成立。",
+      "两个成本估算之间没有任何公开的口径对账。",
+      "回收率来自正在申请改造补贴的供水企业，属于有立场的自报数据。",
+      "本报告的主题是一个合成的验收用例，引用的每一份记录都发布在保留给文档示例的域名上。"
+    ],
+    "research_stop_reason": "决定表决的两个高优先级问题都从有责任主体的记录和一份独立抽检里得到回答，剩下的缺口如实记录，没有用推论补上。"
+  },
+  "unresolved_questions": [
+    "清河片区居民全年用水里，有多少水是以机械表容易少计的低流量流过的？水务局的评审报告、供水集团的年报和独立抽检评估都翻查过用户端流量分布，三份材料都没有；如果这个份额很高，第二期换表的收益会远大于成因拆分给出的那一成二。"
+  ]
+}

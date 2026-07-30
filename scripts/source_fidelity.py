@@ -33,7 +33,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from artifact_safety import artifact_collision_errors  # noqa: E402
+from artifact_safety import artifact_collision_errors, publish_temp_file  # noqa: E402
 from report_contract import canonical_visible_text  # noqa: E402
 
 SCHEMA_VERSION = 1
@@ -294,7 +294,10 @@ def _atomic_write_json(path, payload, *, overwrite=False):
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        temporary.replace(path)
+        try:
+            publish_temp_file(temporary, path, force=overwrite)
+        except FileExistsError as exc:
+            raise ValueError(f"Artifact already exists: {path}") from exc
     except Exception:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

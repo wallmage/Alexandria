@@ -1933,5 +1933,190 @@ class LedgerReferenceTests(unittest.TestCase):
         self.assertTrue(any("unknown adversarial-test claim C9" in error for error in errors), errors)
 
 
+class ChineseQuantityScanTests(unittest.TestCase):
+    """Numbers are verified the same way in English and in Chinese.
+
+    Han characters match ``\\w``, so the digit scan's word-boundary guard used to
+    switch itself off in ordinary Chinese prose, where numerals sit flush
+    against the characters beside them. Nothing between a Chinese claim and its
+    evidence was checked.
+    """
+
+    def test_spaceless_chinese_claim_creates_obligations(self):
+        for claim, figure in (
+            ("营收增长12%。", "12"),
+            ("全年用電量達" "6800" "萬度。", "68000000"),
+        ):
+            with self.subTest(claim=claim):
+                obligations = validate_ledger.quantitative_obligations(claim)
+                self.assertTrue(obligations, claim)
+                self.assertIn(
+                    f"n:{figure}",
+                    set().union(*(forms for _, forms in obligations)),
+                )
+
+    def test_spaceless_chinese_extract_satisfies_the_same_figure(self):
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "营收增长12%。",
+                    "extract_or_location": (
+                        "该公司报告营收增长12%。"
+                    ),
+                }
+            ),
+        )
+
+    def test_a_scaled_figure_rejects_evidence_at_a_different_scale(self):
+        # A scale word is part of the figure: keeping the bare digits as an
+        # acceptable form let "6800萬" match "6800億" (and "5 million" match
+        # "5 billion") through the shared digits.
+        for claim, extract in (
+            ("全年用電量達6800萬度。", "全年用電量達6800億度。"),
+            ("全年用電量達6800萬度。", "全年用電量達6800度。"),
+            ("增加了6800。", "增加至6800億。"),
+            ("Usage reached 6800 million kWh.", "Usage reached 6800 billion kWh."),
+            ("Usage reached 5 million users.", "Usage reached 5 billion users."),
+        ):
+            with self.subTest(claim=claim, extract=extract):
+                errors = validate_ledger.evidence_coverage_errors(
+                    {
+                        "claim_id": "C900",
+                        "kind": "fact",
+                        "claim": claim,
+                        "extract_or_location": extract,
+                    }
+                )
+                self.assertTrue(errors, (claim, extract))
+
+    def test_a_scaled_figure_still_matches_equivalent_notations(self):
+        for claim, extract in (
+            ("全年用電量達6800萬度。", "電量為68,000,000度。"),
+            ("增至0.68億度。", "電量為6800萬度。"),
+            ("Usage reached 68 million kWh.", "metered at 68,000,000 kWh."),
+        ):
+            with self.subTest(claim=claim, extract=extract):
+                self.assertEqual(
+                    [],
+                    validate_ledger.evidence_coverage_errors(
+                        {
+                            "claim_id": "C900",
+                            "kind": "fact",
+                            "claim": claim,
+                            "extract_or_location": extract,
+                        }
+                    ),
+                )
+
+    def test_a_chinese_figure_absent_from_the_extract_is_rejected(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "全年用電量達" "6800" "萬度。",
+                "extract_or_location": (
+                    "全年用電量達" "5200" "萬度。"
+                ),
+            }
+        )
+        self.assertTrue(
+            any("6800" in error and "quantity" in error for error in errors),
+            errors,
+        )
+
+    def test_chinese_scale_suffix_matches_the_written_out_figure(self):
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "全年用電量達" "6800" "萬度。",
+                    "extract_or_location": (
+                        "全年用電量為" "68,000,000" "度。"
+                    ),
+                }
+            ),
+        )
+
+    def test_a_chinese_date_is_one_obligation_not_three_numbers(self):
+        obligations = validate_ledger.quantitative_obligations(
+            "報告日期為" "2026" "年" "7" "月" "28" "日。"
+        )
+        self.assertEqual(["2026-07-28"], [display for display, _ in obligations])
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": (
+                        "報告日期為" "2026" "年" "7"
+                        "月" "28" "日。"
+                    ),
+                    "extract_or_location": (
+                        "刊登於" "2026-07-28" "。"
+                    ),
+                }
+            ),
+        )
+
+    def test_ledger_ids_and_identifiers_stay_excluded_in_chinese_prose(self):
+        self.assertEqual(
+            [],
+            validate_ledger.quantitative_obligations(
+                "見C12的說明，並参考S3。"
+            ),
+        )
+        self.assertEqual(
+            ["CVE-2021-1234"],
+            [
+                display
+                for display, _ in validate_ledger.quantitative_obligations(
+                    "漏洞CVE-2021-1234已修補。"
+                )
+            ],
+        )
+        self.assertEqual(
+            ["v1.2.3"],
+            [
+                display
+                for display, _ in validate_ledger.quantitative_obligations(
+                    "本版本v1.2.3已發布。"
+                )
+            ],
+        )
+
+    def test_english_scanning_is_unchanged(self):
+        self.assertEqual(
+            [("12", {"n:12"}), ("2025", {"n:2025"})],
+            validate_ledger.quantitative_obligations(
+                "Revenue grew 12% in 2025."
+            ),
+        )
+        self.assertEqual(
+            [],
+            validate_ledger.quantitative_obligations(
+                "See https://example.com/a/2026-07-28 for claim C12."
+            ),
+        )
+        for name in ("en", "zh-CN", "zh-HK"):
+            ledger = json.loads(
+                (
+                    ROOT
+                    / "tests"
+                    / "fixtures"
+                    / "golden"
+                    / name
+                    / "ledger.json"
+                ).read_text(encoding="utf-8")
+            )
+            with self.subTest(ledger=name):
+                self.assertEqual([], validate_ledger.validate_references(ledger))
+
+
 if __name__ == "__main__":
     unittest.main()

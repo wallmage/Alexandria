@@ -3,14 +3,17 @@
 import argparse
 import json
 import sys
-from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts import md_to_pdf, validate_report  # noqa: E402
-from tests.build_gated_fixtures import CASES, build_case  # noqa: E402
+from tests.build_gated_fixtures import (  # noqa: E402
+    CASES,
+    build_case,
+    localized_ledger_report_date,
+)
 from tests.source_fidelity_transport import (  # noqa: E402
     mock_production_transport,
 )
@@ -102,10 +105,7 @@ def run_matrix(output_root):
             ledger = json.loads(
                 (case_root / "ledger.json").read_text(encoding="utf-8")
             )
-            report_date = md_to_pdf.localized_date(
-                case["lang"],
-                date.fromisoformat(ledger["report_date"]),
-            )
+            report_date = localized_ledger_report_date(case, ledger)
             for template in TEMPLATES:
                 output = pdfs / f"{case['name']}-{template}.pdf"
                 md_to_pdf.render_pdf(

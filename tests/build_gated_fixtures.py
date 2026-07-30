@@ -5,13 +5,16 @@ import argparse
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.content_gate import run_content_gate
+from scripts.gate_severity import hard_errors
 from scripts.report_blocks import visible_report_blocks
+from scripts.report_contract import localized_date
 from scripts.rewild_gate import file_sha256, run_gate
 from scripts.source_fidelity import issue_source_fidelity_receipt
 from scripts.validate_report import _report_prose
@@ -93,11 +96,81 @@ CASES = (
 )
 
 
+def localized_ledger_report_date(case, ledger_data):
+    """Return the strict locale date derived from one ledger report_date."""
+    raw_value = (
+        ledger_data.get("report_date")
+        if isinstance(ledger_data, dict)
+        else None
+    )
+    try:
+        report_day = date.fromisoformat(raw_value)
+    except (TypeError, ValueError):
+        report_day = None
+    if report_day is None or report_day.isoformat() != raw_value:
+        raise ValueError("Fixture ledger report_date must be a strict ISO date.")
+    return localized_date(case["lang"], report_day)
+
+
+def _is_fixture_date_line(value, lang):
+    if lang == "en":
+        return bool(
+            re.fullmatch(
+                r"(?:[A-Z][a-z]+ \d{4}|\d{1,2} [A-Z][a-z]+ \d{4})",
+                value,
+            )
+        )
+    return bool(re.fullmatch(r"\d{4}年\d{1,2}月(?:\d{1,2}日)?", value))
+
+
+def bind_fixture_report_date(report_text, case, ledger_data):
+    """Replace the fixture's visible date with its ledger-derived day."""
+    expected = localized_ledger_report_date(case, ledger_data)
+    lines = report_text.splitlines(keepends=True)
+    title_seen = False
+    candidates = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not title_seen:
+            if re.match(r"^#\s+\S", stripped):
+                title_seen = True
+            continue
+        if stripped.startswith("## "):
+            break
+        if stripped.startswith(">"):
+            value = stripped[1:].strip()
+            if _is_fixture_date_line(value, case["lang"]):
+                candidates.append(index)
+    if len(candidates) != 1:
+        raise ValueError(
+            f"{case['fixture']} must contain exactly one visible report date "
+            "between its H1 and first H2."
+        )
+    index = candidates[0]
+    ending = (
+        "\r\n"
+        if lines[index].endswith("\r\n")
+        else "\n" if lines[index].endswith("\n") else ""
+    )
+    lines[index] = f"> {expected}{ending}"
+    return "".join(lines)
+
+
 def build_case(case, output_root):
     case_root = output_root / case["name"]
     case_root.mkdir(parents=True, exist_ok=True)
     fixture = ROOT / "tests" / "fixtures" / case["fixture"]
     original = fixture.read_text(encoding="utf-8")
+    ledger_data = json.loads(
+        (ROOT / "tests" / "fixtures" / "evidence-ledger.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    original = bind_fixture_report_date(
+        original,
+        case,
+        ledger_data,
+    )
     heading = case["sources_heading"]
     if original.count(heading) != 1:
         raise ValueError(f"{fixture} must contain exactly one {heading!r}")
@@ -200,12 +273,14 @@ def build_case(case, output_root):
         + "\n",
         encoding="utf-8",
     )
-    errors = run_gate(
-        report,
-        source,
-        report_lang=case["lang"],
-        review_note_path=review,
-        receipt_path=receipt,
+    errors = hard_errors(
+        run_gate(
+            report,
+            source,
+            report_lang=case["lang"],
+            review_note_path=review,
+            receipt_path=receipt,
+        )
     )
     if errors:
         raise RuntimeError(
@@ -213,11 +288,6 @@ def build_case(case, output_root):
             + " ".join(errors)
         )
 
-    ledger_data = json.loads(
-        (ROOT / "tests" / "fixtures" / "evidence-ledger.json").read_text(
-            encoding="utf-8"
-        )
-    )
     ledger_data["brief"]["report_language"] = case["lang"]
     ledger_data["sources"][0]["url"] = case["url"]
     ledger_data["claims"][0]["report_excerpts"] = mapped_excerpts
@@ -232,7 +302,7 @@ def build_case(case, output_root):
     issue_source_fidelity_receipt(
         ledger,
         source_fidelity_receipt,
-        now=__import__("datetime").date(2026, 7, 28),
+        now=date.fromisoformat(ledger_data["report_date"]),
     )
     content_review.write_text(
         json.dumps(
@@ -287,12 +357,14 @@ def build_case(case, output_root):
         + "\n",
         encoding="utf-8",
     )
-    errors = run_content_gate(
-        report,
-        ledger,
-        content_review,
-        content_receipt,
-        source_fidelity_receipt_path=source_fidelity_receipt,
+    errors = hard_errors(
+        run_content_gate(
+            report,
+            ledger,
+            content_review,
+            content_receipt,
+            source_fidelity_receipt_path=source_fidelity_receipt,
+        )
     )
     if errors:
         raise RuntimeError(

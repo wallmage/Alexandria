@@ -9,6 +9,12 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from gate_severity import emit_findings  # noqa: E402
+
 DEFAULT_SCHEMA = (
     Path(__file__).resolve().parents[1]
     / "references"
@@ -226,15 +232,52 @@ _MONTHS = {
     "december": 12,
 }
 
+#: Han, kana, and CJK-compatibility ideographs. Python's ``\w`` matches every
+#: one of them, so a plain ``(?<![\w.])`` guard switched the digit scan off
+#: completely in ordinary Chinese prose, where numerals sit flush against the
+#: characters beside them: ``全年用電量達6800萬度`` asserted no figure at all. The guard
+#: still has to stop a digit inside an ASCII identifier, so CJK is subtracted
+#: from it rather than the guard being dropped.
+_CJK_RANGES = "\u2e80-\u9fff\uf900-\ufaff"
+
+#: ``\b`` vanishes for the same reason between a Han character and an ASCII
+#: token. These are that boundary with CJK subtracted, so dates, versions, and
+#: ledger IDs stay recognizable where Chinese prose runs straight into them.
+_NOT_WORD_BEFORE = r"(?<![^\W" + _CJK_RANGES + r"])"
+_NOT_WORD_AFTER = r"(?![^\W" + _CJK_RANGES + r"])"
+
+#: Chinese scale suffixes attach with no separator, so they cannot use the
+#: ``\b`` the English scale words rely on. 千, 百, and 兆 stay out: the first
+#: two are rare beside digits, and 兆 is read as 10**6 or 10**12 depending on
+#: the writer.
+_CJK_SCALE_WORDS = {
+    "萬": 10000, "万": 10000,
+    "億": 100000000, "亿": 100000000,
+}
+
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
-_LEDGER_ID_RE = re.compile(r"\b[CS][0-9]{1,7}\b")
-_IDENTIFIER_RE = re.compile(r"\b[A-Za-z]{2,}[-‑][0-9][0-9A-Za-z‑-]*\b")
-_ISO_DATE_RE = re.compile(r"\b([0-9]{4})-([0-9]{2})-([0-9]{2})\b")
-_ISO_MONTH_RE = re.compile(r"\b([0-9]{4})-([0-9]{2})\b")
-_VERSION_RE = re.compile(r"\b[vV]?([0-9]+(?:\.[0-9]+){2,})\b")
+_LEDGER_ID_RE = re.compile(
+    _NOT_WORD_BEFORE + r"[CS][0-9]{1,7}" + _NOT_WORD_AFTER
+)
+_IDENTIFIER_RE = re.compile(
+    _NOT_WORD_BEFORE
+    + r"[A-Za-z]{2,}[-‑][0-9][0-9A-Za-z‑-]*"
+    + _NOT_WORD_AFTER
+)
+_ISO_DATE_RE = re.compile(
+    _NOT_WORD_BEFORE + r"([0-9]{4})-([0-9]{2})-([0-9]{2})" + _NOT_WORD_AFTER
+)
+_ISO_MONTH_RE = re.compile(
+    _NOT_WORD_BEFORE + r"([0-9]{4})-([0-9]{2})" + _NOT_WORD_AFTER
+)
+_VERSION_RE = re.compile(
+    _NOT_WORD_BEFORE + r"[vV]?([0-9]+(?:\.[0-9]+){2,})" + _NOT_WORD_AFTER
+)
 _NUMBER_RE = re.compile(
-    r"(?<![\w.])([0-9]+(?:[,\u00a0\u202f][0-9]{3})*(?:\.[0-9]+)?)(?![0-9])"
-    r"(?:\s*(k|mm|m|bn|b|tn|thousand|million|billion|trillion)\b)?",
+    _NOT_WORD_BEFORE + r"(?<!\.)"
+    r"([0-9]+(?:[,\u00a0\u202f][0-9]{3})*(?:\.[0-9]+)?)(?![0-9])"
+    r"(?:\s*(?:(k|mm|m|bn|b|tn|thousand|million|billion|trillion)\b"
+    r"|(" + "|".join(_CJK_SCALE_WORDS) + r")))?",
     re.IGNORECASE,
 )
 _NUMBER_WORD_ALT = "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True))
@@ -324,7 +367,15 @@ _MONTH_NAME_DATE_RE = re.compile(
     r"(?i)\b(?:([0-9]{1,2})\s+)?(" + "|".join(sorted(_MONTHS, key=len, reverse=True))
     + r")\.?\s+(?:([0-9]{1,2})(?:st|nd|rd|th)?,?\s+)?([0-9]{4})\b"
 )
-_SLASH_DATE_RE = re.compile(r"\b([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})\b")
+_SLASH_DATE_RE = re.compile(
+    _NOT_WORD_BEFORE + r"([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})" + _NOT_WORD_AFTER
+)
+#: 2026年7月28日 is one date, exactly as "28 July 2026" is. Left as bare digits it
+#: would assert three separate figures, so it is normalized like every other
+#: date form. A bare 2026年 stays a number, which is what "in 2026" already does.
+_CJK_DATE_RE = re.compile(
+    r"([0-9]{4})\s*年\s*([0-9]{1,2})\s*月(?:\s*([0-9]{1,2})\s*日)?"
+)
 
 
 def _duplicates(values):
@@ -366,6 +417,13 @@ def _normalize_number(raw):
 
 
 def _normalize_dates(text):
+    text = _CJK_DATE_RE.sub(
+        lambda match: (
+            f"{match.group(1)}-{int(match.group(2)):02d}"
+            + (f"-{int(match.group(3)):02d}" if match.group(3) else "")
+        ),
+        text,
+    )
     text = _SLASH_DATE_RE.sub(
         lambda match: (
             f"{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
@@ -434,14 +492,20 @@ def _scan_quantities(text):
     def number(match):
         normalized = _normalize_number(match.group(1))
         forms = {f"n:{normalized}"}
-        scale = _SCALE_WORDS.get((match.group(2) or "").casefold())
+        scale = _SCALE_WORDS.get(
+            (match.group(2) or "").casefold()
+        ) or _CJK_SCALE_WORDS.get(match.group(3) or "")
         if scale:
             try:
                 scaled = float(normalized) * scale
             except ValueError:
                 scaled = None
             if scaled is not None and scaled == int(scaled):
-                forms.add(f"n:{int(scaled)}")
+                # The scale word is part of the asserted figure: "6800萬" means
+                # 68,000,000 and nothing else. Keeping the bare digits as an
+                # acceptable form let "6800萬" match an extract saying "6800億"
+                # (and "5 million" match "5 billion") through the shared digits.
+                forms = {f"n:{int(scaled)}"}
         return (match.group(0).strip(), forms, set(forms), False)
 
     def word_number(match):
@@ -2338,13 +2402,10 @@ def main(argv=None):
         return 1
 
     errors = validate_schema(data, schema) + validate_references(data)
-    if errors:
-        for error in errors:
-            print(f"[FAIL] {error}", file=sys.stderr)
-        return 1
-
-    print(f"[OK] Evidence ledger validated: {args.ledger}")
-    return 0
+    return emit_findings(
+        errors,
+        ok_message=f"[OK] Evidence ledger validated: {args.ledger}",
+    )
 
 
 if __name__ == "__main__":

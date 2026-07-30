@@ -16,9 +16,15 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 try:
+    from .gate_severity import emit_findings, hard_errors, warning
+    from .report_blocks import mask_fenced_code as _mask_fenced_code
     from .report_contract import detect_language
+    from .source_fidelity import validate_source_fidelity_receipt_online
 except ImportError:
+    from gate_severity import emit_findings, hard_errors, warning
+    from report_blocks import mask_fenced_code as _mask_fenced_code
     from report_contract import detect_language
+    from source_fidelity import validate_source_fidelity_receipt_online
 
 SOURCE_HEADINGS = {
     "sources",
@@ -89,43 +95,18 @@ def _is_safe_identity_label(value):
 
 
 def _h2_sections(text):
+    """Return raw H2 titles with offsets.
+
+    This deliberately keeps the verbatim heading text that
+    ``report_blocks.h2_sections`` normalizes away: the section-review contract
+    in content_gate.py and the Sources-placement rules below are keyed to the
+    literal heading a user typed, so the two are not interchangeable.
+    """
     masked = _mask_fenced_code(text)
     return [
         (match.group(1).strip(), match.start())
         for match in re.finditer(r"^##\s+(.+?)\s*$", masked, re.MULTILINE)
     ]
-
-
-def _mask_fenced_code(text):
-    masked = []
-    fence_char = None
-    fence_length = 0
-
-    def hide(line):
-        return "".join(char if char in "\r\n" else " " for char in line)
-
-    for line in text.splitlines(keepends=True):
-        if fence_char is None:
-            opener = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-            if opener:
-                marker = opener.group(1)
-                fence_char = marker[0]
-                fence_length = len(marker)
-                masked.append(hide(line))
-            else:
-                masked.append(line)
-            continue
-
-        closing = re.match(r"^ {0,3}([`~]{3,})[ \t]*(?:\r?\n)?$", line)
-        masked.append(hide(line))
-        if (
-            closing
-            and set(closing.group(1)) == {fence_char}
-            and len(closing.group(1)) >= fence_length
-        ):
-            fence_char = None
-            fence_length = 0
-    return "".join(masked)
 
 
 def _mask_nonlink_regions(text):
@@ -308,7 +289,14 @@ def simplified_script_errors(text, *, sections=None):
 
 
 def _report_prose(text, sections):
-    """Return report body prose without Sources, URLs, markup, or code."""
+    """Return report body prose without Sources, URLs, markup, or code.
+
+    ``report_blocks.visible_report_prose`` is block-structured and keeps a
+    different set of text: it drops only recognized bibliography blocks and
+    re-joins normalized blocks, which changes both the word and character
+    counts the length policy is defined against. The two are not equivalent, so
+    this stays the counting surface.
+    """
     source_starts = [
         start
         for heading, start in sections
@@ -599,7 +587,7 @@ def _page_quality_errors(path, expected_lang=None):
     The visual-inspection checklist in references/pdf-production.md used to be
     enforced by eye alone, which is how a near-blank page shipped. These run the
     mechanical part of that checklist. A missing render backend downgrades to a
-    warning on stderr rather than a silent pass, so the gap is visible.
+    warning rather than a silent pass, so the gap is visible.
     """
     try:
         from scripts import pdf_quality
@@ -610,16 +598,19 @@ def _page_quality_errors(path, expected_lang=None):
             path, lang=expected_lang, check_tokens=True
         )
     except ImportError as exc:
-        print(
-            f"[WARN] PDF page-quality checks skipped, render backend missing: {exc}",
-            file=sys.stderr,
-        )
-        return []
+        return [
+            warning(
+                "PDF page-quality checks skipped, render backend missing: "
+                f"{exc}"
+            )
+        ]
     except Exception as exc:
         return [f"PDF page-quality checks could not run: {exc}"]
-    for finding in report.warnings:
-        print(f"[WARN] {finding.format()}", file=sys.stderr)
-    return [finding.format() for finding in report.errors]
+    findings = [finding.format() for finding in report.errors]
+    findings.extend(
+        warning(finding.format()) for finding in report.warnings
+    )
+    return findings
 
 
 def _file_sha256(path):
@@ -748,14 +739,16 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
                     fidelity_notes_path = notes_file
             if errors:
                 return errors
-            rerun_errors = run_gate(
-                report_path,
-                Path(receipt["source_path"]),
-                report_lang=receipt_lang,
-                review_note_path=Path(receipt["review_note_path"]),
-                receipt_path=regenerated,
-                waiver_path=waiver_path,
-                fidelity_notes_path=fidelity_notes_path,
+            rerun_errors = hard_errors(
+                run_gate(
+                    report_path,
+                    Path(receipt["source_path"]),
+                    report_lang=receipt_lang,
+                    review_note_path=Path(receipt["review_note_path"]),
+                    receipt_path=regenerated,
+                    waiver_path=waiver_path,
+                    fidelity_notes_path=fidelity_notes_path,
+                )
             )
             if not rerun_errors and regenerated.is_file():
                 fresh = json.loads(regenerated.read_text(encoding="utf-8"))
@@ -875,17 +868,49 @@ def main(argv=None):
                 from .content_gate import validate_content_receipt
             except ImportError:
                 from content_gate import validate_content_receipt
-            errors.extend(
-                validate_content_receipt(
-                    markdown_path,
-                    Path(args.ledger),
-                    content_receipt,
-                    source_fidelity_receipt_path=Path(
-                        args.source_fidelity_receipt
-                    ),
-                    expected_lang=args.expected_lang,
-                )
+            content_errors = validate_content_receipt(
+                markdown_path,
+                Path(args.ledger),
+                content_receipt,
+                source_fidelity_receipt_path=Path(
+                    args.source_fidelity_receipt
+                ),
+                expected_lang=args.expected_lang,
             )
+            errors.extend(content_errors)
+            if not hard_errors(content_errors):
+                try:
+                    source_receipt_bytes = Path(
+                        args.source_fidelity_receipt
+                    ).read_bytes()
+                    source_receipt = json.loads(source_receipt_bytes)
+                except (
+                    OSError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    errors.append(
+                        f"Source-fidelity receipt could not be read: {exc}"
+                    )
+                else:
+                    if (
+                        content_receipt.get(
+                            "source_fidelity_receipt_sha256"
+                        )
+                        != hashlib.sha256(
+                            source_receipt_bytes
+                        ).hexdigest()
+                    ):
+                        errors.append(
+                            "Source-fidelity receipt changed after content review."
+                        )
+                    else:
+                        errors.extend(
+                            validate_source_fidelity_receipt_online(
+                                Path(args.ledger),
+                                source_receipt,
+                            )
+                        )
     if args.pdf:
         errors.extend(
             validate_pdf(
@@ -897,13 +922,10 @@ def main(argv=None):
             )
         )
 
-    if errors:
-        for error in errors:
-            print(f"[FAIL] {error}", file=sys.stderr)
-        return 1
-
-    print(f"[OK] Report validated: {markdown_path}")
-    return 0
+    return emit_findings(
+        errors,
+        ok_message=f"[OK] Report validated: {markdown_path}",
+    )
 
 
 if __name__ == "__main__":

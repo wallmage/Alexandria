@@ -434,6 +434,50 @@ Body.
             self.assertEqual("image/png", fetched["mime_type"])
             self.assertEqual(original, image.read_bytes())
 
+    def test_prepared_asset_snapshot_survives_path_replacement(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            image = root / "figure.png"
+            original = encoded_raster("PNG", size=(2, 2))
+            replacement = encoded_raster("PNG", size=(3, 3))
+            image.write_bytes(original)
+            assets = self.converter.collect_render_assets(
+                '<img src="figure.png">',
+                root,
+            )
+
+            image.write_bytes(replacement)
+            fetcher = self.converter.make_snapshot_url_fetcher(
+                root,
+                assets,
+                default_fetcher=lambda _url: {},
+            )
+            fetched = fetcher(image.as_uri())
+
+            self.assertEqual(original, fetched["string"])
+            self.assertEqual("image/png", fetched["mime_type"])
+            self.assertEqual(replacement, image.read_bytes())
+
+    def test_snapshot_fetcher_never_reopens_an_uncaptured_local_asset(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            captured = root / "captured.png"
+            uncaptured = root / "uncaptured.png"
+            captured.write_bytes(encoded_raster("PNG"))
+            uncaptured.write_bytes(encoded_raster("PNG"))
+            assets = self.converter.collect_render_assets(
+                '<img src="captured.png">',
+                root,
+            )
+            fetcher = self.converter.make_snapshot_url_fetcher(
+                root,
+                assets,
+                default_fetcher=lambda _url: {},
+            )
+
+            with self.assertRaisesRegex(ValueError, "not captured"):
+                fetcher(uncaptured.as_uri())
+
     def test_local_image_rejects_symbolic_links(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -602,10 +646,18 @@ Body.
                     encoding="utf-8",
                 )
                 kwargs[name] = path
+        content_snapshot = json.loads(
+            Path(kwargs["content_receipt"]).read_text(encoding="utf-8")
+        )
+        content_snapshot["report_sha256"] = hashlib.sha256(
+            source.read_bytes()
+        ).hexdigest()
         with mock.patch.object(
             self.converter, "validate_rewild_for_render", return_value=None
         ), mock.patch.object(
-            self.converter, "validate_content_for_render", return_value=None
+            self.converter,
+            "validate_content_for_render",
+            return_value=content_snapshot,
         ):
             return self.converter.render_pdf(
                 source,
@@ -1526,6 +1578,50 @@ Body.
                             "en",
                             {"report_date": requested_date},
                         )
+
+    def test_render_delivery_rechecks_source_fidelity_online(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report = root / "report.md"
+            ledger = root / "ledger.json"
+            content_receipt = root / "content.json"
+            source_receipt = root / "source.json"
+            report.write_text("# Report\n", encoding="utf-8")
+            ledger.write_text('{"report_date": "2026-07-28"}', encoding="utf-8")
+            source_receipt.write_text('{"status": "passed"}', encoding="utf-8")
+            content_receipt.write_text(
+                json.dumps(
+                    {
+                        "source_fidelity_receipt_sha256": hashlib.sha256(
+                            source_receipt.read_bytes()
+                        ).hexdigest()
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(
+                    self.converter,
+                    "validate_content_receipt",
+                    return_value=[],
+                ),
+                mock.patch.object(
+                    self.converter,
+                    "validate_source_fidelity_receipt_online",
+                    return_value=["Live source changed."],
+                ) as online,
+                self.assertRaisesRegex(ValueError, "Live source changed"),
+            ):
+                self.converter.validate_content_for_render(
+                    report,
+                    ledger,
+                    content_receipt,
+                    "en",
+                    source_receipt,
+                )
+
+            online.assert_called_once_with(ledger, {"status": "passed"})
 
     def test_unapproved_markdown_body_image_cannot_render(self):
         from PIL import Image

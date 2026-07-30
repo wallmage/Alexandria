@@ -1,0 +1,685 @@
+{
+  "schema_version": 4,
+  "subject": "錦寧中心的區域供冷改造計劃",
+  "research_question": "衡輝置業應否在 2027 年供冷收費期開始之前，為錦寧中心的冷凍機組改造撥款？",
+  "brief": {
+    "intended_reader": "衡輝置業資產投資委員會",
+    "decision_or_use": "決定是否在 2026 年撥款期資助錦寧中心更換冷凍水泵組與相關控制系統。",
+    "archetype": "system",
+    "report_language": "zh-HK",
+    "editorial_mode": "analytical",
+    "scope": {
+      "time_horizon": "2021 年至 2027 年收費期",
+      "geography": "錦寧商業區的區域供冷環路及錦寧中心",
+      "inclusions": [
+        "供冷協議的合約量與費用結構",
+        "區域供冷收費檢討",
+        "用電紀錄與機房運行系數",
+        "撥款決策的程序與日程"
+      ],
+      "exclusions": [
+        "租戶自用設備的採購決定",
+        "環路上其他用戶的商業安排",
+        "真實題材：本紀錄引用的每一份文件都刊載於保留作文件說明用途的域名"
+      ]
+    }
+  },
+  "people": [
+    {
+      "person_id": "P1",
+      "name": "陳兆聰",
+      "aliases": [],
+      "living_status": "living",
+      "public_role": "public",
+      "relationship": "adjacent"
+    }
+  ],
+  "report_date": "2026-07-28",
+  "coverage": [
+    {
+      "area": "用電需求",
+      "question": "錦寧商業區的寫字樓用多少電，趨勢是否耐久？",
+      "priority": "high",
+      "decision_relevance": "沒有負荷趨勢，委員會無法為機房改造定出規模。",
+      "completion_criteria": "用電數列由監管機構的紀錄確立，並取得獨立轉載核對。",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C1",
+        "C3"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "供冷合約結構",
+      "question": "甚麼封住了錦寧中心可以省下的供冷開支？",
+      "priority": "high",
+      "decision_relevance": "真正的制約決定機組改造能否換來任何節省。",
+      "completion_criteria": "由合約量的計算基礎與費用佔比確認制約所在，並以對立解釋檢驗。",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C2",
+        "C6",
+        "C8",
+        "C9"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "供冷收費",
+      "question": "2027 年檢討之後用冷要付多少錢？",
+      "priority": "high",
+      "decision_relevance": "收費水平決定改造工程在收費期內能否回本。",
+      "completion_criteria": "紀錄上兩個成本估算都列出，並對接或公開說明其分歧。",
+      "owner": "primary",
+      "status": "disputed",
+      "claim_ids": [
+        "C4",
+        "C5",
+        "C10"
+      ],
+      "gap_impact": null,
+      "notes": "供冷公司與管理局對增量成本的估算不同；報告同時列出兩者。"
+    },
+    {
+      "area": "決策程序",
+      "question": "誰批准撥款，按甚麼日程？",
+      "priority": "medium",
+      "decision_relevance": "錯過提交窗口的委員會要等一個完整收費期。",
+      "completion_criteria": "由機構自身的紀錄點名批准者及其公布日程。",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C7"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "下調合約量的審批紀錄",
+      "question": "供冷公司過去有沒有批准過下調合約量的申請？",
+      "priority": "medium",
+      "decision_relevance": "獲批的先例會令改造省下的用量連帶省下供冷量費。",
+      "completion_criteria": "一份記載第 9 條申請結果的已公布紀錄。",
+      "owner": "primary",
+      "status": "gap",
+      "claim_ids": [],
+      "gap_impact": "報告可以確認條款存在，但無法說明條款曾否被受理，因此整幢方案是否買得回供冷量費一直懸空。",
+      "notes": null
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "S1",
+      "title": "建築能效管理局《2026 年區域供冷收費檢討》",
+      "url": "https://example.com/beea/district-cooling-charge-review-2026",
+      "publisher": "建築能效管理局",
+      "author": null,
+      "published": "2026-06-18",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "accountable_record",
+      "source_family": "example.com",
+      "roles": [
+        "empirical_data",
+        "historical_record"
+      ],
+      "accountability_basis": "court_or_regulator_record",
+      "limitations": "檢討按管理局自己抄錄的紀錄陳述環路狀況，並未審核供冷公司的內部成本分攤。"
+    },
+    {
+      "source_id": "S2",
+      "title": "錦寧區域供冷有限公司《2025 年營運及財務回顧》",
+      "url": "https://example.org/kamning-cooling/operating-review-2025",
+      "publisher": "錦寧區域供冷有限公司",
+      "author": null,
+      "published": "2026-03-04",
+      "accessed": "2026-07-20",
+      "provenance": "primary_interested",
+      "evidence_type": "official_documentation",
+      "source_family": "example.org",
+      "roles": [
+        "subject_official"
+      ],
+      "accountability_basis": "none",
+      "limitations": "供冷公司正在爭取較高的收費上限，其成本數字屬於有利害關係的估算。"
+    },
+    {
+      "source_id": "S3",
+      "title": "樂衡工程顧問有限公司《錦寧中心供冷負荷評估》",
+      "url": "https://example.net/lokhang/kamning-cooling-load-assessment",
+      "publisher": "樂衡工程顧問有限公司",
+      "author": "區珮瑤",
+      "published": "2025-11-12",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "dataset_or_test",
+      "source_family": "example.net",
+      "roles": [
+        "independent_analysis",
+        "empirical_data"
+      ],
+      "accountability_basis": "none",
+      "limitations": "評估只量度一個秋季的負荷，並未涵蓋夏季高峰。"
+    },
+    {
+      "source_id": "S4",
+      "title": "錦寧日報〈甲級寫字樓用電量續升，供冷佔比最大〉",
+      "url": "https://gazette.example/kamning/office-electricity-2026",
+      "publisher": "錦寧日報",
+      "author": "杜嘉朗",
+      "published": "2026-04-02",
+      "accessed": "2026-07-20",
+      "provenance": "secondary_independent",
+      "evidence_type": "news_report",
+      "source_family": "gazette.example",
+      "roles": [
+        "historical_record"
+      ],
+      "accountability_basis": "named_source_investigation",
+      "limitations": "報導轉載管理局的數列，並非自行量度用電量。"
+    },
+    {
+      "source_id": "S5",
+      "title": "建築能效管理局〈已公布的區域供冷收費〉",
+      "url": "https://example.com/beea/published-cooling-charges",
+      "publisher": "建築能效管理局",
+      "author": null,
+      "published": null,
+      "undated_reason": "收費頁在每次裁定後持續更新，頁面本身沒有標示公布日期。",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "official_documentation",
+      "source_family": "example.com",
+      "roles": [
+        "empirical_data"
+      ],
+      "accountability_basis": "court_or_regulator_record",
+      "limitations": "頁面只顯示閱讀當日生效的收費，並不保留版本紀錄。"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "C1",
+      "claim": "錦寧商業區七幢甲級寫字樓的全年用電量，由 2021 年的 4,100 萬度上升至 2025 年的 6,800 萬度。",
+      "kind": "fact",
+      "importance": "key",
+      "source_ids": [
+        "S1",
+        "S4"
+      ],
+      "extract_or_location": "錦寧商業區七幢甲級寫字樓的全年用電量，由 2021 年的 4,100 萬度上升至 2025 年的 6,800 萬度。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "錦寧商業區七幢甲級寫字樓的全年用電量，由 2021 年的 4,100 萬度上升至 2025 年的 6,800 萬度。"
+        },
+        {
+          "source_id": "S4",
+          "extract_or_location": "管理局的數列顯示，錦寧商業區七幢甲級寫字樓的全年用電量，由 2021 年的 4,100 萬度上升至 2025 年的 6,800 萬度。"
+        }
+      ],
+      "as_of": "2025-12-31",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "錦寧商業區七幢甲級寫字樓的全年用電量，由 2021 年的 4,100 萬度上升至 2025 年的 6,800 萬度，四年之內增加約三分之二"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "負荷趨勢構成機房改造的需求理據。",
+      "what_would_change": "數列被重列，或 2026 年上半年的數字回落至接近 2021 年的水平。",
+      "triangulation": {
+        "status": "met",
+        "rationale": "管理局按季抄錄的數列與本地報章對同一數列的獨立轉載在兩個端點一致。"
+      },
+      "resolution": null,
+      "limitations": "兩份紀錄都追溯到管理局的抄錄，因此旁證落在轉載而不在量度。"
+    },
+    {
+      "claim_id": "C2",
+      "claim": "錦寧中心的供冷協議設定最低合約供冷量為 3,600 冷凍噸，並規定供冷量費按該合約量計算，佔 2025 年供冷費用的 62%。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "錦寧中心的供冷協議設定最低合約供冷量為 3,600 冷凍噸，並規定供冷量費按該合約量計算，佔 2025 年供冷費用的 62%。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "錦寧中心的供冷協議設定最低合約供冷量為 3,600 冷凍噸，並規定供冷量費按該合約量計算，佔 2025 年供冷費用的 62%。"
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "錦寧中心的供冷協議設定最低合約供冷量為 3,600 冷凍噸，並規定供冷量費按該合約量計算，佔 2025 年供冷費用的 62%"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "按合約量固定收取的費用佔比，決定效率工程可以觸及的開支範圍。",
+      "what_would_change": "一份逐月分攤紀錄顯示供冷量費的實際佔比明顯較低。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "只有管理局公布合約量的計算基礎與費用佔比，此項僅有一份紀錄。"
+      },
+      "resolution": null,
+      "limitations": "單一來源，不過該機構正是核定收費機制的一方。"
+    },
+    {
+      "claim_id": "C3",
+      "claim": "錦寧區域供冷有限公司的回顧報告記錄，錦寧中心的系統運行系數由 2022 年的每冷凍噸 0.72 千瓦上升至 2025 年的 0.86 千瓦，並把升幅歸因於冷凍水泵組。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S2"
+      ],
+      "extract_or_location": "錦寧中心的系統運行系數由 2022 年的每冷凍噸 0.72 千瓦上升至 2025 年的 0.86 千瓦，並把升幅歸因於冷凍水泵組。",
+      "source_evidence": [
+        {
+          "source_id": "S2",
+          "extract_or_location": "錦寧中心的系統運行系數由 2022 年的每冷凍噸 0.72 千瓦上升至 2025 年的 0.86 千瓦，並把升幅歸因於冷凍水泵組。"
+        }
+      ],
+      "as_of": "2025-12-31",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "錦寧中心的系統運行系數由 2022 年的每冷凍噸 0.72 千瓦上升至 2025 年的 0.86 千瓦，並把升幅歸因於冷凍水泵組"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "運行系數走高是改造工程要處理的運作徵狀。",
+      "what_would_change": "一份獨立的運行系數數列顯示升幅平均分布於整個環路。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "數字只來自供冷公司，未有找到獨立的運行系數數列。"
+      },
+      "resolution": null,
+      "limitations": "由正在爭取較高收費上限的一方自行申報。"
+    },
+    {
+      "claim_id": "C4",
+      "claim": "錦寧區域供冷有限公司表示，按管理局建議的收費基礎，錦寧中心的供冷成本會由 2027 年起每年增加 420 萬港元。",
+      "kind": "reported_claim",
+      "importance": "supporting",
+      "source_ids": [
+        "S2"
+      ],
+      "extract_or_location": "按管理局建議的收費基礎，錦寧中心的供冷成本會由 2027 年起每年增加 420 萬港元。",
+      "source_evidence": [
+        {
+          "source_id": "S2",
+          "extract_or_location": "按管理局建議的收費基礎，錦寧中心的供冷成本會由 2027 年起每年增加 420 萬港元。"
+        }
+      ],
+      "as_of": "2026-03-04",
+      "confidence": "low",
+      "status": "disputed",
+      "include_in_report": true,
+      "report_excerpts": [
+        "按管理局建議的收費基礎，錦寧中心的供冷成本會由 2027 年起每年增加 420 萬港元"
+      ],
+      "supports": [],
+      "contradicts": [
+        "C5"
+      ],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "收費增幅是整個供冷方案最大的單項成本輸入。",
+      "what_would_change": "一份把兩個成本基礎對接起來的已公布文件。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "供冷公司的數字沒有旁證，並與管理局自己的估算互相矛盾。"
+      },
+      "resolution": "報告同時列出兩個數字，並說明兩方計算的合約量假設不同；公開紀錄上沒有任何對接文件。",
+      "limitations": "檢討仍在進行期間公布的有利害關係估算。"
+    },
+    {
+      "claim_id": "C5",
+      "claim": "管理局估算，收費檢討會令全區供冷用戶的成本由 2027 年起每年增加 260 萬港元。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "收費檢討會令全區供冷用戶的成本由 2027 年起每年增加 260 萬港元。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "收費檢討會令全區供冷用戶的成本由 2027 年起每年增加 260 萬港元。"
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "medium",
+      "status": "disputed",
+      "include_in_report": true,
+      "report_excerpts": [
+        "收費檢討會令全區供冷用戶的成本由 2027 年起每年增加 260 萬港元"
+      ],
+      "supports": [],
+      "contradicts": [
+        "C4"
+      ],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "較低的估算會改變委員會可以接受的回本期。",
+      "what_would_change": "一份公布的合約量假設對接文件，或修訂後的最終裁定。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "管理局的數字單獨成立，並與供冷公司的估算互相矛盾。"
+      },
+      "resolution": "兩個估算覆蓋的合約量假設不同，兩方都沒有公布之間的橋樑；報告呈現區間。",
+      "limitations": "管理局按環路整體計價，而非按單一用戶計價。"
+    },
+    {
+      "claim_id": "C6",
+      "claim": "制約錦寧中心節能成效的，是供冷協議的最低合約供冷量，而不是冷凍機組的效率。",
+      "kind": "analysis",
+      "importance": "key",
+      "source_ids": [],
+      "source_evidence": [],
+      "as_of": "2026-07-20",
+      "confidence": "medium",
+      "status": "inference",
+      "include_in_report": true,
+      "report_excerpts": [
+        "把合約結構與機房紀錄放在一起讀，指向的是協議條款而不是機組本身：供冷量費按最低合約量固定收取，而運行系數上升帶來的額外開支只落在餘下的用量費上"
+      ],
+      "supports": [
+        "C2",
+        "C3",
+        "C9"
+      ],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": "供冷量費按最低合約量固定收取並佔費用結構的大半，而合約量按註冊樓面面積換算，因此改善運行系數只能觸及餘下的用量費。",
+      "decision_relevance": "若制約在協議條款，機組改造買到的是穩定運行而不是節省。",
+      "what_would_change": "一份逐月帳單顯示供冷量費佔比明顯偏低，或供冷公司公布下調合約量的獲批紀錄。",
+      "triangulation": {
+        "status": "met",
+        "rationale": "推論建立在管理局的合約量紀錄、供冷公司的運行系數紀錄與獨立顧問的負荷量度之上，三者屬於不同來源族。"
+      },
+      "resolution": null,
+      "limitations": "推理依賴供冷公司自行申報的運行系數走向。"
+    },
+    {
+      "claim_id": "C7",
+      "claim": "陳兆聰自 2024 年 3 月起出任管理局撥款委員會主席，該委員會每年開放一個撥款窗口，並在 10 月底截止接受申請。",
+      "kind": "fact",
+      "importance": "context",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "陳兆聰自 2024 年 3 月起出任管理局撥款委員會主席，該委員會每年開放一個撥款窗口，並在 10 月底截止接受申請。",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "陳兆聰自 2024 年 3 月起出任管理局撥款委員會主席，該委員會每年開放一個撥款窗口，並在 10 月底截止接受申請。"
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "陳兆聰自 2024 年 3 月起出任管理局撥款委員會主席，該委員會每年開放一個撥款窗口，並在 10 月底截止接受申請"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [
+        "P1"
+      ],
+      "person_claim_role": "neutral",
+      "person_claim_assessment": {
+        "classification": "neutral",
+        "rationale": "此項只記錄一項已公布的任命及其管理的撥款日程，既無指摘，亦無私人資料，對受任者沒有任何評價性描述。"
+      },
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "截止日期同時決定委員會自己的表決日期。",
+      "what_would_change": "主席換人，或同一年開放第二個撥款窗口。",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "機構自身公布的任命與日程無須第二個來源族。"
+      },
+      "resolution": null,
+      "limitations": "屬於管理局對自身治理安排的紀錄。"
+    },
+    {
+      "claim_id": "C8",
+      "claim": "協議第 9 條允許用戶在連續 12 個月的實測高峰負荷低於合約供冷量 80% 之後申請下調合約量，而 2025 年秋季監測的 28 個工作日之中，有 24 日的實測高峰負荷低於該水平。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S3"
+      ],
+      "extract_or_location": "協議第 9 條允許用戶在連續 12 個月的實測高峰負荷低於合約供冷量 80% 之後申請下調合約量，而 2025 年秋季監測的 28 個工作日之中，有 24 日的實測高峰負荷低於該水平。",
+      "source_evidence": [
+        {
+          "source_id": "S3",
+          "extract_or_location": "協議第 9 條允許用戶在連續 12 個月的實測高峰負荷低於合約供冷量 80% 之後申請下調合約量，而 2025 年秋季監測的 28 個工作日之中，有 24 日的實測高峰負荷低於該水平。"
+        }
+      ],
+      "as_of": "2025-11-12",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "協議第 9 條允許用戶在連續 12 個月的實測高峰負荷低於合約供冷量 80% 之後申請下調合約量，而 2025 年秋季監測的 28 個工作日之中，有 24 日的實測高峰負荷低於該水平"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "可下調的合約量會令改造省下的用量連帶省下供冷量費，並削弱協議制約的判斷。",
+      "what_would_change": "一份涵蓋夏季的量度顯示實測高峰貼近合約量，或一份記載申請被拒的紀錄。",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "只有一份獨立評估量度過一個秋季，沒有第二次負荷觀測。"
+      },
+      "resolution": null,
+      "limitations": "評估只覆蓋一個秋季的監測期。"
+    },
+    {
+      "claim_id": "C9",
+      "claim": "2025 年秋季監測的 28 個工作日之中，約 86% 的工作日，實測高峰負荷低於合約供冷量 80%。",
+      "kind": "estimate",
+      "importance": "supporting",
+      "source_ids": [
+        "S3"
+      ],
+      "extract_or_location": "協議第 9 條允許用戶在連續 12 個月的實測高峰負荷低於合約供冷量 80% 之後申請下調合約量，而 2025 年秋季監測的 28 個工作日之中，有 24 日的實測高峰負荷低於該水平。",
+      "source_evidence": [
+        {
+          "source_id": "S3",
+          "extract_or_location": "協議第 9 條允許用戶在連續 12 個月的實測高峰負荷低於合約供冷量 80% 之後申請下調合約量，而 2025 年秋季監測的 28 個工作日之中，有 24 日的實測高峰負荷低於該水平。"
+        }
+      ],
+      "assumptions": [
+        "28 個監測工作日與其中 24 日的達標紀錄來自同一個 2025 年秋季監測期。",
+        "監測期內每一日的量度方法一致，而評估並未檢驗夏季高峰是否同樣達標。"
+      ],
+      "derived_assertions": [
+        {
+          "expression": "86%",
+          "derivation": "28 個監測工作日之中有 24 日達標，佔 85.7%，本報告按四捨五入寫成約 86%。"
+        }
+      ],
+      "as_of": "2025-11-12",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "2025 年秋季監測的 28 個工作日之中，約 86% 的工作日，實測高峰負荷低於合約供冷量 80%"
+      ],
+      "supports": [
+        "C8"
+      ],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": "按評估自身的日數作算術，保留為估算，因為來源只給出達標日數而未給出比例。",
+      "decision_relevance": "委員會比較的是比例而不是日數，因為條款寫的是連續期間的達標情況。",
+      "what_would_change": "一份把夏季監測日一併計入的日數紀錄。",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "這個數字是對單一來源做算術，而不是獨立觀測。"
+      },
+      "resolution": null,
+      "limitations": "由一個秋季監測期推算，最多只保留兩位有效數字。"
+    },
+    {
+      "claim_id": "C10",
+      "claim": "截至 2026 年 7 月 10 日，已公布的區域供冷用量費為每冷凍噸小時 1.62 港元。",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S5"
+      ],
+      "extract_or_location": "截至 2026 年 7 月 10 日，已公布的區域供冷用量費為每冷凍噸小時 1.62 港元。",
+      "source_evidence": [
+        {
+          "source_id": "S5",
+          "extract_or_location": "截至 2026 年 7 月 10 日，已公布的區域供冷用量費為每冷凍噸小時 1.62 港元。"
+        }
+      ],
+      "as_of": "2026-07-10",
+      "time_sensitive": true,
+      "verified_at": "2026-07-20",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "截至 2026 年 7 月 10 日，已公布的區域供冷用量費為每冷凍噸小時 1.62 港元"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "現行單價是任何節省折算成金額時的乘數。",
+      "what_would_change": "一份重設已公布收費的最終裁定。",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "由核定收費的機構自行公布的價目。"
+      },
+      "resolution": null,
+      "limitations": "收費在每次裁定後改動，因此這個數字帶着閱讀日期。"
+    }
+  ],
+  "synthesis": {
+    "central_judgment_claim_ids": [
+      "C1",
+      "C6"
+    ],
+    "counterevidence_claim_ids": [
+      "C8"
+    ],
+    "adversarial_tests": [
+      {
+        "hypothesis": "最低合約量並不是地板：協議第 9 條留有下調的門，所以制約並不存在。",
+        "test": "把獨立顧問的達標日數與條款要求的連續期間，以及供冷公司的審批實務放在一起比較。",
+        "claim_ids": [
+          "C8",
+          "C9",
+          "C2"
+        ],
+        "outcome": "unresolved",
+        "result": "第 9 條與 24 日的達標紀錄都在紀錄上，而沒有任何來源說明供冷公司會否受理這種申請。",
+        "effect_on_conclusion": "協議制約的判斷在已量度的秋季範圍內成立，對夏季與審批實務則明確保留。"
+      },
+      {
+        "hypothesis": "真正封住節省的是機組效率，協議只是背景。",
+        "test": "看已公布的費用結構把可省的空間留在按合約量收取的一側還是按用量收取的一側。",
+        "claim_ids": [
+          "C2",
+          "C6"
+        ],
+        "outcome": "rejected",
+        "result": "唯一一份已公布的佔比紀錄把 62% 的供冷費用歸入按合約量收取的供冷量費。",
+        "effect_on_conclusion": "機組改造被視為維持穩定運行的開支，而不是節省的來源。"
+      }
+    ],
+    "implications": [
+      {
+        "statement": "在合約量問題解決之前投入的機組資本，買到的是穩定運行而不是節省。",
+        "claim_ids": [
+          "C6"
+        ],
+        "for_whom": "衡輝置業資產投資委員會",
+        "timing": "十月提交窗口之前"
+      },
+      {
+        "statement": "按負荷趨勢建立的需求理據，在兩個成本估算之下都站得住。",
+        "claim_ids": [
+          "C1"
+        ],
+        "for_whom": "衡輝置業資產投資委員會",
+        "timing": "2027 年收費期"
+      }
+    ],
+    "decisions_or_takeaways": [
+      {
+        "statement": "在 2026 年窗口提交範圍收窄的水泵組更換方案，並把第二期綁在一次下調合約量的申請結果之上。",
+        "rationale_claim_ids": [
+          "C6",
+          "C1"
+        ],
+        "tradeoff": "範圍收窄的申請放棄了合約量獲准下調時才成立的整幢方案。",
+        "success_signal": "下調合約量的申請在一個收費期之內獲批。",
+        "failure_signal": "水泵組投入運行之後運行系數繼續上升。"
+      }
+    ],
+    "scenarios": [
+      {
+        "name": "收費結構向用量費傾斜",
+        "conditions": [
+          "管理局在初步裁定中下調供冷量費的比重。"
+        ],
+        "leading_indicators": [
+          "初步裁定出現調整費用結構的條文。"
+        ],
+        "disconfirming_indicators": [
+          "裁定只更新單價而保留現行結構。"
+        ],
+        "implication": "整幢方案會變成較好的選擇，分期安排應該重新評估。",
+        "claim_ids": [
+          "C6",
+          "C1"
+        ]
+      }
+    ],
+    "limitations": [
+      "實測高峰負荷的紀錄只有一份獨立評估、一個秋季。",
+      "兩個供冷成本估算沒有任何已公布的對接文件。",
+      "運行系數的紀錄來自正在爭取較高收費上限的供冷公司。",
+      "本報告的題材是一個合成的驗收個案，引用的每一份紀錄都刊載於保留作文件說明用途的域名。"
+    ],
+    "research_stop_reason": "兩條決定委員會表決的高優先問題，都由管理局的紀錄與一份獨立評估回答，餘下的缺口按缺口記錄，而不是用推論補上。"
+  },
+  "unresolved_questions": [
+    "供冷公司過去有沒有受理過協議第 9 條的下調申請？收費檢討文件、營運回顧與獨立評估都逐一讀過審批紀錄，三份都沒有記載；若條款從未被啟動，整幢方案的理據就會退回與第一期相同的穩定運行論據。"
+  ]
+}

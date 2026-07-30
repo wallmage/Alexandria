@@ -1,5 +1,7 @@
+import hashlib
 import importlib.util
 import io
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr
@@ -227,6 +229,141 @@ Words after the sources section.
                 )
             self.assertEqual(1, result)
             self.assertIn("Content quality gate receipt is required", stderr.getvalue())
+
+    def test_delivery_validation_rechecks_source_fidelity_online(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            report = work / "report.md"
+            ledger = work / "ledger.json"
+            rewild = work / "rewild.json"
+            content = work / "content.json"
+            source = work / "source.json"
+            report.write_text(GOOD_REPORT, encoding="utf-8")
+            ledger.write_text("{}", encoding="utf-8")
+            rewild.write_text("{}", encoding="utf-8")
+            source.write_text('{"status": "passed"}', encoding="utf-8")
+            content.write_text(
+                json.dumps(
+                    {
+                        "source_fidelity_receipt_sha256": hashlib.sha256(
+                            source.read_bytes()
+                        ).hexdigest()
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(validate_report, "validate_markdown", return_value=[]),
+                mock.patch.object(
+                    validate_report,
+                    "validate_report_against_ledger",
+                    return_value=[],
+                ),
+                mock.patch.object(
+                    validate_report,
+                    "validate_rewild_receipt",
+                    return_value=[],
+                ),
+                mock.patch(
+                    "content_gate.validate_content_receipt",
+                    return_value=[],
+                ),
+                mock.patch.object(
+                    validate_report,
+                    "validate_source_fidelity_receipt_online",
+                    return_value=["Live source changed."],
+                ) as online,
+                redirect_stderr(stderr),
+            ):
+                code = validate_report.main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--rewild-receipt",
+                        str(rewild),
+                        "--content-receipt",
+                        str(content),
+                        "--source-fidelity-receipt",
+                        str(source),
+                    ]
+                )
+
+            self.assertEqual(1, code)
+            self.assertIn("Live source changed", stderr.getvalue())
+            online.assert_called_once_with(ledger, {"status": "passed"})
+
+    def test_delivery_rejects_source_receipt_swap_before_live_recheck(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            report = work / "report.md"
+            ledger = work / "ledger.json"
+            rewild = work / "rewild.json"
+            content = work / "content.json"
+            source = work / "source.json"
+            report.write_text(GOOD_REPORT, encoding="utf-8")
+            ledger.write_text("{}", encoding="utf-8")
+            rewild.write_text("{}", encoding="utf-8")
+            source.write_text('{"reviewed": true}', encoding="utf-8")
+            content.write_text(
+                json.dumps(
+                    {
+                        "source_fidelity_receipt_sha256": hashlib.sha256(
+                            source.read_bytes()
+                        ).hexdigest()
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+
+            def swap_source(*_args, **_kwargs):
+                source.write_text('{"forged": true}', encoding="utf-8")
+                return []
+
+            with (
+                mock.patch.object(validate_report, "validate_markdown", return_value=[]),
+                mock.patch.object(
+                    validate_report,
+                    "validate_report_against_ledger",
+                    return_value=[],
+                ),
+                mock.patch.object(
+                    validate_report,
+                    "validate_rewild_receipt",
+                    return_value=[],
+                ),
+                mock.patch(
+                    "content_gate.validate_content_receipt",
+                    side_effect=swap_source,
+                ),
+                mock.patch.object(
+                    validate_report,
+                    "validate_source_fidelity_receipt_online",
+                ) as online,
+                redirect_stderr(stderr),
+            ):
+                code = validate_report.main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--rewild-receipt",
+                        str(rewild),
+                        "--content-receipt",
+                        str(content),
+                        "--source-fidelity-receipt",
+                        str(source),
+                    ]
+                )
+
+            self.assertEqual(1, code)
+            self.assertIn(
+                "changed after content review",
+                stderr.getvalue(),
+            )
+            online.assert_not_called()
 
     def test_pdf_validation_counts_clickable_links(self):
         class Annotation:

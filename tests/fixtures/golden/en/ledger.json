@@ -1,0 +1,686 @@
+{
+  "schema_version": 4,
+  "subject": "The Fairhaven rail freight corridor",
+  "research_question": "Should Northgate Terminals commit capital to the Fairhaven corridor before the 2027 access charge period begins?",
+  "brief": {
+    "intended_reader": "Northgate Terminals investment committee",
+    "decision_or_use": "Decide whether to fund a second reception road at Ashcombe before the 2027 charge period.",
+    "archetype": "system",
+    "report_language": "en",
+    "editorial_mode": "analytical",
+    "scope": {
+      "time_horizon": "2021 through the 2027 charge period",
+      "geography": "The Fairhaven corridor between Ashcombe Junction and Ravensmoor Port",
+      "inclusions": [
+        "Corridor capacity and path allocation",
+        "Access charge policy",
+        "Freight volume and punctuality records",
+        "Governance of the investment decision"
+      ],
+      "exclusions": [
+        "Passenger service planning outside the corridor",
+        "Rolling stock procurement economics",
+        "Real-world subjects: every record cited here is published on a domain reserved for documentation"
+      ]
+    }
+  },
+  "people": [
+    {
+      "person_id": "P1",
+      "name": "Priya Raghunathan",
+      "aliases": [],
+      "living_status": "living",
+      "public_role": "public",
+      "relationship": "adjacent"
+    }
+  ],
+  "report_date": "2026-07-28",
+  "coverage": [
+    {
+      "area": "corridor demand",
+      "question": "How much freight does the corridor carry, and is the trend durable?",
+      "priority": "high",
+      "decision_relevance": "A committee cannot size a terminal investment without the tonnage trend it will serve.",
+      "completion_criteria": "The tonnage series is established by the regulator's record and corroborated independently.",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C1",
+        "C3"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "physical capacity",
+      "question": "What limits the number of freight paths the corridor can sell?",
+      "priority": "high",
+      "decision_relevance": "The binding constraint decides whether terminal capital buys any additional throughput.",
+      "completion_criteria": "The constraint is identified from track geometry and path allocation, and tested against a rival explanation.",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C2",
+        "C6",
+        "C8",
+        "C9"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "access charges",
+      "question": "What will the corridor cost to use after the 2027 review?",
+      "priority": "high",
+      "decision_relevance": "The charge determines whether the freight flow remains profitable at the volumes assumed.",
+      "completion_criteria": "Both cost estimates on the record are reported and their disagreement is resolved or disclosed.",
+      "owner": "primary",
+      "status": "disputed",
+      "claim_ids": [
+        "C4",
+        "C5",
+        "C10"
+      ],
+      "gap_impact": null,
+      "notes": "The operator and the authority disagree about the incremental cost; the report carries both."
+    },
+    {
+      "area": "decision governance",
+      "question": "Who approves corridor investment, and on what timetable?",
+      "priority": "medium",
+      "decision_relevance": "A committee that misses the submission window waits a full charge period.",
+      "completion_criteria": "The approving body and its published timetable are named from the authority's own record.",
+      "owner": "primary",
+      "status": "supported",
+      "claim_ids": [
+        "C7"
+      ],
+      "gap_impact": null,
+      "notes": null
+    },
+    {
+      "area": "night path utilisation",
+      "question": "How much of the night window is already sold?",
+      "priority": "medium",
+      "decision_relevance": "Unsold night paths would offer throughput without new track.",
+      "completion_criteria": "A published utilisation figure for the 22:00 to 05:00 window.",
+      "owner": "primary",
+      "status": "gap",
+      "claim_ids": [],
+      "gap_impact": "The report can bound night capacity by arithmetic but cannot state observed night utilisation, so the case for buying paths rather than track stays open.",
+      "notes": null
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "S1",
+      "title": "Fairhaven Transport Authority, Corridor Access Charge Review 2026",
+      "url": "https://example.com/fta/corridor-access-charge-review-2026",
+      "publisher": "Fairhaven Transport Authority",
+      "author": null,
+      "published": "2026-06-18",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "accountable_record",
+      "source_family": "example.com",
+      "roles": [
+        "empirical_data",
+        "historical_record"
+      ],
+      "accountability_basis": "court_or_regulator_record",
+      "limitations": "The review reports the corridor as the authority meters it; it does not audit the operator's own cost allocation."
+    },
+    {
+      "source_id": "S2",
+      "title": "Meridian Freight Rail, Operating and Financial Review 2025",
+      "url": "https://example.org/meridian/operating-review-2025",
+      "publisher": "Meridian Freight Rail",
+      "author": null,
+      "published": "2026-03-04",
+      "accessed": "2026-07-20",
+      "provenance": "primary_interested",
+      "evidence_type": "official_documentation",
+      "source_family": "example.org",
+      "roles": [
+        "subject_official"
+      ],
+      "accountability_basis": "none",
+      "limitations": "The operator is the party asking for a lower charge, so its cost figure is an interested estimate."
+    },
+    {
+      "source_id": "S3",
+      "title": "Calderbank Rail Engineering, Ashcombe Section Capacity Assessment",
+      "url": "https://example.net/calderbank/ashcombe-capacity-assessment",
+      "publisher": "Calderbank Rail Engineering",
+      "author": "K. Oyelaran",
+      "published": "2025-11-12",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "dataset_or_test",
+      "source_family": "example.net",
+      "roles": [
+        "independent_analysis",
+        "empirical_data"
+      ],
+      "accountability_basis": "none",
+      "limitations": "The assessment measured one autumn timetable and did not model winter engineering access."
+    },
+    {
+      "source_id": "S4",
+      "title": "Ravensmoor Gazette, Port rail volumes hold as road haulage retreats",
+      "url": "https://gazette.example/ravensmoor/port-rail-volumes-2026",
+      "publisher": "Ravensmoor Gazette",
+      "author": "H. Duclos",
+      "published": "2026-04-02",
+      "accessed": "2026-07-20",
+      "provenance": "secondary_independent",
+      "evidence_type": "news_report",
+      "source_family": "gazette.example",
+      "roles": [
+        "historical_record"
+      ],
+      "accountability_basis": "named_source_investigation",
+      "limitations": "The report summarises the authority's data rather than measuring volumes independently."
+    },
+    {
+      "source_id": "S5",
+      "title": "Fairhaven Transport Authority, Published corridor charges",
+      "url": "https://example.com/fta/published-corridor-charges",
+      "publisher": "Fairhaven Transport Authority",
+      "author": null,
+      "published": null,
+      "undated_reason": "The tariff page is continuously updated on determination and carries no publication date.",
+      "accessed": "2026-07-20",
+      "provenance": "primary_independent",
+      "evidence_type": "official_documentation",
+      "source_family": "example.com",
+      "roles": [
+        "empirical_data"
+      ],
+      "accountability_basis": "court_or_regulator_record",
+      "limitations": "The page shows the charge in force on the day it is read and keeps no version history."
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "C1",
+      "claim": "Corridor freight volume rose from 4.1 million tonnes in 2021 to 6.8 million tonnes in 2025.",
+      "kind": "fact",
+      "importance": "key",
+      "source_ids": [
+        "S1",
+        "S4"
+      ],
+      "extract_or_location": "Corridor freight volume rose from 4.1 million tonnes in 2021 to 6.8 million tonnes in 2025.",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "Corridor freight volume rose from 4.1 million tonnes in 2021 to 6.8 million tonnes in 2025."
+        },
+        {
+          "source_id": "S4",
+          "extract_or_location": "The authority's series shows corridor freight volume rose to 6.8 million tonnes in 2025 from 4.1 million tonnes in 2021."
+        }
+      ],
+      "as_of": "2025-12-31",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "Corridor freight volume rose from 4.1 million tonnes in 2021 to 6.8 million tonnes in 2025, a gain of two thirds in four years."
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "The tonnage trend sets the demand case for terminal capital.",
+      "what_would_change": "A restated series, or a 2026 half-year figure that falls back toward the 2021 level.",
+      "triangulation": {
+        "status": "met",
+        "rationale": "The regulator's metered series and an independent local report of the same series agree on both endpoints."
+      },
+      "resolution": null,
+      "limitations": "Both records trace to the authority's meters, so the corroboration is on reporting rather than on measurement."
+    },
+    {
+      "claim_id": "C2",
+      "claim": "The Ashcombe section is single track for 11.4 km and is timetabled at four freight paths per hour.",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "Between Ashcombe Junction and Marleigh the corridor is single track for 11.4 km, and the working timetable allocates four freight paths per hour in each direction.",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "Between Ashcombe Junction and Marleigh the corridor is single track for 11.4 km, and the working timetable allocates four freight paths per hour in each direction."
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "For 11.4 km between Ashcombe Junction and Marleigh the corridor narrows to a single track, and the working timetable sells four freight paths per hour in each direction"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "The path limit caps the throughput any terminal on the corridor can deliver.",
+      "what_would_change": "A redoubling scheme entering the authority's committed programme.",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "Only the authority publishes the working timetable, so the path count rests on one record."
+      },
+      "resolution": null,
+      "limitations": "One source, though it is the body that allocates the paths."
+    },
+    {
+      "claim_id": "C3",
+      "claim": "Meridian Freight Rail reported corridor punctuality of 82 per cent in 2025, down from 91 per cent in 2022.",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S2"
+      ],
+      "extract_or_location": "Corridor punctuality fell to 82 per cent in 2025 from 91 per cent in 2022, with the decline concentrated on services crossing the Ashcombe single-track section.",
+      "source_evidence": [
+        {
+          "source_id": "S2",
+          "extract_or_location": "Corridor punctuality fell to 82 per cent in 2025 from 91 per cent in 2022, with the decline concentrated on services crossing the Ashcombe single-track section."
+        }
+      ],
+      "as_of": "2025-12-31",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "The operator's own review reports punctuality falling to 82 per cent in 2025 from 91 per cent in 2022, and places the loss on services crossing Ashcombe"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "Deteriorating punctuality is the operating symptom the investment is meant to relieve.",
+      "what_would_change": "An independent punctuality series that shows the loss spread evenly across the corridor.",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "The figure comes from the operator alone, and no independent punctuality series was found."
+      },
+      "resolution": null,
+      "limitations": "Self-reported by the party seeking a lower access charge."
+    },
+    {
+      "claim_id": "C4",
+      "claim": "Meridian Freight Rail states that the reviewed charge would add 4.2 million pounds a year to its corridor access costs.",
+      "kind": "reported_claim",
+      "importance": "supporting",
+      "source_ids": [
+        "S2"
+      ],
+      "extract_or_location": "On the authority's proposed basis, corridor access costs would rise by 4.2 million pounds a year from the 2027 period.",
+      "source_evidence": [
+        {
+          "source_id": "S2",
+          "extract_or_location": "On the authority's proposed basis, corridor access costs would rise by 4.2 million pounds a year from the 2027 period."
+        }
+      ],
+      "as_of": "2026-03-04",
+      "confidence": "low",
+      "status": "disputed",
+      "include_in_report": true,
+      "report_excerpts": [
+        "The operator puts the increase at 4.2 million pounds a year from the 2027 period"
+      ],
+      "supports": [],
+      "contradicts": [
+        "C5"
+      ],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "The charge increase is the largest single cost input to the corridor case.",
+      "what_would_change": "A published reconciliation of the two cost bases.",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "The operator's figure is uncorroborated and is contradicted by the authority's own estimate."
+      },
+      "resolution": "The report carries both figures and states that the two parties price different traffic mixes; no reconciliation is published.",
+      "limitations": "An interested estimate published while the review was open."
+    },
+    {
+      "claim_id": "C5",
+      "claim": "The Fairhaven Transport Authority put the incremental cost of the reviewed charge to corridor operators at 2.6 million pounds a year.",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "The authority estimates the incremental cost to corridor operators at 2.6 million pounds a year across the 2027 period.",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "The authority estimates the incremental cost to corridor operators at 2.6 million pounds a year across the 2027 period."
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "medium",
+      "status": "disputed",
+      "include_in_report": true,
+      "report_excerpts": [
+        "The authority's review puts the same increase at 2.6 million pounds a year across all corridor operators"
+      ],
+      "supports": [],
+      "contradicts": [
+        "C4"
+      ],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "The lower figure changes the payback period a committee would accept.",
+      "what_would_change": "A published traffic-mix reconciliation, or a revised final determination.",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "The authority's figure stands alone and is contradicted by the operator's estimate."
+      },
+      "resolution": "The two estimates cover different traffic mixes and neither party has published the bridge between them; the report presents the range.",
+      "limitations": "The authority prices the corridor in aggregate rather than for one operator."
+    },
+    {
+      "claim_id": "C6",
+      "claim": "The corridor's binding constraint is the Ashcombe single-track section rather than terminal handling capacity.",
+      "kind": "analysis",
+      "importance": "key",
+      "source_ids": [],
+      "source_evidence": [],
+      "as_of": "2026-07-20",
+      "confidence": "medium",
+      "status": "inference",
+      "include_in_report": true,
+      "report_excerpts": [
+        "Read together, the path allocation and the punctuality record point at the single-track section rather than at the terminals: the corridor sells all four hourly paths, and the delay is concentrated where trains must wait for each other."
+      ],
+      "supports": [
+        "C2",
+        "C3",
+        "C9"
+      ],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": "Path allocation is saturated at four trains an hour and the punctuality loss is concentrated on the single-track section, so added terminal capacity would queue behind the same constraint.",
+      "decision_relevance": "If the constraint sits on the track, terminal capital buys resilience rather than throughput.",
+      "what_would_change": "Evidence that paths go unsold, or a punctuality breakdown that places the delay at the terminals.",
+      "triangulation": {
+        "status": "met",
+        "rationale": "The inference rests on the authority's allocation record and the operator's punctuality series, which are separate families."
+      },
+      "resolution": null,
+      "limitations": "The reasoning depends on the operator's own attribution of where delay arises."
+    },
+    {
+      "claim_id": "C7",
+      "claim": "Priya Raghunathan has chaired the authority's investment committee since March 2024, and the committee publishes one funding window each year.",
+      "kind": "fact",
+      "importance": "context",
+      "source_ids": [
+        "S1"
+      ],
+      "extract_or_location": "The investment committee, chaired since March 2024 by Priya Raghunathan, opens one funding window each year and closes submissions at the end of October.",
+      "source_evidence": [
+        {
+          "source_id": "S1",
+          "extract_or_location": "The investment committee, chaired since March 2024 by Priya Raghunathan, opens one funding window each year and closes submissions at the end of October."
+        }
+      ],
+      "as_of": "2026-06-18",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "The authority's investment committee, chaired since March 2024 by Priya Raghunathan, opens a single funding window each year and closes submissions at the end of October"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [
+        "P1"
+      ],
+      "person_claim_role": "neutral",
+      "person_claim_assessment": {
+        "classification": "neutral",
+        "rationale": "The claim records a published appointment and the committee timetable it governs, with no allegation, no private detail, and no evaluative language about the appointee."
+      },
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "The submission deadline sets the committee's own decision date.",
+      "what_would_change": "A change of chair, or a second funding window in the same year.",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "A published appointment and timetable from the body itself needs no second family."
+      },
+      "resolution": null,
+      "limitations": "The authority's own record of its governance."
+    },
+    {
+      "claim_id": "C8",
+      "claim": "An independent assessment found that four of the twenty-eight night freight paths on the Ashcombe section were unused in the autumn 2025 timetable.",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S3"
+      ],
+      "extract_or_location": "In the autumn 2025 timetable, four of the twenty-eight night freight paths across the Ashcombe section were unused.",
+      "source_evidence": [
+        {
+          "source_id": "S3",
+          "extract_or_location": "In the autumn 2025 timetable, four of the twenty-eight night freight paths across the Ashcombe section were unused."
+        }
+      ],
+      "as_of": "2025-11-12",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "Calderbank's assessment found four of the twenty-eight night paths across the section unused in the autumn 2025 timetable, which is the strongest evidence against treating the track as full"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "Spare night paths would let the flow grow without new track, and would weaken the case for capital.",
+      "what_would_change": "A later timetable in which every night path is sold, or evidence that the unused paths are unusable by loaded trains.",
+      "triangulation": {
+        "status": "limited",
+        "rationale": "One independent assessment of one timetable, with no second observation of the night window."
+      },
+      "resolution": null,
+      "limitations": "The assessment covered a single autumn timetable."
+    },
+    {
+      "claim_id": "C9",
+      "claim": "Roughly 86 per cent of the night freight paths on the section were in use in the autumn 2025 timetable.",
+      "kind": "estimate",
+      "importance": "supporting",
+      "source_ids": [
+        "S3"
+      ],
+      "extract_or_location": "In the autumn 2025 timetable, four of the twenty-eight night freight paths across the Ashcombe section were unused.",
+      "source_evidence": [
+        {
+          "source_id": "S3",
+          "extract_or_location": "In the autumn 2025 timetable, four of the twenty-eight night freight paths across the Ashcombe section were unused."
+        }
+      ],
+      "assumptions": [
+        "The twenty-eight timetabled night paths and the four unused paths come from the same autumn 2025 timetable.",
+        "Every timetabled path is usable by a loaded freight train, which the assessment does not test."
+      ],
+      "derived_assertions": [
+        {
+          "expression": "86 per cent",
+          "derivation": "Twenty-four of twenty-eight night paths were in use, which is 85.7 per cent, reported here as roughly 86 per cent."
+        }
+      ],
+      "as_of": "2025-11-12",
+      "confidence": "medium",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "Twenty-four of those twenty-eight paths were therefore in use, or roughly 86 per cent of the night window, on the one timetable anyone has measured"
+      ],
+      "supports": [
+        "C8"
+      ],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": "Arithmetic on the assessment's own count, kept as an estimate because the source states the unused paths rather than the used share.",
+      "decision_relevance": "The share, not the count, is what a committee compares against the daytime window.",
+      "what_would_change": "A count that separates paths reserved for engineering access from paths available to traffic.",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "The figure is arithmetic on one source rather than an independent observation."
+      },
+      "resolution": null,
+      "limitations": "Derived from a single timetable and stated to two significant figures at most."
+    },
+    {
+      "claim_id": "C10",
+      "claim": "The corridor access charge stood at 3.11 pounds per train-kilometre on 10 July 2026.",
+      "kind": "fact",
+      "importance": "supporting",
+      "source_ids": [
+        "S5"
+      ],
+      "extract_or_location": "As at 10 July 2026 the published corridor charge is 3.11 pounds per train-kilometre.",
+      "source_evidence": [
+        {
+          "source_id": "S5",
+          "extract_or_location": "As at 10 July 2026 the published corridor charge is 3.11 pounds per train-kilometre."
+        }
+      ],
+      "as_of": "2026-07-10",
+      "time_sensitive": true,
+      "verified_at": "2026-07-20",
+      "confidence": "high",
+      "status": "supported",
+      "include_in_report": true,
+      "report_excerpts": [
+        "The published charge stood at 3.11 pounds per train-kilometre on 10 July 2026, which is the base the review moves from"
+      ],
+      "supports": [],
+      "contradicts": [],
+      "person_ids": [],
+      "human_harm_review": null,
+      "reasoning": null,
+      "decision_relevance": "The current charge is the base against which any increase is measured.",
+      "what_would_change": "A final determination that resets the published charge.",
+      "triangulation": {
+        "status": "not_applicable",
+        "rationale": "A published tariff from the body that sets it."
+      },
+      "resolution": null,
+      "limitations": "Tariffs change on determination, so the figure carries its reading date."
+    }
+  ],
+  "synthesis": {
+    "central_judgment_claim_ids": [
+      "C1",
+      "C6"
+    ],
+    "counterevidence_claim_ids": [
+      "C8"
+    ],
+    "adversarial_tests": [
+      {
+        "hypothesis": "The corridor is not full: unused night paths mean traffic can grow without new track.",
+        "test": "Compare the independent night-path count against the daytime allocation and the punctuality record.",
+        "claim_ids": [
+          "C8",
+          "C9",
+          "C2",
+          "C3"
+        ],
+        "outcome": "unresolved",
+        "result": "Four unused night paths remain on the record, and no source establishes whether loaded trains can use them.",
+        "effect_on_conclusion": "The constraint finding holds for the daytime window and is stated as unresolved for the night window."
+      },
+      {
+        "hypothesis": "Terminal handling, not track, sets the corridor's throughput.",
+        "test": "Check whether the punctuality loss is attributed to terminals or to the single-track section.",
+        "claim_ids": [
+          "C3",
+          "C6"
+        ],
+        "outcome": "rejected",
+        "result": "The only published attribution places the loss on services crossing the single-track section.",
+        "effect_on_conclusion": "Terminal capital is treated as resilience spending rather than as throughput."
+      }
+    ],
+    "implications": [
+      {
+        "statement": "Terminal capital committed before the constraint is relieved buys resilience, not volume.",
+        "claim_ids": [
+          "C6"
+        ],
+        "for_whom": "Northgate Terminals investment committee",
+        "timing": "Before the October submission window"
+      },
+      {
+        "statement": "A demand case built on the tonnage trend survives either cost estimate.",
+        "claim_ids": [
+          "C1"
+        ],
+        "for_whom": "Northgate Terminals investment committee",
+        "timing": "2027 charge period"
+      }
+    ],
+    "decisions_or_takeaways": [
+      {
+        "statement": "Submit a scoped reception-road proposal in the 2026 window and make the second phase conditional on a night-path trial.",
+        "rationale_claim_ids": [
+          "C6",
+          "C1"
+        ],
+        "tradeoff": "A scoped submission forgoes the larger scheme that a redoubling decision would justify.",
+        "success_signal": "A night-path trial that fills the four unused paths with loaded trains.",
+        "failure_signal": "Punctuality that keeps falling after the reception road opens."
+      }
+    ],
+    "scenarios": [
+      {
+        "name": "Redoubling committed",
+        "conditions": [
+          "The authority commits the Ashcombe redoubling in the 2027 programme."
+        ],
+        "leading_indicators": [
+          "A redoubling line item in the draft determination."
+        ],
+        "disconfirming_indicators": [
+          "A determination that funds signalling renewal alone."
+        ],
+        "implication": "The larger terminal scheme becomes the better bet, and phasing should be revisited.",
+        "claim_ids": [
+          "C6",
+          "C1"
+        ]
+      }
+    ],
+    "limitations": [
+      "Night-window utilisation rests on one independent assessment of one timetable.",
+      "The two access-cost estimates are not reconciled by any published bridge.",
+      "Punctuality attribution comes from the operator, which is an interested party.",
+      "The subject is a synthetic acceptance fixture and every cited record sits on a documentation domain."
+    ],
+    "research_stop_reason": "The two high-priority questions that decide the committee's vote are answered from the authority's record and one independent assessment, and the remaining gap is recorded rather than inferred."
+  },
+  "unresolved_questions": [
+    "Can loaded freight trains use the four unused night paths on the Ashcombe section, or are they reserved for engineering access? The authority's review, the operator's review, and the independent assessment were all searched for a night-path availability statement and none carries one; if the paths are usable, the case for capital weakens to resilience alone."
+  ]
+}

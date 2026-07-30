@@ -6,14 +6,14 @@ import hashlib
 import json
 import os
 import re
-import sys
 import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 try:
-    from .artifact_safety import artifact_collision_errors
+    from .artifact_safety import artifact_collision_errors, publish_temp_file
+    from .gate_severity import emit_findings, hard_errors
     from .html_policy import (
         SAFE_ATTRIBUTES,
         SAFE_TAGS,
@@ -28,7 +28,8 @@ try:
         validate_report_against_ledger,
     )
 except ImportError:
-    from artifact_safety import artifact_collision_errors
+    from artifact_safety import artifact_collision_errors, publish_temp_file
+    from gate_severity import emit_findings, hard_errors
     from html_policy import (
         SAFE_ATTRIBUTES,
         SAFE_TAGS,
@@ -361,7 +362,7 @@ def _approved_visual_assets(
     return approved, errors
 
 
-def _write_receipt(path, payload):
+def _write_receipt(path, payload, *, force=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_name = None
@@ -379,7 +380,7 @@ def _write_receipt(path, payload):
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        Path(temp_name).replace(path)
+        publish_temp_file(temp_name, path, force=force)
     except Exception:
         if temp_name:
             Path(temp_name).unlink(missing_ok=True)
@@ -543,8 +544,9 @@ def run_content_gate(
                         f"{finding_id} disclosure cannot be located in the final report."
                     )
 
-    if errors:
+    if hard_errors(errors):
         return errors
+    warnings = list(errors)
 
     scores = review["scores"]
     receipt = {
@@ -568,8 +570,14 @@ def run_content_gate(
         "minimum_score": min(item["score"] for item in scores.values()),
         "approved_visual_assets": approved_visual_assets,
     }
-    _write_receipt(receipt_path, receipt)
-    return []
+    try:
+        _write_receipt(receipt_path, receipt, force=force)
+    except FileExistsError:
+        return [
+            f"Content receipt already exists: {receipt_path}. "
+            "Use --force to replace it."
+        ]
+    return warnings
 
 
 def validate_content_receipt(
@@ -681,12 +689,14 @@ def validate_content_receipt(
     if not errors and review_path is not None:
         with tempfile.TemporaryDirectory() as directory:
             regenerated = Path(directory) / "receipt.json"
-            rerun_errors = run_content_gate(
-                report_path,
-                ledger_path,
-                review_path,
-                regenerated,
-                source_fidelity_receipt_path=source_fidelity_receipt_path,
+            rerun_errors = hard_errors(
+                run_content_gate(
+                    report_path,
+                    ledger_path,
+                    review_path,
+                    regenerated,
+                    source_fidelity_receipt_path=source_fidelity_receipt_path,
+                )
             )
             errors.extend(
                 f"Content gate recheck failed: {error}"
@@ -746,12 +756,10 @@ def main(argv=None):
         source_fidelity_receipt_path=args.source_fidelity_receipt,
         force=args.force,
     )
-    if errors:
-        for error in errors:
-            print(f"[FAIL] {error}", file=sys.stderr)
-        return 1
-    print(f"[OK] Content quality gate passed: {args.receipt}")
-    return 0
+    return emit_findings(
+        errors,
+        ok_message=f"[OK] Content quality gate passed: {args.receipt}",
+    )
 
 
 if __name__ == "__main__":

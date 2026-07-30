@@ -18,10 +18,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from artifact_safety import artifact_collision_errors  # noqa: E402
+from artifact_safety import artifact_collision_errors, publish_temp_file  # noqa: E402
+from gate_severity import emit_findings, warning  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 FIDELITY_NOTES_SCHEMA = ROOT / "references" / "rewild-fidelity-notes.schema.json"
+#: Checker sections that can never be waived or downgraded: fabricated figures
+#: and attribution drift (Fidelity), wrong-region vocabulary (Region), and AI
+#: vocabulary. Every other section is style, which reports without blocking.
+HARD_WARNING_SECTIONS = ("Fidelity", "Region", "AI vocabulary")
 PROFILES = {
     "en": ("rewild", "en"),
     "zh-CN": ("rewild-zh", "zh"),
@@ -1011,6 +1016,13 @@ def _semantic_fidelity_errors(source, report, report_lang, exemptions=None):
     }
 
     for source_clause, report_clause, report_index in aligned:
+        if source_clause == report_clause:
+            # An unedited clause cannot have changed meaning. Without this,
+            # a clause carrying both halves of a direction pair ("a lower
+            # total ... and a higher unit rate") reported a reversal against
+            # its own untouched text, and a clause whose causal anchors are
+            # empty reported a substitution against itself.
+            continue
         source_directions = _direction_terms(source_clause)
         report_directions = _direction_terms(report_clause)
         for left, right in DIRECTION_PAIRS:
@@ -1483,9 +1495,7 @@ def run_gate(
     hard_warnings = [
         warning
         for warning in warnings
-        if str(warning.get("section", "")).startswith(
-            ("Fidelity", "Region", "AI vocabulary")
-        )
+        if str(warning.get("section", "")).startswith(HARD_WARNING_SECTIONS)
         or (
             report_lang == "zh-HK"
             and str(warning.get("section", "")).startswith("Hong Kong flavor")
@@ -1530,21 +1540,25 @@ def run_gate(
     style_warnings = [
         warning for warning in warnings if warning not in hard_warnings
     ]
-    missing_waivers = [
-        warning
-        for warning in style_warnings
-        if (
-            str(warning.get("section", "")),
-            str(warning.get("message", "")),
+    # Style is the one tier the gate does not fail on. A retained style
+    # warning is a judgment about phrasing, not evidence, so it is reported
+    # and the receipt still issues; a waiver only records the reason.
+    waived_warnings = []
+    findings = []
+    for item in style_warnings:
+        key = (
+            str(item.get("section", "")),
+            str(item.get("message", "")),
         )
-        not in waivers
-    ]
-    if missing_waivers:
-        return [
-            "Unresolved style warning: "
-            f"{warning.get('section')}: {warning.get('message')}"
-            for warning in missing_waivers
-        ]
+        if key in waivers:
+            waived_warnings.append(item)
+            continue
+        findings.append(
+            warning(
+                "Unresolved style warning: "
+                f"{item.get('section')}: {item.get('message')}"
+            )
+        )
 
     receipt = {
         "schema_version": 1,
@@ -1563,16 +1577,16 @@ def run_gate(
         "review_status": review_note["status"],
         "style_waivers": [
             {
-                "section": warning.get("section"),
-                "message": warning.get("message"),
+                "section": item.get("section"),
+                "message": item.get("message"),
                 "reason": waivers[
                     (
-                        str(warning.get("section", "")),
-                        str(warning.get("message", "")),
+                        str(item.get("section", "")),
+                        str(item.get("message", "")),
                     )
                 ],
             }
-            for warning in style_warnings
+            for item in waived_warnings
         ],
         "fidelity_notes_path": (
             str(Path(fidelity_notes_path).resolve())
@@ -1601,12 +1615,17 @@ def run_gate(
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        Path(temp_name).replace(receipt_path)
+        publish_temp_file(temp_name, receipt_path, force=force)
+    except FileExistsError:
+        return [
+            f"Rewild receipt already exists: {receipt_path}. "
+            "Use --force to replace it."
+        ]
     except Exception:
         if temp_name:
             Path(temp_name).unlink(missing_ok=True)
         raise
-    return []
+    return findings
 
 
 def build_parser():
@@ -1645,20 +1664,11 @@ def main(argv=None):
         fidelity_notes_path=args.fidelity_notes,
         force=args.force,
     )
-    if errors:
-        for error in errors:
-            print(
-                _console_safe(f"[FAIL] {error}", sys.stderr),
-                file=sys.stderr,
-            )
-        return 1
-    print(
-        _console_safe(
-            f"[OK] Rewild gate passed: {Path(args.receipt).resolve()}",
-            sys.stdout,
-        )
+    return emit_findings(
+        errors,
+        ok_message=f"[OK] Rewild gate passed: {Path(args.receipt).resolve()}",
+        transform=_console_safe,
     )
-    return 0
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
-"""Shared path-identity checks for Alexandria artifact writers."""
+"""Shared path-identity and publication checks for artifact writers."""
 
 import os
+from contextlib import suppress
 from pathlib import Path
 
 
@@ -44,3 +45,32 @@ def artifact_collision_errors(read_paths, write_paths):
                     f"{write_path}"
                 )
     return errors
+
+
+def publish_temp_file(temp_path, destination, *, force=False):
+    """Atomically publish a unique same-directory temporary file.
+
+    ``force=False`` uses a hard link as create-if-absent: it either publishes
+    the complete temporary inode or leaves an existing destination untouched.
+    """
+    temp_path = Path(temp_path)
+    destination = Path(destination)
+    if temp_path.parent.resolve() != destination.parent.resolve():
+        temp_path.unlink(missing_ok=True)
+        raise ValueError(
+            "Temporary artifact must be created in the destination's same directory."
+        )
+
+    if force:
+        os.replace(temp_path, destination)
+        return destination
+    try:
+        os.link(temp_path, destination, follow_symlinks=False)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+    with suppress(OSError):
+        temp_path.unlink()
+    # Publication already succeeded. If unlinking the private temporary name
+    # failed, returning success avoids contradicting the authoritative target.
+    return destination

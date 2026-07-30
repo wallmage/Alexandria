@@ -2614,68 +2614,32 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                     validate_ledger.quantitative_evidence(simplified),
                 )
 
-    def test_han_decimal_before_a_compound_unit_is_an_evidence_obligation(self):
-        # 千 (kilo-) and 百 (per-hundred) head real measure units, and those are
-        # the only characters a unit and a numeral share. The numeral run
-        # stopped at its fractional digit, leaving "千瓦" as prose the scanner
-        # did not recognize, so the classifier gate silenced the figure: a
-        # claim of 三點五千瓦 asserted nothing and accepted any extract at all.
-        # A decimal settles the split, so exactly one reading is obligated.
+    def test_measure_unit_figures_normalize_to_the_units_base_scale(self):
+        # 千 (kilo-) and 百 (hecto-) are unit prefixes as well as place values,
+        # so one physical quantity has several spellings and a numeral run
+        # cannot be read apart from the unit it modifies. Each figure with a
+        # listed unit is converted to that unit's base scale and tagged with
+        # its dimension, so 3,500 watts is one form however it is written --
+        # and the un-normalized figure is never offered on its own, which is
+        # what let a 5,000-watt claim pass on an extract reading 5瓦.
         for phrase, expected in (
-            ("功率三點五千瓦。", ("三點五千瓦", "3.5")),
-            ("距離兩點五千米。", ("兩點五千米", "2.5")),
-            ("重量一點二千克。", ("一點二千克", "1.2")),
-            ("增加一點五百分點。", ("一點五百分點", "1.5")),
-            ("時速三點五百公里。", ("三點五百公里", "3.5")),
-            ("能耗零點八千瓦時。", ("零點八千瓦時", "0.8")),
-            ("摄入一点五千卡。", ("一点五千卡", "1.5")),
-        ):
-            display, value = expected
-            with self.subTest(phrase=phrase):
-                self.assertEqual(
-                    [(display, {f"n:{value}"})],
-                    validate_ledger.quantitative_obligations(phrase),
-                )
-        for extract in ("實測功率為 3.5 千瓦。", "實測功率為三點五千瓦。"):
-            with self.subTest(extract=extract):
-                self.assertEqual(
-                    [],
-                    validate_ledger.evidence_coverage_errors(
-                        {
-                            "claim_id": "C920",
-                            "kind": "fact",
-                            "claim": "水泵組的功率為三點五千瓦。",
-                            "extract_or_location": extract,
-                        }
-                    ),
-                )
-        # The two rejections the silence used to allow: a fabricated figure at
-        # the unit's own scale (3,500 is watts, not the 3.5 the claim states)
-        # and an extract carrying no figure whatsoever.
-        for extract in ("實測功率為3500。", "本頁概述產品。"):
-            with self.subTest(extract=extract):
-                errors = validate_ledger.evidence_coverage_errors(
-                    {
-                        "claim_id": "C920",
-                        "kind": "fact",
-                        "claim": "水泵組的功率為三點五千瓦。",
-                        "extract_or_location": extract,
-                    }
-                )
-                self.assertTrue(any("quantity" in error for error in errors), errors)
-
-    def test_whole_number_before_a_compound_unit_offers_both_readings(self):
-        # Without a decimal the split is genuinely ambiguous in writing: 五千瓦
-        # is 五千 + 瓦 (5,000 watts) or 五 + 千瓦 (5 kilowatts), the same
-        # physical quantity written two ways. One token carrying both readings
-        # accepts a correct extract in either notation while still refusing an
-        # extract with no figure -- which is what the old silence allowed.
-        for phrase, expected in (
-            ("功率五千瓦。", ("五千瓦", {"n:5", "n:5000"})),
-            ("距離八千米。", ("八千米", {"n:8", "n:8000"})),
-            ("產量五千噸。", ("五千噸", {"n:5", "n:5000"})),
-            ("耗电五千瓦时。", ("五千瓦时", {"n:5", "n:5000"})),
-            ("摄入两千卡。", ("两千卡", {"n:2", "n:2000"})),
+            ("功率三點五千瓦。", ("三點五千瓦", {"u:W:3500", "n:3500"})),
+            ("功率3.5千瓦。", ("3.5千瓦", {"u:W:3500", "n:3500"})),
+            ("功率三千五百瓦。", ("三千五百瓦", {"u:W:3500", "n:3500"})),
+            ("實測3,500瓦。", ("3,500瓦", {"u:W:3500", "n:3500"})),
+            ("實測功率為 3.5 千瓦。", ("3.5 千瓦", {"u:W:3500", "n:3500"})),
+            ("功率五千瓦。", ("五千瓦", {"u:W:5000", "n:5000"})),
+            ("實測功率5瓦。", ("5瓦", {"u:W:5", "n:5"})),
+            ("距離兩點五千米。", ("兩點五千米", {"u:m:2500", "n:2500"})),
+            ("距離2,500米。", ("2,500米", {"u:m:2500", "n:2500"})),
+            ("重量一點二千克。", ("一點二千克", {"u:g:1200", "n:1200"})),
+            ("增加一點五百分點。", ("一點五百分點", {"u:pp:1.5", "n:1.5"})),
+            ("能耗零點八千瓦時。", ("零點八千瓦時", {"u:Wh:800", "n:800"})),
+            ("摄入一点五千卡。", ("一点五千卡", {"u:cal:1500", "n:1500"})),
+            ("產量五千噸。", ("五千噸", {"u:t:5000", "n:5000"})),
+            ("耗电五千瓦时。", ("五千瓦时", {"u:Wh:5000", "n:5000"})),
+            ("摄入两千卡。", ("两千卡", {"u:cal:2000", "n:2000"})),
+            ("感光元件五百萬像素。", ("五百萬像素", {"u:px:5000000", "n:5000000"})),
         ):
             display, forms = expected
             with self.subTest(phrase=phrase):
@@ -2683,48 +2647,134 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                     [(display, forms)],
                     validate_ledger.quantitative_obligations(phrase),
                 )
-        for extract in (
-            "銘牌標示 5 千瓦。",
-            "銘牌標示 5,000 瓦。",
-            "銘牌標示五千瓦。",
-        ):
-            with self.subTest(extract=extract):
+
+    def test_every_spelling_of_one_quantity_matches_every_other(self):
+        # The false rejection the old both-readings split produced: a claim of
+        # 三點五千瓦 emitted only 3.5 and refused an extract stating the
+        # identical quantity as 3,500瓦. Normalization makes the four spellings
+        # interchangeable in either role, claim or evidence.
+        spellings = ("三點五千瓦", "3,500瓦", "3.5千瓦", "三千五百瓦")
+        for claim_figure in spellings:
+            for extract_figure in spellings:
+                with self.subTest(claim=claim_figure, extract=extract_figure):
+                    self.assertEqual(
+                        [],
+                        validate_ledger.evidence_coverage_errors(
+                            {
+                                "claim_id": "C920",
+                                "kind": "fact",
+                                "claim": f"水泵組的功率為{claim_figure}。",
+                                "extract_or_location": f"實測功率為{extract_figure}。",
+                            }
+                        ),
+                    )
+        # 公里 and 千米 are one unit spelled two ways, so they share a
+        # dimension and cross-match; 三百公里 is 300 km, never a 3 with a
+        # "百公里" unit hung off it (the reading a 百公里 table entry invented).
+        self.assertEqual(
+            [("三百公里", {"u:m:300000", "n:300000"})],
+            validate_ledger.quantitative_obligations("跑了三百公里。"),
+        )
+        for extract_figure in ("三百公里", "300公里", "300千米", "300,000米"):
+            with self.subTest(extract=extract_figure):
                 self.assertEqual(
                     [],
                     validate_ledger.evidence_coverage_errors(
                         {
                             "claim_id": "C921",
                             "kind": "fact",
-                            "claim": "水泵組的功率為五千瓦。",
-                            "extract_or_location": extract,
+                            "claim": "車隊跑了三百公里。",
+                            "extract_or_location": f"里程為{extract_figure}。",
                         }
                     ),
                 )
-        for extract in ("銘牌標示 800 瓦。", "本頁概述產品。"):
-            with self.subTest(extract=extract):
+        # Unit-less evidence at the base scale still satisfies the claim: the
+        # normalized figure is offered untagged as well as tagged.
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C922",
+                    "kind": "fact",
+                    "claim": "水泵組的功率為三點五千瓦。",
+                    "extract_or_location": "實測功率為3,500。",
+                }
+            ),
+        )
+
+    def test_a_figure_at_the_wrong_magnitude_is_rejected(self):
+        # The wrong acceptance the both-readings split produced: 五千瓦 offered
+        # a bare "5" alongside 5,000, and that 5 collided with the 5瓦 in the
+        # extract -- a claim of 5,000 watts passed on evidence of 5 watts.
+        # Each pair below states the same unit at a thousandfold difference.
+        for claim, extract in (
+            ("功率為五千瓦。", "實測功率5瓦。"),
+            ("距離為八千米。", "實測距離8米。"),
+            ("功率為三點五千瓦。", "實測功率3.5瓦。"),
+            ("車隊跑了三百公里。", "里程為300米。"),
+            ("感光元件五百萬像素。", "規格為5像素。"),
+            # And a plainly different figure in the same unit, plus an extract
+            # carrying no figure at all: neither may pass.
+            ("功率為五千瓦。", "銘牌標示 800 瓦。"),
+            ("功率為五千瓦。", "本頁概述產品。"),
+        ):
+            with self.subTest(claim=claim, extract=extract):
                 errors = validate_ledger.evidence_coverage_errors(
                     {
-                        "claim_id": "C921",
+                        "claim_id": "C923",
                         "kind": "fact",
-                        "claim": "水泵組的功率為五千瓦。",
+                        "claim": claim,
                         "extract_or_location": extract,
                     }
                 )
                 self.assertTrue(any("quantity" in error for error in errors), errors)
 
-    def test_compound_unit_split_leaves_plain_readings_alone(self):
-        # The split is confined to an explicit unit list, because 千/百 are
-        # ordinary place values everywhere else. Each phrase below must keep
-        # the reading it already had.
+    def test_a_swallowed_unit_prefix_only_reads_as_one_when_it_multiplies(self):
+        # 百分點 is the one listed unit whose remainder after the prefix
+        # ("分點") stands for nothing, so the swallowed-prefix reading is the
+        # only one available: 五百分點 is 5 percentage points. It is accepted
+        # only where the prefix actually multiplies what is left of the run --
+        # 五百 is 五 hundreds, 三千五百 is not 三千五 hundreds.
+        self.assertEqual(
+            [("五百分點", {"u:pp:5", "n:5"})],
+            validate_ledger.quantitative_obligations("服務公司掉五百分點。"),
+        )
+        self.assertEqual(
+            [], validate_ledger.quantitative_obligations("服務公司掉三千五百分點。")
+        )
+        # Every compound spelling is worth its prefix times the base unit, so
+        # the two ways a run can split ("五千"+"瓦" and "五"+"千瓦") always
+        # normalize to the same figure and the reading never has to be guessed.
+        for unit, (dimension, factor) in validate_ledger._CJK_MEASURE_UNITS.items():
+            for taken in range(1, len(unit)):
+                prefix, rest = unit[:taken], unit[taken:]
+                base = validate_ledger._CJK_MEASURE_UNITS.get(rest)
+                if base is None or not all(
+                    char in validate_ledger._HAN_NUMERAL_CHARS for char in prefix
+                ):
+                    continue
+                with self.subTest(unit=unit, prefix=prefix):
+                    self.assertEqual(dimension, base[0])
+                    self.assertEqual(
+                        factor,
+                        validate_ledger._han_phrase_value(prefix) * base[1],
+                    )
+
+    def test_measure_units_leave_plain_readings_alone(self):
+        # A character sequence is only read as a unit if it is listed, because
+        # 千/百 are ordinary place values everywhere else, and a unit phrase
+        # needs a leading quantity of its own. Each phrase below keeps the
+        # reading it already had.
         for phrase, expected in (
-            ("增加了1.5百分點。", [("1.5", {"n:1.5"})]),      # digit form
+            ("增加了1.5百分點。", [("1.5百分點", {"u:pp:1.5", "n:1.5"})]),
             ("增加兩個百分點。", [("兩", {"n:2"})]),           # classifier count
             ("四年升了七点四个百分点", [("七点四", {"n:7.4"})]),
             ("營收三點五萬。", [("三點五萬", {"n:35000"})]),    # scale word
             ("第二期覆蓋五千戶。", []),      # 千 as a place value: 5,000 households
             ("消耗的千瓦電力較低。", []),     # a unit with no figure in front
-            ("漏损集中在哪几百米上。", []),   # 百米 is not on the list
-            ("油耗以每百公里計算。", []),
+            ("漏损集中在哪几百米上。", []),   # a vague "few hundred metres"
+            ("油耗以每百公里計算。", []),     # 百公里 as a per-100km rate
+            ("風機可達數千瓦。", []),        # "thousands of watts", no figure
         ):
             with self.subTest(phrase=phrase):
                 self.assertEqual(

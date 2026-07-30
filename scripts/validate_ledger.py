@@ -325,7 +325,7 @@ _CJK_MIXED_NUMBER_RE = re.compile(
 #: trailing digits fill the places below the scale rather than the ones place,
 #: so "3萬5" is 35,000 (not 30,005) and "十八萬五" is 185,000. The reading is
 #: genuinely ambiguous in writing, so both are offered as acceptable forms
-#: (see _scaled_number_forms). An explicit 零/〇 placeholder settles it the
+#: (see _scaled_number_values). An explicit 零/〇 placeholder settles it the
 #: other way ("十萬零一" is 100,001), so those are excluded from the tail.
 _CJK_ABBREVIATED_TAIL_RE = re.compile(
     "([" + _CJK_SCALE_CHARS + "])"
@@ -342,28 +342,48 @@ _CJK_ABBREVIATED_TAIL_RE = re.compile(
 #: both worked examples ("三個漏洞", "十八個月"); broadening it is deferred.
 _CJK_COUNT_CLASSIFIERS = frozenset({"個", "个"})
 
-#: Measure units that open with a small-unit numeral character (千 = kilo-,
-#: 百 = hecto- or "per hundred"). These are the only places where a unit and a
-#: numeral share a character, so the scanner cannot see "五千瓦" as 5 kilowatts
-#: without knowing the unit exists -- and "三點五千瓦" looked like a bare
-#: decimal followed by unrecognized prose, which the classifier gate above then
-#: silenced, so a kilowatt reading asserted no figure at all.
+#: Measure units whose figure is comparable across notations, each mapped to
+#: the (dimension, factor) that converts it to that dimension's base unit. A
+#: number directly followed by one of these is normalized to the base scale
+#: before it is compared, so every spelling of one quantity lands on a single
+#: form: 三點五千瓦, 3.5千瓦, 三千五百瓦, and 3,500瓦 are all u:W:3500.
 #:
-#: Deliberately an explicit list rather than a 千/百 rule: those characters are
-#: ordinary place values everywhere else ("五千戶" is 5,000 households, not
-#: 5 kilo-households), so only units known to carry the prefix may split.
-#: Simplified and traditional spellings both, since either script may appear.
-_CJK_COMPOUND_MEASURE_UNITS = tuple(
-    sorted(
-        (
-            "千瓦時", "千瓦时", "千瓦", "千米", "千克", "千噸", "千吨",
-            "千卡", "千字", "百分點", "百分点", "百公里", "百萬像素", "百万像素",
-        ),
-        key=len,
-        reverse=True,
-    )
+#: Normalizing is what makes the 千/百 prefix tractable at all. Those are also
+#: place values, so "五千瓦" parses as 五千 + 瓦 (5,000 watts) or 五 + 千瓦
+#: (5 kilowatts) -- the same physical quantity, and the same normalized form,
+#: which is why the reading no longer has to be guessed. Comparing notations
+#: instead compared the wrong things in both directions: a 5,000-watt claim
+#: matched a 5-watt extract through the shared digit 5, and a claim of
+#: 三點五千瓦 was rejected by an extract stating the identical 3,500瓦.
+#:
+#: 公里 and 千米 are one unit spelled two ways and cross-match by sharing a
+#: dimension. Simplified and traditional spellings both, since either script
+#: may appear. Deliberately a closed table: a character sequence is only read
+#: as a unit if it is listed, because 千/百 are place values everywhere else
+#: ("五千戶" is 5,000 households, not 5 kilo-households). 百公里 is absent on
+#: purpose -- it is a unit only in per-100km constructions ("每百公里"), and
+#: listing it made "三百公里" (300 km) offer a spurious reading of 3.
+_CJK_MEASURE_UNITS = {
+    "瓦": ("W", 1), "千瓦": ("W", 1000),
+    "瓦時": ("Wh", 1), "瓦时": ("Wh", 1),
+    "千瓦時": ("Wh", 1000), "千瓦时": ("Wh", 1000),
+    "米": ("m", 1), "千米": ("m", 1000), "公里": ("m", 1000),
+    "克": ("g", 1), "千克": ("g", 1000),
+    "噸": ("t", 1), "吨": ("t", 1), "千噸": ("t", 1000), "千吨": ("t", 1000),
+    "卡": ("cal", 1), "千卡": ("cal", 1000),
+    "像素": ("px", 1), "百萬像素": ("px", 1000000), "百万像素": ("px", 1000000),
+    "百分點": ("pp", 1), "百分点": ("pp", 1),
+}
+
+#: Longest spelling first, so "千瓦時" is not read as "千瓦" with stray prose
+#: after it and "百萬像素" is not read as "像素" alone.
+_CJK_MEASURE_UNIT_SPELLINGS = tuple(
+    sorted(_CJK_MEASURE_UNITS, key=len, reverse=True)
 )
-_CJK_COMPOUND_UNIT_LOOKAHEAD = max(len(unit) for unit in _CJK_COMPOUND_MEASURE_UNITS)
+
+#: Separators allowed between a figure and its unit. Digit forms are commonly
+#: spaced ("0.72 千瓦"); Han forms are not, but the same gap is harmless there.
+_CJK_UNIT_GAP_CHARS = " \t\u00a0\u202f\u3000"
 
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
 _LEDGER_ID_RE = re.compile(
@@ -545,32 +565,75 @@ def _scaled_phrase_is_ambiguous(phrase):
     )
 
 
-def _cjk_compound_unit_split(span, tail):
-    """Split a known 千-/百-headed measure unit off a Han numeral run.
+def _cjk_measure_unit_after(text, start):
+    """Return (unit, source) for a listed measure unit sitting at `start`.
 
-    Returns (numeral, unit, absorbed) -- the part of the run that is actually a
-    figure, the unit that follows it, and whether the unit's leading 千/百 was
-    swallowed by the run -- or None when no known unit follows.
-
-    Two shapes occur, because the numeral pattern stops at a fractional digit
-    but is greedy over whole numbers. A decimal leaves the whole unit in the
-    tail ("三點五" + "千瓦"), and the figure is unambiguously the run itself:
-    3.5 kilowatts. A whole number swallows the unit's first character
-    ("五千" + "瓦"), and the split is genuinely ambiguous in writing -- 5 kW and
-    5,000 W are the same physical quantity written two ways -- so the caller
-    offers both readings instead of guessing, which still forces the claim to
-    find *a* figure in the evidence.
+    `source` is the text the unit occupies, leading gap included, so a caller
+    can display the figure with its unit ("0.72 千瓦"). None when the text at
+    `start` is not a listed unit.
     """
-    for unit in _CJK_COMPOUND_MEASURE_UNITS:
-        if tail.startswith(unit):
-            return span, unit, False
-        if span.endswith(unit[0]) and tail.startswith(unit[1:]):
-            return span[:-1], unit, True
+    offset = start
+    while offset < len(text) and text[offset] in _CJK_UNIT_GAP_CHARS:
+        offset += 1
+    for unit in _CJK_MEASURE_UNIT_SPELLINGS:
+        if text.startswith(unit, offset):
+            return unit, text[start : offset + len(unit)]
     return None
 
 
-def _scaled_number_forms(phrase):
-    """Acceptable digit forms for one scaled number run.
+def _cjk_absorbed_measure_unit(span, text, start):
+    """Resolve a measure unit whose own prefix was swallowed by the numeral run.
+
+    Returns (unit, numeral, source) or None. 千 and 百 are place values as well
+    as unit prefixes, so a greedy numeral run takes them: "五百" + "分點" is
+    五 + 百分點, five percentage points. Where the remainder after the prefix is
+    itself a listed unit the direct reading already covers the phrase and
+    normalizes to the same value (千瓦 is worth exactly the 千 the run
+    swallowed), so this is only reached for a unit like 百分點 whose remainder
+    stands for nothing on its own.
+
+    The swallowed prefix has to actually multiply what is left of the run, and
+    that is checked arithmetically rather than assumed: 五百 is 五 hundreds, so
+    "五百分點" is 5 percentage points, but 三千五百 is not 三千五 hundreds, so
+    "三千五百分點" is not a unit phrase at all and keeps its plain reading.
+    """
+    for unit in _CJK_MEASURE_UNIT_SPELLINGS:
+        for taken in range(1, len(unit)):
+            prefix, rest = unit[:taken], unit[taken:]
+            if not span.endswith(prefix) or not text.startswith(rest, start):
+                continue
+            numeral = span[:-taken]
+            if not numeral:
+                continue
+            if _han_phrase_value(span) != _han_phrase_value(
+                numeral
+            ) * _han_phrase_value(prefix):
+                continue
+            return unit, numeral, text[start : start + len(rest)]
+    return None
+
+
+def _unit_normalized_forms(values, unit):
+    """Forms for a figure that carries a measure unit.
+
+    Each value is converted to the unit's base scale and emitted twice: tagged
+    with its dimension, so only a quantity of the same magnitude in the same
+    dimension satisfies it however either side spells the unit, and untagged,
+    so evidence that states the base figure without a unit ("3,500") still
+    counts. The un-normalized figure is deliberately not offered untagged: a
+    bare n:5 for 五千瓦 is what let a 5,000-watt claim pass on 5瓦.
+    """
+    dimension, factor = _CJK_MEASURE_UNITS[unit]
+    forms = set()
+    for value in values:
+        base = _normalize_number(_scaled_decimal_string(value, factor))
+        forms.add(f"u:{dimension}:{base}")
+        forms.add(f"n:{base}")
+    return forms
+
+
+def _scaled_number_values(phrase):
+    """Acceptable values for one scaled number run.
 
     Normally the single value the run denotes. A run ending in bare digits
     after its scale word is ambiguous in writing -- "3萬5" is 35,000 read as an
@@ -578,7 +641,7 @@ def _scaled_number_forms(phrase):
     offered: the run still has to find *a* matching figure in the evidence, but
     a correct extract is not rejected over a reading the writer did not intend.
     """
-    forms = {f"n:{_han_numeral_string(phrase)}"}
+    values = {_han_numeral_string(phrase)}
     match = _CJK_ABBREVIATED_TAIL_RE.search(phrase)
     if match:
         digits = "".join(
@@ -588,8 +651,8 @@ def _scaled_number_forms(phrase):
         place = _CJK_SCALE_WORDS[match.group(1)] // 10 ** len(digits)
         if place:
             head = _han_phrase_value(phrase[: match.start(2)])
-            forms.add(f"n:{head + int(digits) * place}")
-    return forms
+            values.add(str(head + int(digits) * place))
+    return values
 
 
 #: Historical vocabulary from the retired magnitude-specific word-number
@@ -798,7 +861,7 @@ def _scan_quantities(text):
 
     def number(match):
         normalized = _normalize_number(match.group(1))
-        forms = {f"n:{normalized}"}
+        values = {normalized}
         scale = _SCALE_WORDS.get(
             (match.group(2) or "").casefold()
         ) or _CJK_SCALE_WORDS.get(match.group(3) or "")
@@ -812,7 +875,16 @@ def _scan_quantities(text):
                 # 68,000,000 and nothing else. Keeping the bare digits as an
                 # acceptable form let "6800萬" match an extract saying "6800億"
                 # (and "5 million" match "5 billion") through the shared digits.
-                forms = {f"n:{int(scaled)}"}
+                values = {str(int(scaled))}
+        # A digit form takes a measure unit as readily as a Han one, and the
+        # two notations have to normalize identically for either to recognize
+        # the other: "3.5 千瓦" and "3,500瓦" are one quantity.
+        unit = _cjk_measure_unit_after(working, match.end())
+        if unit is not None:
+            spelling, source = unit
+            forms = _unit_normalized_forms(values, spelling)
+            return (match.group(0).strip() + source, forms, set(forms), False)
+        forms = {f"n:{value}" for value in values}
         return (match.group(0).strip(), forms, set(forms), False)
 
     def word_number(match):
@@ -877,12 +949,31 @@ def _scan_quantities(text):
             return None
         if _scaled_phrase_is_ambiguous(span):
             return None
-        forms = _scaled_number_forms(span)
+        values = _scaled_number_values(span)
+        unit = _cjk_measure_unit_after(working, match.end())
+        if unit is not None:
+            spelling, source = unit
+            forms = _unit_normalized_forms(values, spelling)
+            return (span + source, forms, set(forms), False)
+        forms = {f"n:{value}" for value in values}
         return (span, forms, set(forms), False)
 
     def han_number(match):
         span = match.group(0)
-        if any(char in _CJK_SCALE_WORDS for char in span):
+        # A listed measure unit is quantitative context in its own right, the
+        # way a classifier is, and it fixes the figure's scale: without it
+        # "功率三點五千瓦" reached the classifier gate below with an
+        # unrecognized unit character in the tail and asserted nothing at all.
+        unit = _cjk_measure_unit_after(working, match.end())
+        if unit is not None and span in _HAN_SMALL_UNIT_VALUES:
+            # The run is nothing but the unit's own prefix character: "千瓦電力"
+            # names a unit, "每百公里" is a per-100km rate, and "數千瓦" is
+            # vague. Each would otherwise assert the prefix's place value as a
+            # figure, so a unit phrase needs a leading quantity of its own
+            # exactly as a scaled one does.
+            unit = None
+        scaled = any(char in _CJK_SCALE_WORDS for char in span)
+        if scaled:
             # "萬一" and the adverb "千萬" ("by all means") open with an
             # implied 1 the way a bare "million" would in English ("Revenue
             # reached a million dollars"); unlike English, that implied 1
@@ -890,23 +981,24 @@ def _scan_quantities(text):
             # quantity of its own ("三千萬", "十八萬", "六億").
             if _scaled_phrase_is_ambiguous(span):
                 return (span, set(), set(), True)
-            forms = _scaled_number_forms(span)
+            values = _scaled_number_values(span)
+        else:
+            values = {_han_numeral_string(span)}
+        if unit is not None:
+            spelling, source = unit
+            forms = _unit_normalized_forms(values, spelling)
+            return (span + source, forms, set(forms), False)
+        if scaled:
+            forms = {f"n:{value}" for value in values}
             return (span, forms, set(forms), False)
-        # A 千-/百-headed measure unit is quantitative context in its own right,
-        # and it is the one place a unit and a numeral share a character (see
-        # _cjk_compound_unit_split). Both shapes reached the classifier gate
-        # below with an unrecognized unit character in the tail and asserted
-        # nothing, so "功率三點五千瓦" accepted any figure at all -- or none.
-        unit_split = _cjk_compound_unit_split(
-            span, working[match.end() : match.end() + _CJK_COMPOUND_UNIT_LOOKAHEAD]
-        )
-        if unit_split is not None and unit_split[0]:
-            numeral, unit, absorbed = unit_split
-            forms = {f"n:{_han_numeral_string(numeral)}"}
-            if absorbed:
-                forms.add(f"n:{_han_numeral_string(span)}")
-            display = span + (unit[1:] if absorbed else unit)
-            return (display, forms, set(forms), False)
+        # The run may instead have swallowed the unit's own prefix character,
+        # which only a 千/百 place value can do (see
+        # _cjk_absorbed_measure_unit).
+        absorbed = _cjk_absorbed_measure_unit(span, working, match.end())
+        if absorbed is not None:
+            spelling, numeral, source = absorbed
+            forms = _unit_normalized_forms({_han_numeral_string(numeral)}, spelling)
+            return (span + source, forms, set(forms), False)
         # No scale word: an ordinary count, gated on a following classifier
         # the same way "三個漏洞" and "十八個月" are in the brief. Bare "一" is
         # excluded unconditionally: it is Chinese's indefinite article

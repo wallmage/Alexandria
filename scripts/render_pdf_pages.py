@@ -2,6 +2,7 @@
 """Render every PDF page to PNG for visual inspection."""
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -79,6 +80,17 @@ def _renderer_command(*names):
         command = shutil.which(name)
         if command:
             return command
+    if sys.platform == "win32" and any(name.startswith("gs") for name in names):
+        roots = (
+            os.environ.get("PROGRAMFILES"),
+            os.environ.get("PROGRAMFILES(X86)"),
+        )
+        for root in filter(None, roots):
+            for version in sorted((Path(root) / "gs").glob("gs*"), reverse=True):
+                for name in names:
+                    command = version / "bin" / f"{name}.exe"
+                    if command.is_file():
+                        return str(command)
     raise RuntimeError(f"PDF renderer not found: {', '.join(names)}")
 
 

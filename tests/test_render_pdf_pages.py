@@ -1,15 +1,46 @@
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "render_pdf_pages.py"
 
 
 class RenderPagesCommandTests(unittest.TestCase):
+    def test_windows_finds_ghostscript_outside_path(self):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            program_files = Path(temp_dir) / "Program Files"
+            executable = program_files / "gs" / "gs10.07.0" / "bin" / "gswin64c.exe"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"")
+
+            with (
+                mock.patch.object(render_pdf_pages.sys, "platform", "win32"),
+                mock.patch.object(
+                    render_pdf_pages.shutil, "which", return_value=None
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {"PROGRAMFILES": str(program_files)},
+                    clear=False,
+                ),
+            ):
+                try:
+                    command = render_pdf_pages._renderer_command(
+                        "gs", "gswin64c", "gswin32c"
+                    )
+                except RuntimeError:
+                    command = None
+
+        self.assertEqual(str(executable), command)
+
     def test_help_works_without_optional_site_packages(self):
         result = subprocess.run(
             [sys.executable, "-S", str(SCRIPT), "--help"],

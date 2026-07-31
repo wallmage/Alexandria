@@ -1,6 +1,6 @@
 [project]
 name = "alexandria-research-skill"
-version = "3.2.2"
+version = "3.2.3"
 description = "Source-backed research reports with validated PDF production"
 requires-python = ">=3.10"
 dependencies = [

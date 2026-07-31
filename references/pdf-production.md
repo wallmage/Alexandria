@@ -203,8 +203,10 @@ glyphs and dropped artwork. On macOS, add `pdfkit` to the backend list. PDFium,
 Poppler, MuPDF, Ghostscript, and PDFKit cover independent rendering paths; the
 last four beyond PDFium may need platform packages. Install `poppler-utils`,
 `mupdf-tools`, and `ghostscript` on Debian or their equivalents. CI must open
-the complete language/template matrix with macOS PDFKit and on Windows.
-Validate release files with veraPDF and qpdf too.
+the complete language/template matrix with macOS PDFKit and on Windows. On
+Windows, the renderer also discovers Ghostscript in its standard `Program
+Files\gs\gs*\bin` location when the installer has not updated `PATH`. Validate
+release files with veraPDF and qpdf too.
 
 Run `scripts/pdf_quality.py` first. It settles the mechanical questions - blank pages, header collisions, overflow, contrast, CJK script purity - so the human pass can spend its attention on the ones a machine cannot answer:
 

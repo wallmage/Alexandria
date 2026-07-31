@@ -381,8 +381,13 @@ Without a template choice, render Executive and the result of
 `select_adaptive_companion()` using identical Markdown and receipts. Do not
 redraft for the second layout; skip it only when rendering cannot complete.
 
-Render every page with `scripts/render_pdf_pages.py`—PDFKit/Preview on macOS,
-PDFium elsewhere—and inspect it or a complete contact sheet. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean.
+Render pages with `scripts/render_pdf_pages.py`—PDFKit/Preview on macOS,
+PDFium elsewhere—and inspect them or a contact sheet. For compatibility work,
+cross-render with `scripts/pdf_compatibility.py`;
+use PDFium, Poppler, MuPDF, and Ghostscript, plus PDFKit on macOS. Check the
+cover, contents, headings, tables, code, images, links, page numbers, long
+URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender
+until clean.
 
 Do not use file size as a content or quality signal.
 

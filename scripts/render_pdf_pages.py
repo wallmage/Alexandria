@@ -74,6 +74,88 @@ def render_with_pdfkit(pdf_path, output_dir, *, dpi):
         raise RuntimeError(f"PDFKit page rendering failed: {detail}")
 
 
+def _renderer_command(*names):
+    for name in names:
+        command = shutil.which(name)
+        if command:
+            return command
+    raise RuntimeError(f"PDF renderer not found: {', '.join(names)}")
+
+
+def _run_renderer(command, label):
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(f"{label} page rendering failed: {detail}")
+
+
+def _normalize_page_names(output_dir):
+    pages = []
+    for path in output_dir.glob("page-*.png"):
+        try:
+            number = int(path.stem.rsplit("-", 1)[1])
+        except ValueError:
+            continue
+        pages.append((number, path))
+    for number, path in sorted(pages):
+        target = output_dir / f"page-{number:04d}.png"
+        if path != target:
+            path.rename(target)
+
+
+def render_with_poppler(pdf_path, output_dir, *, dpi):
+    _run_renderer(
+        [
+            _renderer_command("pdftocairo"),
+            "-png",
+            "-r",
+            str(dpi),
+            str(pdf_path),
+            str(output_dir / "page"),
+        ],
+        "Poppler",
+    )
+    _normalize_page_names(output_dir)
+
+
+def render_with_mupdf(pdf_path, output_dir, *, dpi):
+    _run_renderer(
+        [
+            _renderer_command("mutool"),
+            "draw",
+            "-q",
+            "-r",
+            str(dpi),
+            "-o",
+            str(output_dir / "page-%04d.png"),
+            str(pdf_path),
+        ],
+        "MuPDF",
+    )
+
+
+def render_with_ghostscript(pdf_path, output_dir, *, dpi):
+    _run_renderer(
+        [
+            _renderer_command("gs", "gswin64c", "gswin32c"),
+            "-q",
+            "-dSAFER",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-sDEVICE=png16m",
+            f"-r{dpi}",
+            f"-o{output_dir / 'page-%04d.png'}",
+            str(pdf_path),
+        ],
+        "Ghostscript",
+    )
+
+
 def render_pages(pdf_path, output_dir, *, dpi=144, backend="auto"):
     pdf_path, output_dir = validate_paths(pdf_path, output_dir)
     selected = "pdfkit" if backend == "auto" and sys.platform == "darwin" else backend
@@ -83,8 +165,16 @@ def render_pages(pdf_path, output_dir, *, dpi=144, backend="auto"):
         if sys.platform != "darwin":
             raise RuntimeError("The PDFKit backend is available only on macOS.")
         render_with_pdfkit(pdf_path, output_dir, dpi=dpi)
-    else:
+    elif selected == "pdfium":
         render_with_pdfium(pdf_path, output_dir, dpi=dpi)
+    elif selected == "poppler":
+        render_with_poppler(pdf_path, output_dir, dpi=dpi)
+    elif selected == "mupdf":
+        render_with_mupdf(pdf_path, output_dir, dpi=dpi)
+    elif selected == "ghostscript":
+        render_with_ghostscript(pdf_path, output_dir, dpi=dpi)
+    else:
+        raise ValueError(f"Unknown PDF rendering backend: {selected}")
     page_count = len(list(output_dir.glob("page-*.png")))
     if not page_count:
         raise RuntimeError(f"{selected} rendered no PDF pages.")
@@ -98,7 +188,14 @@ def main(argv=None):
     parser.add_argument("--dpi", type=int, default=144, help="Render resolution")
     parser.add_argument(
         "--backend",
-        choices=("auto", "pdfium", "pdfkit"),
+        choices=(
+            "auto",
+            "pdfium",
+            "pdfkit",
+            "poppler",
+            "mupdf",
+            "ghostscript",
+        ),
         default="auto",
         help="Rendering engine (auto uses PDFKit on macOS, PDFium elsewhere)",
     )

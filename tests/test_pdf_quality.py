@@ -157,6 +157,66 @@ class TemplateContrastTests(unittest.TestCase):
                 self.assertIn(".insight-panel a", css)
                 self.assertIn(LINK_ON_DARK[name], css)
 
+    def test_generated_css_disables_pdf_image_interpolation(self):
+        for name in TEMPLATES:
+            with self.subTest(template=name):
+                css = page_html("", template=name)
+                self.assertIn("image-rendering: crisp-edges", css)
+
+
+class PdfPortabilityTests(unittest.TestCase):
+    def test_pdfa_3u_with_embedded_unicode_fonts_passes(self):
+        from weasyprint import HTML
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "portable.pdf"
+            HTML(
+                string=(
+                    '<html lang="zh-CN"><meta charset="utf-8">'
+                    "<title>兼容性测试</title><p>简体中文和 English 都必须完整显示。</p>"
+                    "</html>"
+                )
+            ).write_pdf(target, pdf_variant="pdf/a-3u")
+            findings, metrics = pdf_quality.check_pdf_portability(target)
+
+        self.assertEqual([finding.format() for finding in findings], [])
+        self.assertEqual(metrics["pdfa"], "3U")
+        self.assertGreater(metrics["embedded_fonts"], 0)
+
+    def test_unembedded_font_and_missing_pdfa_profile_are_rejected(self):
+        from pypdf import PdfWriter
+        from pypdf.generic import DictionaryObject, NameObject
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "unportable.pdf"
+            writer = PdfWriter()
+            page = writer.add_blank_page(width=300, height=400)
+            font = writer._add_object(
+                DictionaryObject(
+                    {
+                        NameObject("/Type"): NameObject("/Font"),
+                        NameObject("/Subtype"): NameObject("/Type1"),
+                        NameObject("/BaseFont"): NameObject("/Helvetica"),
+                    }
+                )
+            )
+            page[NameObject("/Resources")] = DictionaryObject(
+                {
+                    NameObject("/Font"): DictionaryObject(
+                        {NameObject("/F1"): font}
+                    )
+                }
+            )
+            with target.open("wb") as stream:
+                writer.write(stream)
+
+            findings, _ = pdf_quality.check_pdf_portability(target)
+
+        errors = [finding.format() for finding in findings]
+        self.assertTrue(any("PDF/A-3u" in error for error in errors))
+        self.assertTrue(any("not embedded" in error for error in errors))
+        self.assertTrue(any("Unicode map" in error for error in errors))
+
 
 class FontScriptTests(unittest.TestCase):
     def test_classifier_separates_simplified_from_traditional(self):

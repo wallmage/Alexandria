@@ -25,7 +25,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes fonts-noto-cjk
+          sudo apt-get install --yes \
+            fonts-noto-cjk ghostscript mupdf-tools poppler-utils qpdf
           python -m pip install -r requirements.txt
           python -m pip install pip-audit
 
@@ -46,16 +47,25 @@ jobs:
         if: matrix.python-version == '3.12'
         run: python tests/ci_render_matrix.py /tmp/alexandria-ci
 
+      - name: Validate PDF/A conformance and PDF structure
+        if: matrix.python-version == '3.12'
+        run: |
+          docker run --rm \
+            -v /tmp/alexandria-ci/pdfs:/data:ro \
+            verapdf/cli:v1.30.2 \
+            --format text --recurse /data
+          find /tmp/alexandria-ci/pdfs -name '*.pdf' -print0 |
+            xargs -0 -n1 qpdf --check
+
+      - name: Cross-render every language and template
+        if: matrix.python-version == '3.12'
+        run: |
+          python scripts/pdf_compatibility.py \
+            /tmp/alexandria-ci/pdfs \
+            /tmp/alexandria-renderers \
+            --backends pdfium,poppler,mupdf,ghostscript
+
       - name: Verify live production source transport
         if: matrix.python-version == '3.12'
         run: |
           python -c "from scripts.source_fidelity import default_fetcher; result = default_fetcher('https://example.com/'); assert 'Example Domain' in result.text"
-
-      - name: Rasterize all sample pages
-        if: matrix.python-version == '3.12'
-        run: |
-          python scripts/render_pdf_pages.py \
-            /tmp/alexandria-ci/pdfs/zh-CN-executive.pdf \
-            /tmp/alexandria-pages \
-            --dpi 96
-          test "$(find /tmp/alexandria-pages -name 'page-*.png' | wc -l)" -ge 3

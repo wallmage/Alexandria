@@ -1252,6 +1252,7 @@ img {
     max-width: 100%;
     height: auto;
     margin: 6mm auto;
+    image-rendering: crisp-edges;
 }
 
 hr {

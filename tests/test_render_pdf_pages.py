@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -117,6 +118,43 @@ class RenderPagesCommandTests(unittest.TestCase):
             "Blueprint background must not depend on a tiled PDF pattern "
             "that Preview drops",
         )
+
+    @unittest.skipUnless(
+        all(shutil.which(command) for command in ("pdftocairo", "mutool", "gs")),
+        "requires Poppler, MuPDF, and Ghostscript",
+    )
+    def test_portability_backends_render_every_page(self):
+        from pypdf import PdfWriter
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=300, height=400)
+            writer.add_blank_page(width=300, height=400)
+            with pdf.open("wb") as stream:
+                writer.write(stream)
+
+            for backend in ("poppler", "mupdf", "ghostscript"):
+                with self.subTest(backend=backend):
+                    output = temp / backend
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(SCRIPT),
+                            str(pdf),
+                            str(output),
+                            "--backend",
+                            backend,
+                            "--dpi",
+                            "72",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual(2, len(list(output.glob("page-*.png"))))
 
 
 if __name__ == "__main__":

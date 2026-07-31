@@ -2716,6 +2716,28 @@ def prepare_pdf_render(
     }
 
 
+def portable_pdf_color_spaces(_document, pdf):
+    """Inline sRGB in transparency objects for strict PDF renderers."""
+    srgb = next(
+        (
+            item["srgb"]
+            for item in pdf.objects
+            if hasattr(item, "get") and item.get("srgb")
+        ),
+        None,
+    )
+    if srgb is None:
+        return
+    for item in pdf.objects:
+        extra = getattr(item, "extra", None)
+        if extra:
+            group = extra.get("Group")
+            if group and group.get("CS") == "/srgb":
+                group["CS"] = srgb
+        if hasattr(item, "get") and item.get("ColorSpace") == "/srgb":
+            item["ColorSpace"] = srgb
+
+
 def write_prepared_pdf(prepared, output_path, *, asset_root):
     """Write one prepared render with deterministic PDF object identities."""
     output_path = Path(output_path)
@@ -2728,7 +2750,12 @@ def write_prepared_pdf(prepared, output_path, *, asset_root):
                 asset_root,
                 prepared["assets"],
             ),
-        ).write_pdf(output_path, pdf_tags=True)
+        ).write_pdf(
+            output_path,
+            pdf_tags=True,
+            pdf_variant="pdf/a-3u",
+            finisher=portable_pdf_color_spaces,
+        )
     return output_path
 
 

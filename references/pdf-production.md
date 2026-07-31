@@ -61,6 +61,13 @@ Read `references/pdf-templates.md` and resolve the intake values before renderin
   --content-receipt "$CONTENT_RECEIPT"
 ```
 
+The renderer writes PDF/A-3u. The file carries Unicode text maps, embedded
+fonts, an embedded sRGB output profile, tags, and PDF/A metadata. Raster images
+disable the PDF interpolation flag required by PDF/A. Named sRGB colour spaces
+inside transparency objects are replaced with their direct ICCBased value;
+this preserves colour management and avoids MuPDF's `unknown colorspace: srgb`
+failure.
+
 Use `--lang en`, `--lang zh-CN`, or `--lang zh-HK` when automatic script detection is ambiguous. Use `--keep-html` only when debugging layout. The converter refuses to replace an existing PDF; prefer a versioned filename, or pass `--force` only when replacement is intentional.
 
 Optional metadata and imagery:
@@ -148,6 +155,10 @@ It exits non-zero on any error-severity finding and reports:
 | `overflow` | any text box escapes the page box. |
 | `cjk_fonts` | a zh render mixes Simplified and Traditional faces, or uses the wrong script for the locale. Needs `--lang`. |
 | `cjk_preview_compat` | a zh render embeds the PingFang CFF subset that macOS Preview/PDFKit renders with missing Chinese glyphs. Needs `--lang`. |
+| `pdf_profile` | the file does not declare PDF/A-3u. |
+| `color_profile` | the file has no embedded output colour profile. |
+| `font_embedding` | any rendered font is not embedded. |
+| `font_unicode` | any rendered font has no Unicode map. |
 | `sparse_page` | *(warning only)* a page's inked band covers under 32% of the text block. A section ending near the top of a page is normal. |
 
 Import it instead of shelling out when you need the numbers:
@@ -177,6 +188,21 @@ Preview. This native pass is mandatory for final inspection because PDFium and
 Poppler can display an embedded font that Preview cannot. Use
 `--backend pdfium` only for cross-renderer diagnosis. Outside macOS, `auto`
 uses PDFium; `--backend pdfkit` is rejected.
+
+For a compatibility review, install the external renderers and run:
+
+```bash
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/pdf_compatibility.py" \
+  "$PDF_DIRECTORY" "$PDF_COMPAT_DIR" \
+  --backends pdfium,poppler,mupdf,ghostscript
+```
+
+This cross-render gate requires equal page counts and dimensions, then compares
+per-page visual detail to catch missing glyphs or dropped artwork. On macOS,
+add `pdfkit` to the backend list. PDFium, Poppler, MuPDF, Ghostscript, and
+PDFKit cover independent rendering paths; the last four beyond PDFium may need
+platform packages. Install `poppler-utils`, `mupdf-tools`, and `ghostscript` on
+Debian or their equivalents. Validate release files with veraPDF and qpdf too.
 
 Run `scripts/pdf_quality.py` first. It settles the mechanical questions - blank pages, header collisions, overflow, contrast, CJK script purity - so the human pass can spend its attention on the ones a machine cannot answer:
 

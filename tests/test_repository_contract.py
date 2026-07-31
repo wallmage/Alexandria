@@ -227,6 +227,23 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("--review-note", result.stdout)
 
+    def test_pdf_portability_gate_is_bundled_and_ci_exercised(self):
+        workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(
+            encoding="utf-8"
+        )
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        production = (ROOT / "references" / "pdf-production.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertTrue((ROOT / "scripts" / "pdf_compatibility.py").is_file())
+        self.assertIn("pdf_compatibility.py", workflow)
+        self.assertIn("mupdf-tools", workflow)
+        self.assertIn("verapdf/cli:v1.30.2", workflow)
+        self.assertIn("PDF/A-3u", production)
+        self.assertIn("PDFium, Poppler, MuPDF, Ghostscript", production)
+        self.assertIn("cross-render", skill.casefold())
+
     def test_evidence_schema_declares_real_json_schema(self):
         schema = json.loads(
             (ROOT / "references" / "evidence-ledger.schema.json").read_text(

@@ -340,6 +340,119 @@ def embedded_font_names(pdf_path):
     return sorted(names)
 
 
+def _indirect_key(value):
+    reference = getattr(value, "indirect_reference", None)
+    if reference is None:
+        return ("direct", id(value))
+    return ("indirect", reference.idnum, reference.generation)
+
+
+def _resource_fonts(resources, seen=None):
+    """Yield every font reachable from page or Form XObject resources."""
+    if seen is None:
+        seen = set()
+    resources = resources.get_object() if hasattr(resources, "get_object") else resources
+    if not resources:
+        return
+    key = _indirect_key(resources)
+    if key in seen:
+        return
+    seen.add(key)
+
+    fonts = resources.get("/Font") or {}
+    fonts = fonts.get_object() if hasattr(fonts, "get_object") else fonts
+    for reference in fonts.values():
+        yield reference.get_object()
+
+    xobjects = resources.get("/XObject") or {}
+    xobjects = xobjects.get_object() if hasattr(xobjects, "get_object") else xobjects
+    for reference in xobjects.values():
+        xobject = reference.get_object()
+        if xobject.get("/Subtype") == "/Form":
+            yield from _resource_fonts(xobject.get("/Resources"), seen)
+
+
+def check_pdf_portability(pdf_path):
+    """Require a self-contained PDF/A-3u file with portable text fonts."""
+    import pypdf
+
+    reader = pypdf.PdfReader(str(pdf_path))
+    findings = []
+    xmp = reader.xmp_metadata
+    part = str(getattr(xmp, "pdfaid_part", "") or "")
+    conformance = str(getattr(xmp, "pdfaid_conformance", "") or "").upper()
+    if part != "3" or conformance != "U":
+        findings.append(
+            Finding(
+                check="pdf_profile",
+                severity="error",
+                message="PDF must declare the PDF/A-3u archival profile",
+            )
+        )
+
+    root = reader.trailer.get("/Root") or {}
+    output_intents = root.get("/OutputIntents") or []
+    if not any(
+        intent.get_object().get("/DestOutputProfile") for intent in output_intents
+    ):
+        findings.append(
+            Finding(
+                check="color_profile",
+                severity="error",
+                message="PDF must embed an output colour profile",
+            )
+        )
+
+    fonts = {}
+    for page in reader.pages:
+        for font in _resource_fonts(page.get("/Resources")):
+            fonts.setdefault(_indirect_key(font), font)
+
+    embedded_count = 0
+    for font in fonts.values():
+        name = str(font.get("/BaseFont") or "unnamed font")
+        descendants = [
+            descendant.get_object()
+            for descendant in (font.get("/DescendantFonts") or [])
+        ]
+        faces = descendants or [font]
+        embedded = False
+        for face in faces:
+            descriptor = face.get("/FontDescriptor")
+            descriptor = descriptor.get_object() if descriptor else None
+            if descriptor and any(
+                descriptor.get(key)
+                for key in ("/FontFile", "/FontFile2", "/FontFile3")
+            ):
+                embedded = True
+                break
+        if embedded:
+            embedded_count += 1
+        else:
+            findings.append(
+                Finding(
+                    check="font_embedding",
+                    severity="error",
+                    message=f"{name} is not embedded",
+                )
+            )
+        if not font.get("/ToUnicode"):
+            findings.append(
+                Finding(
+                    check="font_unicode",
+                    severity="error",
+                    message=f"{name} has no Unicode map",
+                )
+            )
+
+    return findings, {
+        "pdfa": f"{part}{conformance}" if part or conformance else "",
+        "font_count": len(fonts),
+        "embedded_fonts": embedded_count,
+        "output_intent": bool(output_intents),
+    }
+
+
 def preview_incompatible_cjk_fonts(pdf_path):
     """Return embedded PingFang CFF subsets that macOS Preview misrenders."""
     import pypdf
@@ -822,6 +935,9 @@ def run_quality_checks(
         report.findings.extend(findings)
         report.metrics["contrast"] = metrics
     if pdf_path is not None:
+        findings, metrics = check_pdf_portability(pdf_path)
+        report.findings.extend(findings)
+        report.metrics["portability"] = metrics
         findings, metrics = check_pdf(pdf_path)
         report.findings.extend(findings)
         report.metrics["pdf"] = metrics

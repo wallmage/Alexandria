@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1205,8 +1206,53 @@ Body.
 
             self.assertEqual(calls["base_url"], source.parent.resolve())
             self.assertIs(calls["pdf_tags"], True)
+            self.assertEqual(calls["pdf_variant"], "pdf/a-3u")
             self.assertTrue(output.exists())
             self.assertEqual(0o600, os.stat(output).st_mode & 0o777)
+
+    @unittest.skipUnless(shutil.which("mutool"), "requires MuPDF")
+    def test_pdfa_transparency_renders_cleanly_in_mupdf(self):
+        from weasyprint import HTML
+
+        html = """
+        <style>
+          div {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(
+              90deg, rgba(255, 0, 0, .2), blue
+            );
+            box-shadow: 0 10px 20px rgba(0, 0, 0, .2);
+          }
+        </style>
+        <div></div>
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "transparency.pdf"
+            HTML(string=html).write_pdf(
+                pdf,
+                pdf_variant="pdf/a-3u",
+                finisher=self.converter.portable_pdf_color_spaces,
+            )
+            result = subprocess.run(
+                [
+                    shutil.which("mutool"),
+                    "draw",
+                    "-q",
+                    "-r",
+                    "72",
+                    "-o",
+                    str(temp / "page-%04d.png"),
+                    str(pdf),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn("unknown colorspace", result.stderr.lower())
 
     def test_render_never_widens_a_restrictive_umask(self):
         class FakeHTML:

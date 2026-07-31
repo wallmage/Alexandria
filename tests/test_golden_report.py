@@ -24,9 +24,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts import md_to_pdf, pdf_quality, validate_report  # noqa: E402
+from scripts import (  # noqa: E402
+    md_to_pdf,
+    pdf_compatibility,
+    pdf_quality,
+    validate_report,
+)
 from scripts.content_gate import run_content_gate  # noqa: E402
 from scripts.gate_severity import hard_errors  # noqa: E402
+from scripts.render_pdf_pages import render_pages  # noqa: E402
 from scripts.report_contract import localized_date  # noqa: E402
 from scripts.rewild_gate import file_sha256, run_gate  # noqa: E402
 from scripts.source_fidelity import (  # noqa: E402
@@ -607,6 +613,7 @@ class GoldenReportPipelineTests(unittest.TestCase):
                 )
 
             self._assert_pdf_carries_report_text(pdf, case)
+            self._assert_native_render_matches_pdfium(pdf, case)
 
     def _assert_pdf_carries_report_text(self, pdf, case):
         from pypdf import PdfReader
@@ -625,6 +632,22 @@ class GoldenReportPipelineTests(unittest.TestCase):
                 1000,
                 f"{case['lang']} PDF did not render CJK text.",
             )
+
+    def _assert_native_render_matches_pdfium(self, pdf, case):
+        if sys.platform != "darwin":
+            return
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            render_pages(pdf, root / "pdfium", dpi=96, backend="pdfium")
+            render_pages(pdf, root / "pdfkit", dpi=96, backend="pdfkit")
+            errors, _ = pdf_compatibility.compare_render_sets(
+                root / "pdfium", root / "pdfkit"
+            )
+        self.assertEqual(
+            [],
+            errors,
+            f"{case['lang']} changed position or lost content in macOS PDFKit",
+        )
 
 
 if __name__ == "__main__":

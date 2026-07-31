@@ -198,11 +198,13 @@ For a compatibility review, install the external renderers and run:
 ```
 
 This cross-render gate requires equal page counts and dimensions, then compares
-per-page visual detail to catch missing glyphs or dropped artwork. On macOS,
-add `pdfkit` to the backend list. PDFium, Poppler, MuPDF, Ghostscript, and
-PDFKit cover independent rendering paths; the last four beyond PDFium may need
-platform packages. Install `poppler-utils`, `mupdf-tools`, and `ghostscript` on
-Debian or their equivalents. Validate release files with veraPDF and qpdf too.
+both visual detail and its page position to catch missing, scattered, or moved
+glyphs and dropped artwork. On macOS, add `pdfkit` to the backend list. PDFium,
+Poppler, MuPDF, Ghostscript, and PDFKit cover independent rendering paths; the
+last four beyond PDFium may need platform packages. Install `poppler-utils`,
+`mupdf-tools`, and `ghostscript` on Debian or their equivalents. CI must open
+the complete language/template matrix with macOS PDFKit and on Windows.
+Validate release files with veraPDF and qpdf too.
 
 Run `scripts/pdf_quality.py` first. It settles the mechanical questions - blank pages, header collisions, overflow, contrast, CJK script purity - so the human pass can spend its attention on the ones a machine cannot answer:
 

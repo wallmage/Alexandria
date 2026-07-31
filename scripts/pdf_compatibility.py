@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from PIL import Image, ImageFilter, ImageStat
@@ -13,6 +14,8 @@ except ImportError:
     from render_pdf_pages import render_pages
 
 MIN_DETAIL_RATIO = 0.75
+MIN_SPATIAL_SIMILARITY = 0.85
+SPATIAL_SAMPLE_SIZE = (149, 210)
 
 
 def _edge_energy(path):
@@ -23,6 +26,33 @@ def _edge_energy(path):
                 (2, 2, grayscale.width - 2, grayscale.height - 2)
             )
         return ImageStat.Stat(grayscale.filter(ImageFilter.FIND_EDGES)).mean[0]
+
+
+def _edge_vector(path):
+    with Image.open(path) as image:
+        edges = (
+            image.convert("L")
+            .resize(SPATIAL_SAMPLE_SIZE, Image.Resampling.BILINEAR)
+            .filter(ImageFilter.FIND_EDGES)
+            .crop((2, 2, SPATIAL_SAMPLE_SIZE[0] - 2, SPATIAL_SAMPLE_SIZE[1] - 2))
+        )
+        return tuple(edges.get_flattened_data())
+
+
+def _spatial_similarity(reference, candidate):
+    reference_edges = _edge_vector(reference)
+    candidate_edges = _edge_vector(candidate)
+    dot = sum(
+        reference * candidate
+        for reference, candidate in zip(
+            reference_edges, candidate_edges, strict=True
+        )
+    )
+    reference_norm = sum(value * value for value in reference_edges)
+    candidate_norm = sum(value * value for value in candidate_edges)
+    if not reference_norm or not candidate_norm:
+        return 1.0 if reference_norm == candidate_norm else 0.0
+    return dot / math.sqrt(reference_norm * candidate_norm)
 
 
 def compare_render_sets(reference_dir, candidate_dir):
@@ -53,13 +83,24 @@ def compare_render_sets(reference_dir, candidate_dir):
             if reference_energy > 1e-9
             else 1.0 if candidate_energy <= 1e-9 else float("inf")
         )
+        spatial_similarity = _spatial_similarity(reference, candidate)
         metrics["pages"].append(
-            {"page": candidate.name, "detail_ratio": round(ratio, 3)}
+            {
+                "page": candidate.name,
+                "detail_ratio": round(ratio, 3),
+                "spatial_similarity": round(spatial_similarity, 3),
+            }
         )
         if ratio < MIN_DETAIL_RATIO:
             errors.append(
                 f"{candidate.name} visual detail ratio {ratio:.3f} is below "
                 f"{MIN_DETAIL_RATIO:.2f}"
+            )
+        if spatial_similarity < MIN_SPATIAL_SIMILARITY:
+            errors.append(
+                f"{candidate.name} spatial similarity "
+                f"{spatial_similarity:.3f} is below "
+                f"{MIN_SPATIAL_SIMILARITY:.2f}"
             )
     return errors, metrics
 

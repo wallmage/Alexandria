@@ -51,6 +51,29 @@ class PdfCompatibilityTests(unittest.TestCase):
         self.assertTrue(errors)
         self.assertIn("visual detail", errors[0])
 
+    def test_same_detail_at_wrong_positions_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reference = root / "reference"
+            candidate = root / "candidate"
+            reference.mkdir()
+            candidate.mkdir()
+            expected = Image.new("RGB", (120, 120), "white")
+            displaced = Image.new("RGB", (120, 120), "white")
+            for x in range(15, 75, 4):
+                for y in range(20, 100):
+                    expected.putpixel((x, y), (0, 0, 0))
+                    displaced.putpixel((x + 30, y), (0, 0, 0))
+            expected.save(reference / "page-0001.png")
+            displaced.save(candidate / "page-0001.png")
+
+            errors, _ = pdf_compatibility.compare_render_sets(
+                reference, candidate
+            )
+
+        self.assertTrue(errors)
+        self.assertIn("spatial", errors[0])
+
     def test_renderer_sharpness_is_not_treated_as_missing_content(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -73,6 +96,30 @@ class PdfCompatibilityTests(unittest.TestCase):
                 )
 
         self.assertEqual(errors, [])
+
+    def test_spatial_threshold_uses_unrounded_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reference = root / "reference"
+            candidate = root / "candidate"
+            reference.mkdir()
+            candidate.mkdir()
+            for directory in (reference, candidate):
+                Image.new("RGB", (100, 120), "white").save(
+                    directory / "page-0001.png"
+                )
+
+            with mock.patch.object(
+                pdf_compatibility,
+                "_spatial_similarity",
+                return_value=0.8496,
+            ):
+                errors, _ = pdf_compatibility.compare_render_sets(
+                    reference, candidate
+                )
+
+        self.assertTrue(errors)
+        self.assertIn("spatial", errors[0])
 
 
 if __name__ == "__main__":

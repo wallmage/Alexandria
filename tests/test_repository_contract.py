@@ -231,18 +231,21 @@ class RepositoryContractTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(
             encoding="utf-8"
         )
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        production = (ROOT / "references" / "pdf-production.md").read_text(
-            encoding="utf-8"
-        )
+        command = ROOT / "scripts" / "pdf_compatibility.py"
 
-        self.assertTrue((ROOT / "scripts" / "pdf_compatibility.py").is_file())
+        result = subprocess.run(
+            [sys.executable, str(command), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--backends", result.stdout)
         self.assertIn("pdf_compatibility.py", workflow)
         self.assertIn("mupdf-tools", workflow)
         self.assertIn("verapdf/cli:v1.30.2", workflow)
-        self.assertIn("PDF/A-3u", production)
-        self.assertIn("PDFium, Poppler, MuPDF, Ghostscript", production)
-        self.assertIn("cross-render", skill.casefold())
+        self.assertIn("macos-pdfkit:", workflow)
+        self.assertIn("windows-pdf:", workflow)
 
     def test_evidence_schema_declares_real_json_schema(self):
         schema = json.loads(

@@ -30,14 +30,14 @@ Alexandria bundles Source Sans 3, Source Serif 4, and Source Code Pro, and embed
 
 So zh output uses the host's fonts, and the pipeline makes that safe instead of pretending otherwise:
 
-1. **Script-pure stacks.** `scripts/md_to_pdf.py` defines one font stack per locale containing only Simplified faces for `zh-CN` and only Traditional faces for `zh-HK`. Japanese faces and `Droid Sans Fallback` were removed, and no stack ends in a generic `serif` / `sans-serif` / `monospace` keyword, because fontconfig answered those generics with whichever Songti it felt like. That is how a Hong Kong document previously ended up set in PingFang HK, Songti TC, *and* Songti SC-Bold at once. On macOS, both Chinese locales prefer the TrueType `Arial Unicode MS` before PingFang: WeasyPrint 69's embedded PingFang CFF subsets render correctly in PDFium and Poppler but lose most Chinese glyphs in Preview/PDFKit.
+1. **Script-pure stacks.** `scripts/md_to_pdf.py` defines one font stack per locale containing only Simplified faces for `zh-CN` and only Traditional faces for `zh-HK`. Japanese faces and `Droid Sans Fallback` were removed, and no stack ends in a generic `serif` / `sans-serif` / `monospace` keyword, because fontconfig answered those generics with whichever Songti it felt like. That is how a Hong Kong document previously ended up set in PingFang HK, Songti TC, *and* Songti SC-Bold at once. On macOS, both Chinese locales prefer Preview-compatible TrueType faces—Arial Unicode MS, then the matching Heiti or Songti—before PingFang. WeasyPrint 69's embedded PingFang CFF subsets render correctly in PDFium and Poppler but lose most Chinese glyphs in Preview/PDFKit.
 2. **Enforced checks.** `scripts/pdf_quality.check_cjk_fonts(pdf, lang)` reads the embedded font list and font-program type back out of the finished PDF. It **fails** if the render mixes scripts, uses the wrong script for the locale, embeds no CJK face, or contains the PingFang CFF subset known to render incompletely in macOS Preview. Silent SC/TC mixing and PDFKit-only glyph loss now stop the build.
 3. **An opt-in bundle.** Drop `AlexandriaCJK-SC.ttf` and/or `AlexandriaCJK-TC.ttf` into `assets/fonts/` and `BUNDLED_FONT_CSS` picks them up automatically and pins them at the head of every zh stack. With those files present, `zh-CN` and `zh-HK` render identically on every machine and pagination stops being host-dependent.
 
 Without the optional bundle, pagination remains host-dependent, so a `--min-pages` threshold can pass on one machine and fail on another. Verify the intended family is installed before rendering:
 
-- Simplified Chinese: Noto Sans CJK SC, Source Han Sans SC, Arial Unicode MS, PingFang SC, or Microsoft YaHei.
-- Hong Kong Traditional Chinese: Noto Sans CJK HK/TC, Source Han Sans HK, Arial Unicode MS, PingFang HK, or Microsoft JhengHei.
+- Simplified Chinese: Noto Sans CJK SC, Source Han Sans SC, Arial Unicode MS, Heiti SC, Songti SC, PingFang SC, or Microsoft YaHei.
+- Hong Kong Traditional Chinese: Noto Sans CJK HK/TC, Source Han Sans HK, Arial Unicode MS, Heiti TC, Songti TC, PingFang HK, or Microsoft JhengHei.
 
 On Debian/Ubuntu CI, install `fonts-noto-cjk`. A PDF that extracts the right Unicode text can still display missing-glyph boxes, so this does not replace visual inspection.
 
@@ -171,6 +171,12 @@ PDF_CHECK_DIR="$(mktemp -d)"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/render_pdf_pages.py" \
   "$REPORT_PDF" "$PDF_CHECK_DIR" --dpi 144
 ```
+
+On macOS, `--backend auto` (the default) uses PDFKit, the same framework as
+Preview. This native pass is mandatory for final inspection because PDFium and
+Poppler can display an embedded font that Preview cannot. Use
+`--backend pdfium` only for cross-renderer diagnosis. Outside macOS, `auto`
+uses PDFium; `--backend pdfkit` is rejected.
 
 Run `scripts/pdf_quality.py` first. It settles the mechanical questions - blank pages, header collisions, overflow, contrast, CJK script purity - so the human pass can spend its attention on the ones a machine cannot answer:
 

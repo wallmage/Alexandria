@@ -1,5 +1,7 @@
 """Tests for the programmatic PDF and design-token quality gate."""
 
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -286,6 +288,69 @@ class FontScriptTests(unittest.TestCase):
 
         errors = [finding for finding in findings if finding.severity == "error"]
         self.assertEqual(errors, [])
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS fonts")
+    def test_chinese_stacks_survive_without_arial_unicode(self):
+        first_config = subprocess.check_output(
+            ["fc-conflist"],
+            text=True,
+        ).splitlines()[0]
+        fontconfig_root = Path(first_config.removeprefix("+ ").split(":", 1)[0]).parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fontconfig = root / "fonts.conf"
+            fontconfig.write_text(
+                f"""<?xml version="1.0"?>
+                <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+                <fontconfig>
+                  <include>{fontconfig_root}/fonts.conf</include>
+                  <selectfont><rejectfont><pattern>
+                    <patelt name="family">
+                      <string>Arial Unicode MS</string>
+                    </patelt>
+                  </pattern></rejectfont></selectfont>
+                </fontconfig>
+                """,
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["FONTCONFIG_FILE"] = str(fontconfig)
+
+            for lang, text in (
+                ("zh-CN", "中文字体必须能在系统预览中完整显示。"),
+                ("zh-HK", "中文字體必須能在系統預覽中完整顯示。"),
+            ):
+                with self.subTest(lang=lang):
+                    target = root / f"{lang}.pdf"
+                    script = f"""
+from scripts import md_to_pdf, pdf_quality
+from weasyprint import HTML
+settings = md_to_pdf.localized_settings({lang!r}, "executive")
+html = (
+  "<style>"
+  + ".sans {{ font-family: " + settings["font_sans"] + "; }}"
+  + ".display {{ font-family: " + settings["font_display"] + "; }}"
+  + ".mono {{ font-family: " + settings["font_mono"] + "; }}"
+  + "</style>"
+  + '<p class="sans">{text}</p>'
+  + '<p class="display">{text}</p>'
+  + '<p class="mono">{text}</p>'
+)
+HTML(string=html).write_pdf({str(target)!r}, pdf_tags=True)
+findings, _ = pdf_quality.check_cjk_fonts({str(target)!r}, {lang!r})
+errors = [finding.format() for finding in findings if finding.severity == "error"]
+if errors:
+    raise SystemExit("\\n".join(errors))
+"""
+                    result = subprocess.run(
+                        [sys.executable, "-c", script],
+                        cwd=ROOT,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(0, result.returncode, result.stderr)
 
 
 class RenderedPageTests(unittest.TestCase):

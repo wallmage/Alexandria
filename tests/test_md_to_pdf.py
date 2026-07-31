@@ -1885,9 +1885,8 @@ class DesignRegressionTests(unittest.TestCase):
             self.assertIn("SOURCE_DATE_EPOCH", os.environ)
         self.assertEqual(os.environ.get("SOURCE_DATE_EPOCH"), before)
 
-    def test_blueprint_cover_drawing_snaps_to_the_datum_grid(self):
-        # 17mm..185mm x 111mm..255mm on a 24mm grid anchored at 17mm/15mm.
-        self.assertIn("background-position: 17mm 15mm", self.css)
+    def test_blueprint_cover_drawing_uses_explicit_datum_geometry(self):
+        # Explicit shapes survive PDFKit; tiled background patterns do not.
         self.assertIn("inset: 111mm 25mm 42mm 17mm", self.css)
         for offset in ("left: 24mm", "top: 24mm", "width: 48mm", "height: 48mm"):
             self.assertIn(offset, self.css)

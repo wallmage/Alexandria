@@ -152,24 +152,25 @@ FONT_SANS_EN = '"Alexandria Sans", "Avenir Next", "Helvetica Neue", Arial, sans-
 # it before PingFang while retaining PingFang as a last host fallback.
 FONT_SANS_CN = (
     '"Alexandria CJK SC", "Alexandria Sans", "Noto Sans CJK SC", '
-    '"Source Han Sans SC", "Arial Unicode MS", "PingFang SC", '
+    '"Source Han Sans SC", "Arial Unicode MS", "Heiti SC", "PingFang SC", '
     '"Microsoft YaHei"'
 )
 FONT_SANS_HK = (
     '"Alexandria CJK TC", "Alexandria Sans", "Noto Sans CJK HK", '
-    '"Noto Sans CJK TC", "Source Han Sans HK", "Arial Unicode MS", "PingFang HK", '
-    '"Microsoft JhengHei"'
+    '"Noto Sans CJK TC", "Source Han Sans HK", "Arial Unicode MS", '
+    '"Heiti TC", "PingFang HK", "Microsoft JhengHei"'
 )
 FONT_SERIF_EN = (
     '"Alexandria Serif", "Iowan Old Style", Baskerville, Georgia, serif'
 )
 FONT_SERIF_CN = (
     '"Alexandria CJK SC", "Alexandria Serif", "Noto Serif CJK SC", '
-    '"Source Han Serif SC", "Arial Unicode MS", "PingFang SC"'
+    '"Source Han Serif SC", "Arial Unicode MS", "Songti SC", "PingFang SC"'
 )
 FONT_SERIF_HK = (
     '"Alexandria CJK TC", "Alexandria Serif", "Noto Serif CJK HK", '
-    '"Noto Serif CJK TC", "Source Han Serif HK", "Arial Unicode MS", "PingFang HK"'
+    '"Noto Serif CJK TC", "Source Han Serif HK", "Arial Unicode MS", '
+    '"Songti TC", "PingFang HK"'
 )
 FONT_MONO = '"Alexandria Mono", Menlo, Consolas, "Courier New", monospace'
 # CJK glyphs inside a mono label used to fall through the Latin monospace
@@ -179,12 +180,12 @@ FONT_MONO = '"Alexandria Mono", Menlo, Consolas, "Courier New", monospace'
 FONT_MONO_CN = (
     '"Alexandria Mono", Menlo, Consolas, "Courier New", '
     '"Alexandria CJK SC", "Noto Sans Mono CJK SC", "Arial Unicode MS", '
-    '"PingFang SC"'
+    '"Heiti SC", "PingFang SC"'
 )
 FONT_MONO_HK = (
     '"Alexandria Mono", Menlo, Consolas, "Courier New", '
     '"Alexandria CJK TC", "Noto Sans Mono CJK HK", "Arial Unicode MS", '
-    '"PingFang HK"'
+    '"Heiti TC", "PingFang HK"'
 )
 
 

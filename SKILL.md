@@ -381,7 +381,8 @@ Without a template choice, render Executive and the result of
 `select_adaptive_companion()` using identical Markdown and receipts. Do not
 redraft for the second layout; skip it only when rendering cannot complete.
 
-Render the PDF to images and inspect every page or a complete contact sheet. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean.
+Render every page with `scripts/render_pdf_pages.py`—PDFKit/Preview on macOS,
+PDFium elsewhere—and inspect it or a complete contact sheet. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean.
 
 Do not use file size as a content or quality signal.
 

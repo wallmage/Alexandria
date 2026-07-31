@@ -2755,12 +2755,7 @@ TEMPLATE_CSS = {
 }
 .template-blueprint .cover {
     padding: 15mm 17mm;
-    background:
-        linear-gradient(to right, rgba(74,159,216,0.10) 0.35pt, transparent 0.35pt),
-        linear-gradient(to bottom, rgba(74,159,216,0.08) 0.35pt, transparent 0.35pt),
-        #fff;
-    background-size: 24mm 24mm;
-    background-position: 17mm 15mm;
+    background: #fff;
 }
 .template-blueprint .cover-copy {
     width: 170mm;
@@ -2827,7 +2822,6 @@ TEMPLATE_CSS = {
     bottom: -9mm;
     height: 3mm;
     border-top: 0.6pt solid #4a9fd8;
-    background: repeating-linear-gradient(to right, #4a9fd8 0 0.5pt, transparent 0.5pt 24mm);
 }
 .orbit-ruler {
     position: absolute;
@@ -2842,10 +2836,7 @@ TEMPLATE_CSS = {
     background: #fff;
 }
 .toc-blueprint {
-    background:
-        linear-gradient(to right, rgba(74,159,216,0.08) 0.35pt, transparent 0.35pt),
-        linear-gradient(to bottom, rgba(74,159,216,0.07) 0.35pt, transparent 0.35pt);
-    background-size: 30mm 30mm;
+    background: #fff;
 }
 .toc-blueprint .toc-title {
     font-size: 43pt;
@@ -2868,10 +2859,7 @@ TEMPLATE_CSS = {
     background: #4a9fd8;
 }
 .blueprint-feature-page {
-    background:
-        linear-gradient(to right, rgba(74,159,216,0.07) 0.35pt, transparent 0.35pt),
-        #fff;
-    background-size: 30mm 30mm;
+    background: #fff;
 }
 /* Generated opener plate: the datum grid the template is named for, with an
    orthographic construction snapped to a 13mm module. Blueprint ships no
@@ -2881,10 +2869,7 @@ TEMPLATE_CSS = {
     background: #f7fbfe;
 }
 .template-blueprint .feature-plate {
-    background:
-        linear-gradient(to right, rgba(74,159,216,0.30) 0.35pt, transparent 0.35pt),
-        linear-gradient(to bottom, rgba(74,159,216,0.24) 0.35pt, transparent 0.35pt);
-    background-size: 13mm 13mm;
+    background: transparent;
 }
 .template-blueprint .feature-plate i:nth-child(1) {
     left: 26mm;
@@ -2928,9 +2913,6 @@ TEMPLATE_CSS = {
 .template-blueprint .report-body {
     padding-left: 8mm;
     border-left: 0.5pt solid rgba(74,159,216,0.55);
-    background-image:
-        linear-gradient(to right, rgba(74,159,216,0.04) 0.35pt, transparent 0.35pt);
-    background-size: 8mm 8mm;
 }
 """,
     "terrain": """

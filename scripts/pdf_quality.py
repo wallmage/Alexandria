@@ -276,6 +276,7 @@ CJK_FAMILY_MARKERS = (
     "pingfang", "songti", "heiti", "hiragino", "yahei", "jhenghei", "mingliu",
     "notosanscjk", "notoserifcjk", "sourcehan", "droidsansfallback",
     "alexandriacjk", "stsong", "stheiti", "simsun", "kaiti", "fangsong",
+    "arialunicode",
 )
 
 _TOKEN_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z]*|[a-z]+|[0-9]+")
@@ -294,12 +295,14 @@ def _font_tokens(name):
 
 
 def classify_font_script(name):
-    """Return 'simplified', 'traditional', 'latin' or 'unknown' for a font."""
+    """Return the Chinese script coverage, 'latin', or 'unknown' for a font."""
     tokens = _font_tokens(name)
     compact = "".join(tokens)
     if not any(marker in compact for marker in CJK_FAMILY_MARKERS):
         return "latin"
     token_set = set(tokens)
+    if "arialunicode" in compact:
+        return "universal"
     traditional = bool(token_set & TRADITIONAL_MARKERS) or any(
         marker in compact
         for marker in (
@@ -334,6 +337,37 @@ def embedded_font_names(pdf_path):
                 child = descendant.get_object()
                 if child.get("/BaseFont"):
                     names.add(str(child["/BaseFont"]))
+    return sorted(names)
+
+
+def preview_incompatible_cjk_fonts(pdf_path):
+    """Return embedded PingFang CFF subsets that macOS Preview misrenders."""
+    import pypdf
+
+    reader = pypdf.PdfReader(str(pdf_path))
+    names = set()
+    for page in reader.pages:
+        fonts = (page.get("/Resources") or {}).get("/Font") or {}
+        for key in fonts:
+            font = fonts[key].get_object()
+            parent_name = str(font.get("/BaseFont") or "")
+            for descendant in font.get("/DescendantFonts") or []:
+                child = descendant.get_object()
+                name = str(child.get("/BaseFont") or parent_name)
+                if "pingfang" not in "".join(_font_tokens(name)):
+                    continue
+                descriptor = (child.get("/FontDescriptor") or {}).get_object()
+                font_file = (
+                    (descriptor.get("/FontFile3") or {}).get_object()
+                    if descriptor
+                    else None
+                )
+                if (
+                    child.get("/Subtype") == "/CIDFontType0"
+                    and font_file
+                    and font_file.get("/Subtype") == "/OpenType"
+                ):
+                    names.add(name)
     return sorted(names)
 
 
@@ -382,7 +416,11 @@ def check_cjk_fonts(pdf_path, lang):
                 where=lang,
             )
         )
-    elif not scripts and not by_script.get("unknown"):
+    elif (
+        not scripts
+        and not by_script.get("unknown")
+        and not by_script.get("universal")
+    ):
         findings.append(
             Finding(
                 check="cjk_fonts",
@@ -400,7 +438,28 @@ def check_cjk_fonts(pdf_path, lang):
                 where=lang,
             )
         )
-    return findings, {"fonts": names, "by_script": by_script}
+    incompatible = (
+        preview_incompatible_cjk_fonts(pdf_path)
+        if Path(pdf_path).is_file()
+        else []
+    )
+    for name in incompatible:
+        findings.append(
+            Finding(
+                check="cjk_preview_compat",
+                severity="error",
+                message=(
+                    "macOS Preview renders incomplete text from embedded "
+                    f"PingFang CFF subset {name}; use a TrueType CJK face"
+                ),
+                where=lang,
+            )
+        )
+    return findings, {
+        "fonts": names,
+        "by_script": by_script,
+        "preview_incompatible": incompatible,
+    }
 
 
 def _load_pdfium():

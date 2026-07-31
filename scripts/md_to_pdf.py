@@ -147,13 +147,17 @@ FONT_SANS_EN = '"Alexandria Sans", "Avenir Next", "Helvetica Neue", Arial, sans-
 # optional bundled faces are present in assets/fonts/; see pdf_templates.
 # scripts/pdf_quality.check_cjk_fonts() fails the build if a render still
 # embeds both Simplified and Traditional faces.
+# WeasyPrint's PingFang CFF subsets render incompletely in macOS Preview.
+# Arial Unicode MS is a TrueType face on macOS, so both Chinese locales prefer
+# it before PingFang while retaining PingFang as a last host fallback.
 FONT_SANS_CN = (
     '"Alexandria CJK SC", "Alexandria Sans", "Noto Sans CJK SC", '
-    '"Source Han Sans SC", "PingFang SC", "Microsoft YaHei"'
+    '"Source Han Sans SC", "Arial Unicode MS", "PingFang SC", '
+    '"Microsoft YaHei"'
 )
 FONT_SANS_HK = (
     '"Alexandria CJK TC", "Alexandria Sans", "Noto Sans CJK HK", '
-    '"Noto Sans CJK TC", "Source Han Sans HK", "PingFang HK", '
+    '"Noto Sans CJK TC", "Source Han Sans HK", "Arial Unicode MS", "PingFang HK", '
     '"Microsoft JhengHei"'
 )
 FONT_SERIF_EN = (
@@ -161,11 +165,11 @@ FONT_SERIF_EN = (
 )
 FONT_SERIF_CN = (
     '"Alexandria CJK SC", "Alexandria Serif", "Noto Serif CJK SC", '
-    '"Source Han Serif SC", "PingFang SC"'
+    '"Source Han Serif SC", "Arial Unicode MS", "PingFang SC"'
 )
 FONT_SERIF_HK = (
     '"Alexandria CJK TC", "Alexandria Serif", "Noto Serif CJK HK", '
-    '"Noto Serif CJK TC", "Source Han Serif HK", "PingFang HK"'
+    '"Noto Serif CJK TC", "Source Han Serif HK", "Arial Unicode MS", "PingFang HK"'
 )
 FONT_MONO = '"Alexandria Mono", Menlo, Consolas, "Courier New", monospace'
 # CJK glyphs inside a mono label used to fall through the Latin monospace
@@ -174,11 +178,13 @@ FONT_MONO = '"Alexandria Mono", Menlo, Consolas, "Courier New", monospace'
 # own CJK family instead of a generic.
 FONT_MONO_CN = (
     '"Alexandria Mono", Menlo, Consolas, "Courier New", '
-    '"Alexandria CJK SC", "Noto Sans Mono CJK SC", "PingFang SC"'
+    '"Alexandria CJK SC", "Noto Sans Mono CJK SC", "Arial Unicode MS", '
+    '"PingFang SC"'
 )
 FONT_MONO_HK = (
     '"Alexandria Mono", Menlo, Consolas, "Courier New", '
-    '"Alexandria CJK TC", "Noto Sans Mono CJK HK", "PingFang HK"'
+    '"Alexandria CJK TC", "Noto Sans Mono CJK HK", "Arial Unicode MS", '
+    '"PingFang HK"'
 )
 
 

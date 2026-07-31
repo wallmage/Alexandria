@@ -30,14 +30,14 @@ Alexandria bundles Source Sans 3, Source Serif 4, and Source Code Pro, and embed
 
 So zh output uses the host's fonts, and the pipeline makes that safe instead of pretending otherwise:
 
-1. **Script-pure stacks.** `scripts/md_to_pdf.py` defines one font stack per locale containing only Simplified faces for `zh-CN` and only Traditional faces for `zh-HK`. Japanese faces and `Droid Sans Fallback` were removed, and no stack ends in a generic `serif` / `sans-serif` / `monospace` keyword, because fontconfig answered those generics with whichever Songti it felt like. That is how a Hong Kong document previously ended up set in PingFang HK, Songti TC, *and* Songti SC-Bold at once.
-2. **An enforced check.** `scripts/pdf_quality.check_cjk_fonts(pdf, lang)` reads the embedded font list back out of the finished PDF, classifies every face as Simplified, Traditional, or Latin, and **fails** if the render mixes scripts, uses the wrong script for the locale, or embeds no CJK face at all. Silent SC/TC mixing is no longer possible; the build stops.
+1. **Script-pure stacks.** `scripts/md_to_pdf.py` defines one font stack per locale containing only Simplified faces for `zh-CN` and only Traditional faces for `zh-HK`. Japanese faces and `Droid Sans Fallback` were removed, and no stack ends in a generic `serif` / `sans-serif` / `monospace` keyword, because fontconfig answered those generics with whichever Songti it felt like. That is how a Hong Kong document previously ended up set in PingFang HK, Songti TC, *and* Songti SC-Bold at once. On macOS, both Chinese locales prefer the TrueType `Arial Unicode MS` before PingFang: WeasyPrint 69's embedded PingFang CFF subsets render correctly in PDFium and Poppler but lose most Chinese glyphs in Preview/PDFKit.
+2. **Enforced checks.** `scripts/pdf_quality.check_cjk_fonts(pdf, lang)` reads the embedded font list and font-program type back out of the finished PDF. It **fails** if the render mixes scripts, uses the wrong script for the locale, embeds no CJK face, or contains the PingFang CFF subset known to render incompletely in macOS Preview. Silent SC/TC mixing and PDFKit-only glyph loss now stop the build.
 3. **An opt-in bundle.** Drop `AlexandriaCJK-SC.ttf` and/or `AlexandriaCJK-TC.ttf` into `assets/fonts/` and `BUNDLED_FONT_CSS` picks them up automatically and pins them at the head of every zh stack. With those files present, `zh-CN` and `zh-HK` render identically on every machine and pagination stops being host-dependent.
 
 Without the optional bundle, pagination remains host-dependent, so a `--min-pages` threshold can pass on one machine and fail on another. Verify the intended family is installed before rendering:
 
-- Simplified Chinese: Noto Sans CJK SC, Source Han Sans SC, PingFang SC, or Microsoft YaHei.
-- Hong Kong Traditional Chinese: Noto Sans CJK HK/TC, Source Han Sans HK, PingFang HK, or Microsoft JhengHei.
+- Simplified Chinese: Noto Sans CJK SC, Source Han Sans SC, Arial Unicode MS, PingFang SC, or Microsoft YaHei.
+- Hong Kong Traditional Chinese: Noto Sans CJK HK/TC, Source Han Sans HK, Arial Unicode MS, PingFang HK, or Microsoft JhengHei.
 
 On Debian/Ubuntu CI, install `fonts-noto-cjk`. A PDF that extracts the right Unicode text can still display missing-glyph boxes, so this does not replace visual inspection.
 
@@ -147,6 +147,7 @@ It exits non-zero on any error-severity finding and reports:
 | `header_gap` | the running header sits closer than 6mm to the first body baseline. |
 | `overflow` | any text box escapes the page box. |
 | `cjk_fonts` | a zh render mixes Simplified and Traditional faces, or uses the wrong script for the locale. Needs `--lang`. |
+| `cjk_preview_compat` | a zh render embeds the PingFang CFF subset that macOS Preview/PDFKit renders with missing Chinese glyphs. Needs `--lang`. |
 | `sparse_page` | *(warning only)* a page's inked band covers under 32% of the text block. A section ending near the top of a page is normal. |
 
 Import it instead of shelling out when you need the numbers:

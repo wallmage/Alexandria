@@ -1,5 +1,6 @@
 """Tests for the programmatic PDF and design-token quality gate."""
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -167,6 +168,7 @@ class FontScriptTests(unittest.TestCase):
             "/ABCDEF+SourceHanSansHK-Regular": "traditional",
             "/ABCDEF+HiraginoSansGB-W3": "simplified",
             "/ABCDEF+MicrosoftJhengHei": "traditional",
+            "/ABCDEF+Arial-Unicode-MS": "universal",
             "/ABCDEF+Alexandria-Sans": "latin",
             "/ABCDEF+SourceSerif4": "latin",
         }
@@ -217,6 +219,73 @@ class FontScriptTests(unittest.TestCase):
         findings, metrics = pdf_quality.check_cjk_fonts("ignored.pdf", "en")
         self.assertEqual(findings, [])
         self.assertEqual(metrics, {})
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS PingFang")
+    def test_pingfang_cff_render_is_rejected_for_preview(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "pingfang.pdf"
+            render_html_to_pdf(
+                """
+                <html lang="zh-CN">
+                  <style>body { font-family: "PingFang SC"; }</style>
+                  <body><p>中文字体必须能在系统预览中完整显示。</p></body>
+                </html>
+                """,
+                target,
+            )
+            findings, _ = pdf_quality.check_cjk_fonts(target, "zh-CN")
+
+        preview_errors = [
+            finding
+            for finding in findings
+            if finding.severity == "error" and "Preview" in finding.message
+        ]
+        self.assertTrue(
+            preview_errors,
+            "a PingFang CFF subset renders incompletely in macOS Preview",
+        )
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS fonts")
+    def test_simplified_stack_renders_preview_compatible_cjk(self):
+        from scripts import md_to_pdf
+
+        settings = md_to_pdf.localized_settings("zh-CN", "executive")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "simplified.pdf"
+            render_html_to_pdf(
+                f"""
+                <html lang="zh-CN">
+                  <style>body {{ font-family: {settings["font_sans"]}; }}</style>
+                  <body><p>中文字体必须能在系统预览中完整显示。</p></body>
+                </html>
+                """,
+                target,
+            )
+            findings, _ = pdf_quality.check_cjk_fonts(target, "zh-CN")
+
+        errors = [finding for finding in findings if finding.severity == "error"]
+        self.assertEqual(errors, [])
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS fonts")
+    def test_traditional_stack_renders_preview_compatible_cjk(self):
+        from scripts import md_to_pdf
+
+        settings = md_to_pdf.localized_settings("zh-HK", "executive")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "traditional.pdf"
+            render_html_to_pdf(
+                f"""
+                <html lang="zh-HK">
+                  <style>body {{ font-family: {settings["font_sans"]}; }}</style>
+                  <body><p>中文字體必須能在系統預覽中完整顯示。</p></body>
+                </html>
+                """,
+                target,
+            )
+            findings, _ = pdf_quality.check_cjk_fonts(target, "zh-HK")
+
+        errors = [finding for finding in findings if finding.severity == "error"]
+        self.assertEqual(errors, [])
 
 
 class RenderedPageTests(unittest.TestCase):

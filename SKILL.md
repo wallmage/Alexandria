@@ -1,6 +1,6 @@
 ---
 name: alexandria
-description: Use when a user asks for deep research, a deep dive, investigation, full picture, sourced report, or long-form analysis of a person, organization, product, event, concept, market, industry, or phenomenon, especially when the result should be a polished PDF. Do not use for quick summaries, simple definitions, casual Q&A, or non-research writing.
+description: Use only when the user explicitly asks to use Alexandria or explicitly requests a long-form, source-backed report for polished PDF delivery. Do not use for ordinary web searches, current-information lookups, recommendations, comparisons, fact-checking, troubleshooting, or normal chat answers, even when asked to research, investigate, analyze, browse, cite sources, or be thorough.
 ---
 
 # Alexandria

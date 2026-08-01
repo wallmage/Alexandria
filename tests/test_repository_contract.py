@@ -9,6 +9,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryContractTests(unittest.TestCase):
+    def test_skill_requires_an_explicit_long_form_report_request(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        description = skill.split("---", 2)[1].casefold()
+
+        self.assertIn("explicitly asks to use alexandria", description)
+        self.assertIn("long-form", description)
+        self.assertIn("polished pdf", description)
+        self.assertIn("ordinary web searches", description)
+        self.assertIn("normal chat answers", description)
+
     def test_every_archetype_requires_explicit_coverage_mapping(self):
         for name in (
             "artifact.md",

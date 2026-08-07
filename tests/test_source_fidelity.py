@@ -170,6 +170,75 @@ class ProbeTests(unittest.TestCase):
                 source_fidelity._extract_pdf_text(b"pdf"),
             )
 
+    def test_pdf_worker_applies_memory_and_cpu_limits(self):
+        from pypdf import PdfWriter
+
+        payload = io.BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        writer.write(payload)
+        fake_resource = mock.Mock(RLIMIT_AS=1, RLIMIT_CPU=2)
+        events = []
+        fake_resource.setrlimit.side_effect = (
+            lambda _kind, _limits: events.append("limit")
+        )
+        stdin = mock.Mock(buffer=io.BytesIO(payload.getvalue()))
+        stdout = mock.Mock(buffer=io.BytesIO())
+
+        def extract(_payload):
+            events.append("extract")
+            return "verified evidence"
+
+        with (
+            mock.patch.object(source_fidelity, "resource", fake_resource),
+            mock.patch.object(source_fidelity.sys, "stdin", stdin),
+            mock.patch.object(source_fidelity.sys, "stdout", stdout),
+            mock.patch.object(
+                source_fidelity,
+                "_extract_pdf_text",
+                side_effect=extract,
+            ),
+        ):
+            self.assertEqual(0, source_fidelity._run_pdf_worker())
+
+        self.assertEqual(["limit", "limit", "extract"], events)
+        fake_resource.setrlimit.assert_has_calls(
+            [
+                mock.call(
+                    fake_resource.RLIMIT_AS,
+                    (
+                        source_fidelity.PDF_WORKER_MEMORY_LIMIT_BYTES,
+                        source_fidelity.PDF_WORKER_MEMORY_LIMIT_BYTES,
+                    ),
+                ),
+                mock.call(
+                    fake_resource.RLIMIT_CPU,
+                    (
+                        source_fidelity.PDF_WORKER_CPU_LIMIT_SECONDS,
+                        source_fidelity.PDF_WORKER_CPU_LIMIT_SECONDS,
+                    ),
+                ),
+            ]
+        )
+
+    def test_pdf_worker_memory_error_is_reported_as_unreadable(self):
+        completed = subprocess.CompletedProcess(
+            args=["pdf-worker"],
+            returncode=1,
+            stdout=b"",
+            stderr=b"MemoryError: allocation failed\n",
+        )
+        with mock.patch.object(
+            source_fidelity.subprocess,
+            "run",
+            return_value=completed,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "PDF source could not be read: MemoryError",
+            ):
+                source_fidelity._decode_pdf_document(b"%PDF-1.7\n")
+
     def test_hidden_html_subtrees_are_not_reader_visible_evidence(self):
         hidden_documents = (
             "<template>The vendor sold customer records.</template><p>Visible page.</p>",
@@ -296,6 +365,46 @@ class SafeTargetTests(unittest.TestCase):
                 "https://example.com/",
                 resolver=self.mixed_resolver,
             )
+
+    def test_encoded_and_translation_addresses_are_rejected(self):
+        unsafe_addresses = (
+            "64:ff9b::7f00:1",
+            "64:ff9b:1::7f00:1",
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+            "2002:7f00:1::",
+            "2001::1",
+            "::",
+            "0.0.0.0",
+        )
+        for address in unsafe_addresses:
+            def resolver(_host, port, _address=address, **_kwargs):
+                return [(2, 1, 6, "", (_address, port))]
+
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                source_fidelity.validate_public_http_url(
+                    "https://example.com/",
+                    resolver=resolver,
+                )
+
+        target = source_fidelity.validate_public_http_url(
+            "https://example.com/",
+            resolver=self.public_resolver,
+        )
+        self.assertEqual(("93.184.216.34",), target.addresses)
+
+    def test_plaintext_http_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Plaintext HTTP"):
+            source_fidelity.validate_public_http_url(
+                "http://example.com/",
+                resolver=self.public_resolver,
+            )
+
+        target = source_fidelity.validate_public_http_url(
+            "https://example.com/",
+            resolver=self.public_resolver,
+        )
+        self.assertEqual("https", target.scheme)
 
     def test_default_fetcher_rejects_local_files_before_opening(self):
         with self.assertRaises(ValueError):

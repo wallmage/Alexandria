@@ -21,6 +21,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from html.parser import HTMLParser
@@ -29,6 +30,11 @@ from pathlib import Path
 from typing import ClassVar
 from urllib.error import URLError
 from urllib.parse import urljoin, urlsplit
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - unavailable on Windows
+    resource = None
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -49,6 +55,8 @@ MAX_FETCH_BYTES = 4_000_000
 MAX_DOCUMENT_PAGES = 500
 MAX_DOCUMENT_TEXT_CHARACTERS = 5_000_000
 MAX_DOCUMENT_PARSE_SECONDS = 20
+PDF_WORKER_MEMORY_LIMIT_BYTES = 1024**3
+PDF_WORKER_CPU_LIMIT_SECONDS = 15
 PDF_WORKER_ARGUMENT = "--decode-pdf-worker"
 USER_AGENT = "Alexandria-source-fidelity/1.0"
 MAX_REDIRECTS = 5
@@ -71,6 +79,18 @@ PROBE_CONTEXT_RADIUS = 500
 _QUOTE_SPANS = re.compile(
     r"\"([^\"]{4,})\"|'([^']{4,})'|“([^”]{4,})”|「([^」]{4,})」|『([^』]{4,})』"
 )
+_DENIED_IPV4_NETWORKS = (ipaddress.ip_network("0.0.0.0/8"),)
+_DENIED_IPV6_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "64:ff9b::/96",
+        "64:ff9b:1::/48",
+        "::/128",
+        "::1/128",
+        "2002::/16",
+        "2001::/32",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -92,7 +112,31 @@ class FetchedDocument:
     byte_count: int
 
 
-def validate_public_http_url(url, *, resolver=None):
+def _is_public_address(value):
+    address = ipaddress.ip_address(value)
+    if isinstance(address, ipaddress.IPv6Address):
+        embedded = []
+        if address.ipv4_mapped is not None:
+            embedded.append(address.ipv4_mapped)
+        if address.sixtofour is not None:
+            embedded.append(address.sixtofour)
+        if address.teredo is not None:
+            embedded.extend(address.teredo)
+        if any(not _is_public_address(item) for item in embedded):
+            return False
+        if any(address in network for network in _DENIED_IPV6_NETWORKS):
+            return False
+    elif any(address in network for network in _DENIED_IPV4_NETWORKS):
+        return False
+    return address.is_global
+
+
+def validate_public_http_url(
+    url,
+    *,
+    resolver=None,
+    allow_insecure_http=False,
+):
     """Resolve one public HTTP(S) target or reject it before any connection."""
     resolver = resolver or socket.getaddrinfo
     try:
@@ -101,8 +145,14 @@ def validate_public_http_url(url, *, resolver=None):
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Malformed source URL: {url!r}") from exc
     scheme = parsed.scheme.casefold()
-    if scheme not in {"http", "https"}:
-        raise ValueError("Source URLs must use http or https.")
+    if scheme == "http":
+        if not allow_insecure_http:
+            raise ValueError(
+                "Plaintext HTTP sources are not accepted; "
+                "source URLs must use HTTPS."
+            )
+    elif scheme != "https":
+        raise ValueError("Source URLs must use HTTPS.")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("Source URLs may not contain credentials.")
     host = (parsed.hostname or "").rstrip(".")
@@ -136,8 +186,7 @@ def validate_public_http_url(url, *, resolver=None):
         raise ValueError(f"Source host has no usable address: {host}")
     unsafe = []
     for address in addresses:
-        value = ipaddress.ip_address(address)
-        if not value.is_global:
+        if not _is_public_address(address):
             unsafe.append(address)
     if unsafe:
         raise ValueError(
@@ -1231,6 +1280,15 @@ def build_parser():
 
 
 def _run_pdf_worker():
+    if resource is not None:
+        for kind, limit in (
+            (resource.RLIMIT_AS, PDF_WORKER_MEMORY_LIMIT_BYTES),
+            (resource.RLIMIT_CPU, PDF_WORKER_CPU_LIMIT_SECONDS),
+        ):
+            # Some kernels reject limits below the interpreter's current
+            # reservation; the parent process timeout remains in force.
+            with suppress(OSError, ValueError):
+                resource.setrlimit(kind, (limit, limit))
     try:
         payload = sys.stdin.buffer.read(MAX_FETCH_BYTES + 1)
         if len(payload) > MAX_FETCH_BYTES:

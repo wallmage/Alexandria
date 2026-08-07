@@ -16,11 +16,13 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 try:
+    from .artifact_safety import validated_artifact_path
     from .gate_severity import emit_findings, hard_errors, warning
     from .report_blocks import mask_fenced_code as _mask_fenced_code
     from .report_contract import detect_language
     from .source_fidelity import validate_source_fidelity_receipt_online
 except ImportError:
+    from artifact_safety import validated_artifact_path
     from gate_severity import emit_findings, hard_errors, warning
     from report_blocks import mask_fenced_code as _mask_fenced_code
     from report_contract import detect_language
@@ -661,8 +663,11 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
             / "naturalness-check.py"
         ).resolve()
         try:
-            recorded_checker = Path(receipt.get("checker_path", "")).resolve()
-        except (OSError, TypeError):
+            recorded_checker = validated_artifact_path(
+                receipt.get("checker_path"),
+                "Rewild receipt Rewild checker",
+            )
+        except ValueError:
             recorded_checker = None
         if recorded_checker != canonical_checker:
             errors.append(
@@ -679,14 +684,17 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
         ("checker_path", "checker_sha256", "Rewild checker"),
         ("review_note_path", "review_note_sha256", "blind-review note"),
     ):
-        value = receipt.get(path_key)
-        if not value:
-            errors.append(f"Rewild receipt is missing the {label} path.")
+        try:
+            path = validated_artifact_path(
+                receipt.get(path_key),
+                f"Rewild receipt {label}",
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
             continue
-        path = Path(value)
         try:
             digest = _file_sha256(path)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             errors.append(f"Rewild receipt {label} could not be verified: {exc}")
             continue
         if receipt.get(hash_key) != digest:
@@ -724,7 +732,17 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
                     "bound fidelity-notes file."
                 )
             if recorded_notes_path:
-                notes_file = Path(recorded_notes_path)
+                try:
+                    notes_file = validated_artifact_path(
+                        recorded_notes_path,
+                        "Rewild receipt fidelity-notes",
+                    )
+                except ValueError as exc:
+                    errors.append(str(exc))
+                    notes_file = None
+            else:
+                notes_file = None
+            if notes_file is not None:
                 if not notes_file.is_file():
                     errors.append(
                         "Rewild receipt's fidelity-notes file is missing: "

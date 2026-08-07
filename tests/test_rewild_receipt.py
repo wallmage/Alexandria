@@ -818,6 +818,32 @@ if __name__ == "__main__":
 
 
 class ReceiptAuditTrailTests(unittest.TestCase):
+    def test_malformed_receipt_path_fields_fail_validation_without_crashing(self):
+        receipt = {
+            "schema_version": 1,
+            "status": "passed",
+            "report_path": "report.md",
+            "report_lang": "en",
+            "checker_path": "checker.py",
+            "review_status": "completed",
+            "style_waivers": [],
+            "source_path": "source.md",
+            "review_note_path": "review.json",
+        }
+        for field in ("source_path", "checker_path", "review_note_path"):
+            for value in ({"bad": "path"}, "\x00"):
+                with self.subTest(field=field, value=value):
+                    malformed = {**receipt, field: value}
+                    errors = validate_rewild_receipt(
+                        Path(__file__).parents[1] / "missing-report.md",
+                        malformed,
+                        expected_lang="en",
+                    )
+                    self.assertTrue(
+                        any("path" in error and "valid" in error for error in errors),
+                        errors,
+                    )
+
     def test_tampered_exemption_trail_fails_validation(self):
         import sys
 
@@ -859,6 +885,20 @@ class ReceiptAuditTrailTests(unittest.TestCase):
             report = case_root / "report.md"
             receipt = case_root / "receipt.json"
             data = json.loads(receipt.read_text(encoding="utf-8"))
+
+            for value in ({"bad": "path"}, "\x00"):
+                with self.subTest(value=value):
+                    malformed_path = dict(data)
+                    malformed_path["fidelity_notes_path"] = value
+                    errors = validate_rewild_receipt(
+                        report,
+                        malformed_path,
+                        expected_lang="en",
+                    )
+                    self.assertTrue(
+                        any("path" in error and "valid" in error for error in errors),
+                        errors,
+                    )
 
             tampered = dict(data)
             tampered["fidelity_notes"] = [

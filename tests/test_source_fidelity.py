@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import ssl
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -104,6 +105,71 @@ def fake_fetcher(pages):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_malformed_pdf_is_reported_as_unreadable(self):
+        with self.assertRaisesRegex(ValueError, "PDF source could not be read"):
+            source_fidelity._decode_document(
+                b"%PDF-1.7\n",
+                "application/pdf",
+                None,
+            )
+
+    def test_pdf_parser_timeout_interrupts_the_blocked_parser(self):
+        with mock.patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired("pdf parser", 0.01),
+        ):
+            with self.assertRaisesRegex(ValueError, "time limit"):
+                source_fidelity._decode_document(
+                    b"%PDF-1.7\n",
+                    "application/pdf",
+                    None,
+                )
+
+    def test_pdf_over_page_budget_is_rejected_before_text_extraction(self):
+        from pypdf import PdfWriter
+
+        payload = io.BytesIO()
+        writer = PdfWriter()
+        for _ in range(501):
+            writer.add_blank_page(width=72, height=72)
+        writer.write(payload)
+
+        with self.assertRaisesRegex(ValueError, "page limit"):
+            source_fidelity._decode_document(
+                payload.getvalue(),
+                "application/pdf",
+                None,
+            )
+
+    def test_pdf_cumulative_text_budget_is_enforced(self):
+        pages = [mock.Mock(), mock.Mock()]
+        for page in pages:
+            page.extract_text.return_value = "x" * 3_000_000
+        fake_pypdf = mock.Mock()
+        fake_pypdf.PdfReader.return_value = mock.Mock(
+            is_encrypted=False,
+            pages=pages,
+        )
+
+        with mock.patch.dict("sys.modules", {"pypdf": fake_pypdf}):
+            with self.assertRaisesRegex(ValueError, "text limit"):
+                source_fidelity._extract_pdf_text(b"pdf")
+
+    def test_pdf_inside_resource_budget_still_decodes(self):
+        page = mock.Mock()
+        page.extract_text.return_value = "verified evidence"
+        fake_pypdf = mock.Mock()
+        fake_pypdf.PdfReader.return_value = mock.Mock(
+            is_encrypted=False,
+            pages=[page],
+        )
+
+        with mock.patch.dict("sys.modules", {"pypdf": fake_pypdf}):
+            self.assertEqual(
+                "verified evidence",
+                source_fidelity._extract_pdf_text(b"pdf"),
+            )
+
     def test_hidden_html_subtrees_are_not_reader_visible_evidence(self):
         hidden_documents = (
             "<template>The vendor sold customer records.</template><p>Visible page.</p>",
@@ -658,6 +724,17 @@ class FidelityTests(unittest.TestCase):
                     ledger_path, receipt
                 ),
             )
+            for field in ("ledger_schema_path", "verifier_path"):
+                with self.subTest(field=field):
+                    malformed = {**receipt, field: "\x00"}
+                    errors = source_fidelity.validate_source_fidelity_receipt(
+                        ledger_path,
+                        malformed,
+                    )
+                    self.assertTrue(
+                        any("path" in error and "valid" in error for error in errors),
+                        errors,
+                    )
             changed = ledger()
             changed["claims"][0]["source_evidence"][0][
                 "extract_or_location"

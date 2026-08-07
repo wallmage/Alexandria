@@ -840,6 +840,58 @@ class ContentGateTests(unittest.TestCase):
             )
             self.assertTrue(any("current ledger" in error for error in errors), errors)
 
+    def test_malformed_receipt_path_fields_fail_validation_without_crashing(self):
+        receipt = {
+            "schema_version": 2,
+            "status": "passed",
+            "report_path": "report.md",
+            "ledger_path": "ledger.json",
+            "content_review_schema_path": str(
+                ROOT / "references" / "content-review.schema.json"
+            ),
+            "evidence_ledger_schema_path": str(
+                ROOT / "references" / "evidence-ledger.schema.json"
+            ),
+            "review_note_path": "review.json",
+        }
+        for field in (
+            "content_review_schema_path",
+            "evidence_ledger_schema_path",
+            "review_note_path",
+        ):
+            for value in ({"bad": "path"}, "\x00"):
+                with self.subTest(field=field, value=value):
+                    malformed = {**receipt, field: value}
+                    errors = validate_content_receipt(
+                        ROOT / "missing-report.md",
+                        ROOT / "missing-ledger.json",
+                        malformed,
+                    )
+                    self.assertTrue(
+                        any("path" in error and "valid" in error for error in errors),
+                        errors,
+                    )
+
+    def test_non_object_gate_inputs_fail_validation_without_crashing(self):
+        for field in ("ledger", "review"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                report, ledger, review, receipt, source_receipt = self.make_case(
+                    directory
+                )
+                target = ledger if field == "ledger" else review
+                target.write_text("[]", encoding="utf-8")
+                errors = run_content_gate(
+                    report,
+                    ledger,
+                    review,
+                    receipt,
+                    source_fidelity_receipt_path=source_receipt,
+                )
+                self.assertTrue(
+                    any("is not of type 'object'" in error for error in errors),
+                    errors,
+                )
+
     def test_every_substantive_section_needs_one_matching_value_review(self):
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, receipt, source_receipt = self.make_case(directory)

@@ -16,6 +16,18 @@ def _same_artifact(first, second):
         return False
 
 
+def validated_artifact_path(value, label):
+    """Resolve one serialized path or raise a stable validation error."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} path must be a valid non-empty string.")
+    try:
+        return Path(value).resolve()
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"{label} path must be a valid non-empty string."
+        ) from exc
+
+
 def artifact_collision_errors(read_paths, write_paths):
     """Reject write targets that alias any input or another output."""
     reads = {

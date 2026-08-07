@@ -12,7 +12,11 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 try:
-    from .artifact_safety import artifact_collision_errors, publish_temp_file
+    from .artifact_safety import (
+        artifact_collision_errors,
+        publish_temp_file,
+        validated_artifact_path,
+    )
     from .gate_severity import emit_findings, hard_errors
     from .html_policy import (
         SAFE_ATTRIBUTES,
@@ -28,7 +32,11 @@ try:
         validate_report_against_ledger,
     )
 except ImportError:
-    from artifact_safety import artifact_collision_errors, publish_temp_file
+    from artifact_safety import (
+        artifact_collision_errors,
+        publish_temp_file,
+        validated_artifact_path,
+    )
     from gate_severity import emit_findings, hard_errors
     from html_policy import (
         SAFE_ATTRIBUTES,
@@ -450,10 +458,12 @@ def run_content_gate(
     errors.extend(
         _schema_errors(ledger, EVIDENCE_LEDGER_SCHEMA, "Evidence ledger:")
     )
-    errors.extend(validate_references(ledger))
     errors.extend(
         _schema_errors(review, CONTENT_REVIEW_SCHEMA, "Content review:")
     )
+    if not isinstance(ledger, dict) or not isinstance(review, dict):
+        return errors
+    errors.extend(validate_references(ledger))
     errors.extend(_section_review_errors(report_text, review))
     errors.extend(validate_report_against_ledger(report_text, ledger))
     ledger_language = (
@@ -666,18 +676,29 @@ def validate_content_receipt(
             "evidence-ledger schema",
         ),
     ):
-        recorded_path = Path(receipt.get(path_key, "")).resolve()
+        try:
+            recorded_path = validated_artifact_path(
+                receipt.get(path_key),
+                f"Content receipt {label}",
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
         if recorded_path != expected_path:
             errors.append(f"Content receipt does not use Alexandria's canonical {label}.")
         elif receipt.get(hash_key) != file_sha256(expected_path):
             errors.append(f"Alexandria's bundled {label} has changed.")
 
     review_value = receipt.get("review_note_path")
-    if not review_value:
-        errors.append("Content receipt is missing the review-note path.")
+    try:
+        review_path = validated_artifact_path(
+            review_value,
+            "Content receipt review-note",
+        )
+    except ValueError as exc:
+        errors.append(str(exc))
         review_path = None
-    else:
-        review_path = Path(review_value).resolve()
+    if review_path is not None:
         try:
             review_hash = file_sha256(review_path)
         except OSError as exc:

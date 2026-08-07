@@ -18,6 +18,7 @@ import os
 import re
 import socket
 import ssl
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -33,7 +34,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from artifact_safety import artifact_collision_errors, publish_temp_file  # noqa: E402
+from artifact_safety import (  # noqa: E402
+    artifact_collision_errors,
+    publish_temp_file,
+    validated_artifact_path,
+)
 from report_contract import canonical_visible_text  # noqa: E402
 
 SCHEMA_VERSION = 1
@@ -41,6 +46,10 @@ DEFAULT_SAMPLE_SIZE = 8
 DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_FETCH_ATTEMPTS = 3
 MAX_FETCH_BYTES = 4_000_000
+MAX_DOCUMENT_PAGES = 500
+MAX_DOCUMENT_TEXT_CHARACTERS = 5_000_000
+MAX_DOCUMENT_PARSE_SECONDS = 20
+PDF_WORKER_ARGUMENT = "--decode-pdf-worker"
 USER_AGENT = "Alexandria-source-fidelity/1.0"
 MAX_REDIRECTS = 5
 PRODUCTION_TRANSPORT = "dns-pinned-http-v1"
@@ -172,6 +181,51 @@ def _same_source_host(first, second):
     return normalized(first) == normalized(second)
 
 
+def _extract_pdf_text(payload):
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(payload))
+    if reader.is_encrypted:
+        raise ValueError("Encrypted PDF sources cannot be verified.")
+    if len(reader.pages) > MAX_DOCUMENT_PAGES:
+        raise ValueError(f"PDF exceeds the page limit of {MAX_DOCUMENT_PAGES}.")
+    parts = []
+    text_characters = 0
+    for page in reader.pages:
+        page_text = page.extract_text() or ""
+        text_characters += len(page_text)
+        if text_characters > MAX_DOCUMENT_TEXT_CHARACTERS:
+            raise ValueError(
+                "PDF exceeds the text limit of "
+                f"{MAX_DOCUMENT_TEXT_CHARACTERS} characters."
+            )
+        parts.append(page_text)
+    text = "\n".join(parts)
+    if not text.strip():
+        raise ValueError("PDF source contains no extractable text.")
+    return text
+
+
+def _decode_pdf_document(payload):
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), PDF_WORKER_ARGUMENT],
+            input=payload,
+            capture_output=True,
+            check=False,
+            timeout=MAX_DOCUMENT_PARSE_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("PDF parsing exceeded the time limit.") from exc
+    if completed.returncode:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(
+            "PDF source could not be read: "
+            + (detail or f"parser exited with status {completed.returncode}")
+        )
+    return completed.stdout.decode("utf-8")
+
+
 def _decode_document(payload, content_type, charset):
     if content_type in SUPPORTED_TEXT_TYPES:
         try:
@@ -181,18 +235,7 @@ def _decode_document(payload, content_type, charset):
                 f"Source declares an unsupported character encoding: {charset}"
             ) from exc
     if content_type == "application/pdf":
-        try:
-            from pypdf import PdfReader
-
-            reader = PdfReader(BytesIO(payload))
-            if reader.is_encrypted:
-                raise ValueError("Encrypted PDF sources cannot be verified.")
-            text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        except (OSError, ValueError) as exc:
-            raise ValueError(f"PDF source could not be read: {exc}") from exc
-        if not text.strip():
-            raise ValueError("PDF source contains no extractable text.")
-        return text
+        return _decode_pdf_document(payload)
     raise ValueError(f"Unsupported source content type: {content_type or 'missing'}")
 
 
@@ -918,17 +961,33 @@ def validate_source_fidelity_receipt(ledger_path, receipt):
         ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return errors + [f"Evidence ledger could not be verified: {exc}"]
-    if (
-        Path(str(receipt.get("ledger_schema_path", ""))).resolve()
-        != LEDGER_SCHEMA.resolve()
+    if not isinstance(ledger, dict):
+        return errors + ["Evidence ledger root must be an object."]
+    try:
+        recorded_schema_path = validated_artifact_path(
+            receipt.get("ledger_schema_path"),
+            "Source-fidelity receipt ledger-schema",
+        )
+    except ValueError as exc:
+        errors.append(str(exc))
+        recorded_schema_path = None
+    if recorded_schema_path is not None and (
+        recorded_schema_path != LEDGER_SCHEMA.resolve()
         or receipt.get("ledger_schema_sha256") != file_sha256(LEDGER_SCHEMA)
     ):
         errors.append(
             "Source-fidelity receipt does not use the current ledger schema."
         )
-    if (
-        Path(str(receipt.get("verifier_path", ""))).resolve()
-        != Path(__file__).resolve()
+    try:
+        recorded_verifier_path = validated_artifact_path(
+            receipt.get("verifier_path"),
+            "Source-fidelity receipt verifier",
+        )
+    except ValueError as exc:
+        errors.append(str(exc))
+        recorded_verifier_path = None
+    if recorded_verifier_path is not None and (
+        recorded_verifier_path != Path(__file__).resolve()
         or receipt.get("verifier_sha256") != file_sha256(__file__)
     ):
         errors.append(
@@ -1171,7 +1230,24 @@ def build_parser():
     return parser
 
 
+def _run_pdf_worker():
+    try:
+        payload = sys.stdin.buffer.read(MAX_FETCH_BYTES + 1)
+        if len(payload) > MAX_FETCH_BYTES:
+            raise ValueError(f"PDF exceeds {MAX_FETCH_BYTES} bytes.")
+        text = _extract_pdf_text(payload)
+    except Exception as exc:
+        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    sys.stdout.buffer.write(text.encode("utf-8"))
+    return 0
+
+
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv == [PDF_WORKER_ARGUMENT]:
+        return _run_pdf_worker()
     args = build_parser().parse_args(argv)
     collisions = artifact_collision_errors(
         {"ledger": args.ledger},

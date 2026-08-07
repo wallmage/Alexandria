@@ -1499,6 +1499,47 @@ def source_acronyms(source):
     return out
 
 
+def _substring_locations(terms, texts):
+    """Map each term to the text indices containing it in one pass."""
+    locations = {term: set() for term in terms}
+    transitions = [{}]
+    failures = [0]
+    matches = [[]]
+    for term in locations:
+        state = 0
+        for char in term:
+            if char not in transitions[state]:
+                transitions[state][char] = len(transitions)
+                transitions.append({})
+                failures.append(0)
+                matches.append([])
+            state = transitions[state][char]
+        matches[state].append(term)
+
+    queue = list(transitions[0].values())
+    cursor = 0
+    while cursor < len(queue):
+        state = queue[cursor]
+        cursor += 1
+        for char, child in transitions[state].items():
+            fallback = failures[state]
+            while fallback and char not in transitions[fallback]:
+                fallback = failures[fallback]
+            failures[child] = transitions[fallback].get(char, 0)
+            matches[child].extend(matches[failures[child]])
+            queue.append(child)
+
+    for text_index, text in enumerate(texts):
+        state = 0
+        for char in text:
+            while state and char not in transitions[state]:
+                state = failures[state]
+            state = transitions[state].get(char, 0)
+            for term in matches[state]:
+                locations[term].add(text_index)
+    return locations
+
+
 def orphaned_claims(source, output, lang):
     """Attributed claims in the source that survive in the rewrite unattributed.
 
@@ -1509,10 +1550,11 @@ def orphaned_claims(source, output, lang):
     attr = re.compile(ATTRIBUTION_RE[lang], re.I)
     out_low = output.lower()
     out_sentences = [s.lower() for s in split_sentences(output, lang)]
-    orphans = []
-    for sentence in split_sentences(source, lang):
-        if not attr.search(sentence):
-            continue
+    attributed = [sentence for sentence in split_sentences(source, lang)
+                  if attr.search(sentence)]
+    claims = []
+    all_terms = set()
+    for sentence in attributed:
         body = attr.sub(" ", sentence)
         if lang in CJK_LANGS:
             # Bigrams, not whole runs: 這一 becoming 這個 used to break the
@@ -1527,7 +1569,14 @@ def orphaned_claims(source, output, lang):
                      if len(w) > 3 and w.lower() not in CAP_STOPWORDS]
         if not terms:
             continue
-        kept = sum(1 for t in terms if t in out_low)
+        claims.append((sentence, terms))
+        all_terms.update(terms)
+
+    locations = _substring_locations(all_terms, [out_low, *out_sentences])
+    orphans = []
+    carrier_cache = {}
+    for sentence, terms in claims:
+        kept = sum(1 for t in terms if 0 in locations[t])
         if kept / len(terms) < 0.5:
             continue
         # The claim survived. Ask whether *the sentences carrying it* credit
@@ -1536,9 +1585,21 @@ def orphaned_claims(source, output, lang):
         # for every claim in the piece, which two separate rewrites found by
         # keeping one legitimate attribution and sailing past two fabricated
         # statistics.
-        carriers = [s for s in out_sentences
-                    if sum(1 for t in terms if t in s) / len(terms) >= 0.5]
-        if carriers and not any(attr.search(s) for s in carriers):
+        term_key = tuple(terms)
+        if term_key not in carrier_cache:
+            carrier_counts = {}
+            for term in terms:
+                for text_index in locations[term]:
+                    if text_index:
+                        carrier_counts[text_index] = (
+                            carrier_counts.get(text_index, 0) + 1)
+            carriers = [
+                s for i, s in enumerate(out_sentences, 1)
+                if carrier_counts.get(i, 0) / len(terms) >= 0.5]
+            carrier_cache[term_key] = (
+                bool(carriers)
+                and not any(attr.search(s) for s in carriers))
+        if carrier_cache[term_key]:
             orphans.append(sentence.strip()[:70])
     return orphans
 

@@ -131,12 +131,7 @@ def _is_public_address(value):
     return address.is_global
 
 
-def validate_public_http_url(
-    url,
-    *,
-    resolver=None,
-    allow_insecure_http=False,
-):
+def validate_public_http_url(url, *, resolver=None):
     """Resolve one public HTTP(S) target or reject it before any connection."""
     resolver = resolver or socket.getaddrinfo
     try:
@@ -146,11 +141,10 @@ def validate_public_http_url(
         raise ValueError(f"Malformed source URL: {url!r}") from exc
     scheme = parsed.scheme.casefold()
     if scheme == "http":
-        if not allow_insecure_http:
-            raise ValueError(
-                "Plaintext HTTP sources are not accepted; "
-                "source URLs must use HTTPS."
-            )
+        raise ValueError(
+            "Plaintext HTTP sources are not accepted; "
+            "source URLs must use HTTPS."
+        )
     elif scheme != "https":
         raise ValueError("Source URLs must use HTTPS.")
     if parsed.username is not None or parsed.password is not None:

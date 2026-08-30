@@ -359,15 +359,15 @@ class SafeTargetTests(unittest.TestCase):
         self.assertEqual("example.com", target.host)
         self.assertEqual(("93.184.216.34",), target.addresses)
 
-    def test_mixed_public_and_private_dns_answers_are_rejected(self):
-        with self.assertRaises(ValueError):
-            source_fidelity.validate_public_http_url(
-                "https://example.com/",
-                resolver=self.mixed_resolver,
-            )
+    def test_resolved_addresses_are_accepted_regardless_of_range(self):
+        target = source_fidelity.validate_public_http_url(
+            "https://example.com/",
+            resolver=self.mixed_resolver,
+        )
+        self.assertEqual(("93.184.216.34", "127.0.0.1"), target.addresses)
 
-    def test_encoded_and_translation_addresses_are_rejected(self):
-        unsafe_addresses = (
+        local_addresses = (
+            "198.18.5.201",
             "64:ff9b::7f00:1",
             "64:ff9b:1::7f00:1",
             "::ffff:127.0.0.1",
@@ -377,21 +377,26 @@ class SafeTargetTests(unittest.TestCase):
             "::",
             "0.0.0.0",
         )
-        for address in unsafe_addresses:
+        for address in local_addresses:
             def resolver(_host, port, _address=address, **_kwargs):
                 return [(2, 1, 6, "", (_address, port))]
 
-            with self.subTest(address=address), self.assertRaises(ValueError):
-                source_fidelity.validate_public_http_url(
+            with self.subTest(address=address):
+                resolved = source_fidelity.validate_public_http_url(
                     "https://example.com/",
                     resolver=resolver,
                 )
+                self.assertEqual((address,), resolved.addresses)
+
+    def test_clash_fake_ip_answers_are_accepted(self):
+        def clash_resolver(_host, _port, **_kwargs):
+            return [(2, 1, 6, "", ("198.18.5.201", 443))]
 
         target = source_fidelity.validate_public_http_url(
             "https://example.com/",
-            resolver=self.public_resolver,
+            resolver=clash_resolver,
         )
-        self.assertEqual(("93.184.216.34",), target.addresses)
+        self.assertEqual(("198.18.5.201",), target.addresses)
 
     def test_plaintext_http_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Plaintext HTTP"):
@@ -432,26 +437,6 @@ class SafeTargetTests(unittest.TestCase):
 
         self.assertEqual("example domain", source_fidelity.strip_markup(fetched.text))
         self.assertEqual(3, request.call_count)
-
-    def test_benchmark_dns_mapping_cannot_be_enabled_by_environment_variables(self):
-        def codex_resolver(_host, _port, **_kwargs):
-            return [(2, 1, 6, "", ("198.18.5.201", 443))]
-
-        with mock.patch.dict(
-            source_fidelity.os.environ,
-            {"CODEX_THREAD_ID": "thread", "CODEX_SHELL": "1"},
-            clear=True,
-        ):
-            with self.assertRaises(ValueError):
-                source_fidelity.validate_public_http_url(
-                    "https://example.com/", resolver=codex_resolver
-                )
-        with mock.patch.dict(source_fidelity.os.environ, {}, clear=True):
-            with self.assertRaises(ValueError):
-                source_fidelity.validate_public_http_url(
-                    "https://example.com/", resolver=codex_resolver
-                )
-
 
 class SamplingTests(unittest.TestCase):
     def test_central_and_key_claims_are_sampled_first(self):

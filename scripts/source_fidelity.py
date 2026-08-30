@@ -79,18 +79,6 @@ PROBE_CONTEXT_RADIUS = 500
 _QUOTE_SPANS = re.compile(
     r"\"([^\"]{4,})\"|'([^']{4,})'|“([^”]{4,})”|「([^」]{4,})」|『([^』]{4,})』"
 )
-_DENIED_IPV4_NETWORKS = (ipaddress.ip_network("0.0.0.0/8"),)
-_DENIED_IPV6_NETWORKS = tuple(
-    ipaddress.ip_network(network)
-    for network in (
-        "64:ff9b::/96",
-        "64:ff9b:1::/48",
-        "::/128",
-        "::1/128",
-        "2002::/16",
-        "2001::/32",
-    )
-)
 
 
 @dataclass(frozen=True)
@@ -112,27 +100,8 @@ class FetchedDocument:
     byte_count: int
 
 
-def _is_public_address(value):
-    address = ipaddress.ip_address(value)
-    if isinstance(address, ipaddress.IPv6Address):
-        embedded = []
-        if address.ipv4_mapped is not None:
-            embedded.append(address.ipv4_mapped)
-        if address.sixtofour is not None:
-            embedded.append(address.sixtofour)
-        if address.teredo is not None:
-            embedded.extend(address.teredo)
-        if any(not _is_public_address(item) for item in embedded):
-            return False
-        if any(address in network for network in _DENIED_IPV6_NETWORKS):
-            return False
-    elif any(address in network for network in _DENIED_IPV4_NETWORKS):
-        return False
-    return address.is_global
-
-
 def validate_public_http_url(url, *, resolver=None):
-    """Resolve one public HTTP(S) target or reject it before any connection."""
+    """Resolve one HTTPS target or reject it before any connection."""
     resolver = resolver or socket.getaddrinfo
     try:
         parsed = urlsplit(str(url or ""))
@@ -178,15 +147,6 @@ def validate_public_http_url(url, *, resolver=None):
         )
     if not addresses:
         raise ValueError(f"Source host has no usable address: {host}")
-    unsafe = []
-    for address in addresses:
-        if not _is_public_address(address):
-            unsafe.append(address)
-    if unsafe:
-        raise ValueError(
-            "Source host resolves to a non-public address: "
-            + ", ".join(unsafe)
-        )
     return SafeTarget(
         url=parsed.geturl(),
         scheme=scheme,

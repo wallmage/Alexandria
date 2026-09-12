@@ -6,3 +6,6 @@ reports/
 .ruff_cache/
 __pycache__/
 *.py[cod]
+.runtime.json
+assets/fonts/AlexandriaCJK-*.ttf
+assets/fonts/OFL-NotoSans*.txt

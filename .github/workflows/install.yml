@@ -1,0 +1,53 @@
+name: Install
+
+on:
+  push:
+    paths:
+      - 'scripts/install*'
+      - 'requirements.txt'
+      - '.github/workflows/install.yml'
+      - 'INSTALL.md'
+  pull_request:
+    paths:
+      - 'scripts/install*'
+      - 'requirements.txt'
+      - '.github/workflows/install.yml'
+      - 'INSTALL.md'
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      ALEXANDRIA_RUNTIME_DIR: ${{ runner.temp }}/alexandria runtime
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install on macOS
+        if: runner.os == 'macOS'
+        run: sh scripts/install.sh
+      - name: Install on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: '& .\scripts\install.ps1'
+      - name: Verify the saved runtime in a fresh shell
+        shell: pwsh
+        run: |
+          $runtime = Get-Content .runtime.json | ConvertFrom-Json
+          $program = $runtime.command[0]
+          $arguments = $runtime.command[1..($runtime.command.Count - 1)]
+          & $program @arguments scripts/install_runtime.py --runtime $env:ALEXANDRIA_RUNTIME_DIR --verify-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload installation log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: install-${{ matrix.os }}
+          path: ${{ runner.temp }}/alexandria runtime/install.log
+          retention-days: 1

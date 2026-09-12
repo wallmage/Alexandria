@@ -8,22 +8,14 @@ Never rely on the current working directory. Pass paths as argument-array values
 
 ## Environment
 
-Create an isolated environment. On POSIX:
-
-```bash
-ALEXANDRIA_ENV="$(mktemp -d)/venv"
-python3 -m venv "$ALEXANDRIA_ENV"
-ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
-"$ALEXANDRIA_PYTHON" -m pip install -r "$SKILL_ROOT/requirements.txt"
-```
-
-On Windows, use a task-owned temporary directory and set `ALEXANDRIA_PYTHON` to `Scripts/python.exe`.
-
-WeasyPrint may need platform libraries. Follow its official installation guide if the dependency check reports an unusable installation.
+Read `INSTALL.md` and automatically run its platform installer if the runtime
+is absent or fails verification. Reuse the locally generated `.runtime.json`
+command prefix for every Python invocation below, including validation and page
+rendering. Do not create a new environment or install global packages per report.
 
 ## Chinese fonts
 
-Alexandria bundles Source Sans 3, Source Serif 4, and Source Code Pro, and embeds and subsets them on every render. It does **not** bundle a CJK face by default, and that is a deliberate, documented limitation rather than an oversight:
+Alexandria bundles Source Sans 3, Source Serif 4, and Source Code Pro, and embeds and subsets them on every render. The ZIP does **not** bundle CJK faces. The automatic installer downloads verified OFL Simplified and Traditional TrueType faces into the installed skill; the following host-font fallback applies when those optional local files are absent:
 
 - The obvious candidates it could legally redistribute are Noto Sans CJK and Noto Serif CJK (OFL). A Simplified + Traditional pair in both sans and serif is roughly 40-80MB, which is one to two orders of magnitude larger than the entire rest of the skill. A range subset does not solve it either: report text is open-vocabulary, so any subset narrow enough to be small will drop characters from some future report, and it would drop them silently.
 - The faces actually installed on most authoring machines - PingFang, Songti, Hiragino - are proprietary and cannot be redistributed.
@@ -221,7 +213,7 @@ Run `scripts/pdf_quality.py` first. It settles the mechanical questions - blank 
 
 Anything found here that a machine could have caught belongs in `scripts/pdf_quality.py` as a new check, with a test, before the next release.
 
-Delete only the exact task-owned environment and inspection directories after delivery.
+Delete only task-owned inspection directories after delivery; retain the managed runtime and installed fonts.
 
 ## Tooling fallback
 

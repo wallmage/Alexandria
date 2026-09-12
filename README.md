@@ -1,5 +1,7 @@
 # Alexandria
 
+Give this repository URL or the ZIP to your agent and say “Install this skill.” The agent must follow [INSTALL.md](INSTALL.md), including automatic runtime setup and PDF verification.
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文（香港）](README.zh-HK.md)
 
 Alexandria is named after the Library of Alexandria, whose ambition was to bring the world's knowledge under one roof. I built the Alexandria skill in the same spirit: a research assistant you can ask about anything. It works out what needs investigating, finds current sources, weighs the evidence, and turns the results into a complete report in the language you used.

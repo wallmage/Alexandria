@@ -10,6 +10,8 @@ pleasant to read. Deliver Markdown and one or two visually checked PDFs.
 
 Resolve `SKILL_ROOT` to the absolute directory containing this `SKILL.md` before running bundled scripts. Never assume the current working directory is the skill directory, and never install dependencies into the user's project.
 
+Read `INSTALL.md` before installation or first use. Complete setup automatically and reuse its verified runtime.
+
 ## Complete delivery despite tooling failures
 
 A topic request authorizes the full research-to-PDF workflow. All source checking
@@ -260,10 +262,6 @@ Re-read the weighted source sample online. Offline, empty, unreachable, or
 partial runs cannot issue a receipt:
 
 ```bash
-ALEXANDRIA_ENV="$(mktemp -d)/venv"
-python3 -m venv "$ALEXANDRIA_ENV"
-ALEXANDRIA_PYTHON="$ALEXANDRIA_ENV/bin/python"
-"$ALEXANDRIA_PYTHON" -m pip install -r "$SKILL_ROOT/requirements.txt"
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/source_fidelity.py" "$LEDGER_JSON" \
   --online --receipt "$SOURCE_FIDELITY_RECEIPT"
 ```
@@ -296,7 +294,7 @@ Save a cross-platform-safe filename:
 
 Pass paths as argument-array values where possible. In a shell, quote every path and variable.
 
-Reuse the task-owned environment from Step 7. On Windows, set `ALEXANDRIA_PYTHON` to the environment's `Scripts/python.exe`. Then run:
+Use the managed command prefix from `INSTALL.md` for each Python invocation below:
 
 ```bash
 # All languages

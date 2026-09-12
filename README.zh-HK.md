@@ -1,5 +1,7 @@
 # Alexandria
 
+將倉庫連結或 ZIP 交畀智能體，講「幫我安裝呢個 skill」。智能體按 [INSTALL.md](INSTALL.md) 自動完成環境安裝及 PDF 驗證，毋須選擇依賴。
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文（香港）](README.zh-HK.md)
 
 Alexandria 這個名字來自亞歷山大圖書館。那座圖書館的理想，是把全世界的知識匯聚在同一個地方。我亦因此製作了 Alexandria：一個甚麼都可以問、甚麼都可以研究的深度研究助手。它會自行判斷要查甚麼、尋找最新資料、核對證據，再按你提問所用的語言寫成完整報告。

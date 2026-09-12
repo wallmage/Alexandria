@@ -1,5 +1,7 @@
 # Alexandria
 
+把仓库链接或 ZIP 交给智能体，说“帮我安装这个 skill”。智能体按 [INSTALL.md](INSTALL.md) 自动完成环境安装与 PDF 验证，无需选择依赖。
+
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文（香港）](README.zh-HK.md)
 
 Alexandria 这个名字来自亚历山大图书馆。那座图书馆的理想，是把全世界的知识汇聚到同一个地方。我也因此做了 Alexandria：一个什么都能问、什么都能研究的深度研究助手。它会自己判断该查什么、寻找最新资料、核对证据，再用你提问的语言写成完整报告。

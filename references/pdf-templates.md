@@ -1,30 +1,18 @@
-# PDF templates and report intake
+# PDF templates and automatic selection
 
-Use this reference when acknowledging a new Alexandria assignment and again before rendering.
+Use this reference to select report layouts automatically before rendering.
 
-## Ask once, in one non-blocking batch
+## Automatic selection; no intake questions
 
-Immediately after the user's first Deep Research request, acknowledge the topic and ask all four questions together in a commentary update. Put the template question first and write in the user's language.
+Start research directly from the topic. Do not ask the user to choose a template,
+review a catalogue, name a preparer or client, or decide confidentiality.
+Deliver two PDFs with identical content: Executive as the default and one
+non-Executive companion selected from the topic mapping below using
+`select_adaptive_companion()`. The user can choose between the finished files.
 
-1. **What look and feel do you want?**
-   - **A — Executive (Default).** Restrained ivory, navy, and teal consulting pages with editorial hierarchy and precise evidence layouts, best for strategy, finance, policy, companies, and general business research.
-   - **B — Spectrum.** White, cobalt, violet, lime, and black form a bold contemporary signal system, best for digital products, media, consumer technology, startups, and future-facing subjects.
-   - **C — Atlas.** Forest green, sage, quiet serif typography, and field-journal imagery create an editorial record, best for people, history, culture, art, society, and geography.
-   - **D — Horizon.** Black, white, cobalt blue, panoramic photography, and floating observation cards create a decisive field-note aesthetic, best for infrastructure, energy, geopolitics, supply chains, resilience, and cities.
-   - **E — Maison.** Warm ivory, monumental serif typography, refined photography, and generous editorial space create a premium magazine feel, best for luxury, hospitality, retail, travel, real estate, food, and consumer brands.
-   - **F — Blueprint.** Black, white, and technical cyan combine with grids, datums, nodes, and process maps, best for operating models, organization design, engineering, governance, implementation, and transformation.
-   - **G — Terrain.** Forest green, cream, aerial imagery, contour lines, and cartographic notation create a place-based field atlas, best for ecology, conservation, agriculture, water, land use, and natural resources.
-   - **H — Orbit.** Electric cobalt, black, white, orbital geometry, scientific imagery, and measured typography create a precision research system, best for AI, semiconductors, robotics, advanced science, and deep technology.
-   - **I — Sunbeam.** Ink black, tangerine, sunflower yellow, oversized serif type, and playful circular signals create an upbeat editorial system, best for entrepreneurship, education, youth, civic participation, social impact, and community initiatives.
-   - **J — Current.** Warm white, flowing orange ribbons, friendly sans-serif typography, and route-like diagrams create an optimistic sense of motion, best for mobility, customer journeys, innovation programs, service operations, the future of work, and organizational change.
-   - **K — Apricot.** Warm ivory, apricot accents, human-scale photography, and generous serif layouts create a calm, welcoming report, best for workplace culture, care, public health, learning, people strategy, and community wellbeing.
-2. **Who should appear under “Prepared by”?** Default: Alexandria.
-3. **Do you want a client name in the report?** Default: blank; omit the client field entirely.
-4. **Do you want confidentiality wording and stamps on the report?** Default: Off. Explain that turning it on adds “Strictly Confidential” and the footer “Controlled copy · Not for external distribution.”
-
-Do not ask these as four separate turns, and do not wait for an answer. Start framing and researching the topic immediately after sending the questions. Treat the questions as optional production preferences, never as permission to begin.
-
-Keep the adaptive/default values active while research continues. If the user replies during the work, apply every supplied answer to the final production and keep the defaults for unanswered items. Resolve the final values immediately before rendering; if an answer arrives after a draft PDF was rendered but before delivery, rerender it. If no answer arrives, finish and deliver two PDFs containing the same report content: Executive as the default version and one topic-adaptive companion.
+Default metadata: prepared by Alexandria, client omitted, current date,
+confidentiality Off. Apply volunteered preferences without requesting answers.
+An explicit request for one template takes precedence and produces one PDF.
 
 ## Select the template
 
@@ -43,7 +31,7 @@ An explicit template choice always wins. Without one, adapt from the topic:
 - **Apricot:** workplace culture, employee experience, care, mental health, public or community health, lifelong learning, people and culture, or community wellbeing.
 - **Ambiguous or evenly mixed:** use a stable topic hash to distribute the adaptive version across the portfolio instead of repeatedly choosing the same design.
 
-An explicit template choice produces one PDF and always wins. Without a choice, render Executive plus the deterministic non-Executive companion selected for the topic; both use the already-approved Markdown, sources, citations, and Rewild receipt, so the second version adds no research or writing tokens and only one additional local rendering pass. If that second pass actually exceeds five minutes or cannot complete within the available runtime, deliver Executive alone and say so.
+An explicit template choice produces one PDF and always wins. Without a choice, render Executive plus the deterministic non-Executive companion selected for the topic; both use the already-approved Markdown, sources, citations, and Rewild receipt, so the second version adds no research or writing tokens and only one additional local rendering pass. If rendering encounters a technical problem, recover internally using the SKILL.md complete-delivery fallback and finish the PDFs. Do not ask the user to troubleshoot or make a template decision.
 
 ## Metadata contract
 

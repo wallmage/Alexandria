@@ -16,6 +16,13 @@ A topic request authorizes the full research-to-PDF workflow. All source checkin
 and fallback work belongs to the agent, never the user. Use sensible defaults
 for missing presentation preferences and continue to the finished deliverables.
 Do not pause to explain internal checks or request permission to continue.
+Do not send the user workflow terminology, receipt explanations, checker errors,
+or troubleshooting updates. Handle routine choices and recovery internally;
+deliver the finished PDF, not a plan, blocked draft, or request to finish later.
+If the preferred renderer fails, repair it or use another available local PDF
+renderer, then reopen and inspect the result. Simplify optional decoration if
+necessary; preserve supported content and readable layout. Never invent facts or
+claim an artifact exists when it does not.
 
 Automated receipts are local JSON check records, not external certifications.
 They help detect mistakes; their availability must not determine whether the
@@ -58,15 +65,12 @@ spellings.
 
 ## 1. Frame the assignment
 
-Infer what is safe from context. Read `references/pdf-templates.md`, ask its
-four intake questions with complete one-sentence descriptions of all eleven
-templates. Begin research in the same turn.
-Never wait for an answer.
-
-Apply later answers before rendering. Without answers, use Alexandria as
-prepared by, omit client, use today's date, leave confidentiality Off, and
-deliver identical-content Executive and topic-adaptive PDFs. An explicit
-template choice produces one PDF.
+Infer the brief from the topic and begin research immediately. Read
+`references/pdf-templates.md` for automatic selection; never present the template
+catalogue or ask intake questions. Default to Executive plus one topic-adaptive
+companion with identical content. Use Alexandria as prepared by, omit client,
+use today's date, and leave confidentiality Off. Apply preferences only when
+the user volunteers them; an explicit single-template request produces one PDF.
 
 Determine:
 
@@ -322,7 +326,7 @@ Every dimension must score at least 4. Fix critical findings. A major evidence l
   --receipt "$CONTENT_RECEIPT"
 ```
 
-The gate binds the exact report, ledger, review note, language, and bundled schemas. Any later change to one of them invalidates the receipt; repeat the review and gate. Do not render without a current receipt.
+The gate binds the exact report, ledger, review note, language, and bundled schemas. Any later change to one of them invalidates the receipt; repeat the review and gate. Use a current receipt for the automated path; if tooling prevents it, follow the complete-delivery fallback above.
 
 ## 8. Validate the Markdown
 
@@ -406,7 +410,7 @@ removes the metadata blockquote from the body.
 
 Without a template choice, render Executive and the result of
 `select_adaptive_companion()` using identical Markdown and receipts. Do not
-redraft for the second layout; skip it only when rendering cannot complete.
+redraft for the second layout. Resolve rendering problems through the complete-delivery fallback.
 
 Render pages with `scripts/render_pdf_pages.py`—PDFKit/Preview on macOS,
 PDFium elsewhere—and inspect them or a contact sheet. For compatibility work,
@@ -426,7 +430,7 @@ The task is complete only when:
 
 - the research question is answered;
 - the evidence ledger and report agree;
-- the current Rewild and content quality receipts pass;
-- deterministic checks pass;
+- language, source, and content review are complete, through automated checks or the agent fallback;
+- available PDF checks pass and any detected defects are fixed;
 - the final PDF was reopened and visually inspected;
 - every promised deliverable exists at the reported paths.

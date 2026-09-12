@@ -1,3 +1,4 @@
+import base64
 import contextlib
 import hashlib
 import json
@@ -13,6 +14,20 @@ class RenderBoundaryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.converter = load_converter()
+
+    def test_embedded_raster_renders_with_production_fetcher(self):
+        from pypdf import PdfReader
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = root / "report.pdf"
+            data = base64.b64encode(encoded_raster("PNG")).decode("ascii")
+            prepared = {
+                "bound_html": f'<img src="data:image/png;base64,{data}">',
+                "assets": [],
+            }
+            self.converter.write_prepared_pdf(prepared, output, asset_root=root)
+            self.assertEqual(len(PdfReader(output).pages[0].images), 1)
 
     def test_write_prepared_pdf_uses_reviewed_asset_snapshot_bytes(self):
         with tempfile.TemporaryDirectory() as temp_dir:

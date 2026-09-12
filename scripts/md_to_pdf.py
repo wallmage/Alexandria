@@ -511,7 +511,9 @@ def make_url_fetcher(asset_root, default_fetcher=None):
                 io.BytesIO(decoded), label="Embedded image"
             )
             if default_fetcher is None:
-                from weasyprint import default_url_fetcher as fetch
+                from weasyprint.urls import URLFetcher
+
+                fetch = URLFetcher(allowed_protocols={"data"})
             else:
                 fetch = default_fetcher
             return fetch(url)

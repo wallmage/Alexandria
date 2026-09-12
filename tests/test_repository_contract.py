@@ -132,39 +132,26 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertIn(f'$SKILL_ROOT/scripts/{script}', production)
         self.assertNotIn("python3 scripts/", production)
 
-    def test_pdf_intake_is_non_blocking_and_offers_all_eleven_templates(self):
+    def test_pdf_templates_are_selected_automatically_without_intake(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         templates = (ROOT / "references" / "pdf-templates.md").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("Begin research in the same turn", skill)
-        self.assertIn("Never wait for an answer", skill)
-        self.assertIn("complete one-sentence", skill)
-        for label in (
-            "A — Executive (Default)",
-            "B — Spectrum",
-            "C — Atlas",
-            "D — Horizon",
-            "E — Maison",
-            "F — Blueprint",
-            "G — Terrain",
-            "H — Orbit",
-            "I — Sunbeam",
-            "J — Current",
-            "K — Apricot",
+        self.assertIn("begin research immediately", skill)
+        self.assertIn("never present the template\ncatalogue or ask intake questions", skill)
+        self.assertIn("Do not ask the user to choose a template", templates)
+        self.assertIn("Deliver two PDFs with identical content", templates)
+        self.assertIn("Executive as the default", templates)
+        self.assertIn("select_adaptive_companion()", templates)
+        self.assertIn("prepared by Alexandria, client omitted, current date", templates)
+        self.assertIn("confidentiality Off", templates)
+        self.assertIn("An explicit request for one template takes precedence", templates)
+        for name in (
+            "Executive", "Spectrum", "Atlas", "Horizon", "Maison", "Blueprint",
+            "Terrain", "Orbit", "Sunbeam", "Current", "Apricot",
         ):
-            self.assertIn(label, templates)
-        self.assertIn("all eleven", skill)
-        self.assertIn("Sunbeam", production := (
-            ROOT / "references" / "pdf-production.md"
-        ).read_text(encoding="utf-8"))
-        self.assertIn("Current", production)
-        self.assertIn("Apricot", production)
-        self.assertIn("Default: Off", templates)
-        self.assertIn("if an answer arrives after a draft PDF was rendered", templates)
-        self.assertIn("two PDFs", templates)
-        self.assertIn("same report content", templates)
+            self.assertIn(f"**{name}:**", templates)
 
     def test_rewild_is_a_bundled_hard_gate_for_every_report_language(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")

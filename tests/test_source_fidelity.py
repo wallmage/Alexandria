@@ -47,7 +47,7 @@ def receipt_responses():
 def ledger():
     return {
         "schema_version": 4,
-        "report_date": "2026-07-28",
+        "report_date": datetime.now(timezone.utc).date().isoformat(),
         "synthesis": {"central_judgment_claim_ids": ["C2"]},
         "sources": [
             {"source_id": "S1", "url": "https://example.org/pricing"},

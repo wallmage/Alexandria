@@ -2684,6 +2684,7 @@ def prepare_pdf_render(
     render_inputs,
     report_text=None,
     content_receipt_data=None,
+    manual_review=False,
 ):
     """Build render-ready HTML from the gated report and reviewed assets."""
     input_path = Path(input_path).resolve()
@@ -2697,17 +2698,18 @@ def prepare_pdf_render(
         rendered_html,
         input_path.parent,
     )
-    validate_visual_asset_approvals(
-        input_path,
-        render_assets,
-        (
-            content_receipt_data
-            if content_receipt_data is not None
-            else content_receipt
-        ),
-        report_text=md_text,
-        cover_image=resolved_inputs["cover_image"],
-    )
+    if not manual_review:
+        validate_visual_asset_approvals(
+            input_path,
+            render_assets,
+            (
+                content_receipt_data
+                if content_receipt_data is not None
+                else content_receipt
+            ),
+            report_text=md_text,
+            cover_image=resolved_inputs["cover_image"],
+        )
     return {
         "render_inputs": resolved_inputs,
         "rendered_html": rendered_html,
@@ -2778,6 +2780,7 @@ def render_pdf(
     source_fidelity_receipt=None,
     keep_html=False,
     force=False,
+    manual_review=False,
 ):
     """Render one Markdown file and return the output PDF path."""
     input_path, output_path = validate_paths(input_path, output_path, force=force)
@@ -2821,30 +2824,34 @@ def render_pdf(
         raise ValueError(
             f"Markdown report could not be snapshotted for rendering: {exc}"
         ) from exc
-    validate_rewild_for_render(
-        input_path,
-        rewild_receipt,
-        lang,
-        report_text=report_text,
-    )
-    validated_content_receipt = validate_content_for_render(
-        input_path,
-        ledger,
-        content_receipt,
-        lang,
-        source_fidelity_receipt,
-        render_inputs=requested_render_inputs,
-        report_text=report_text,
-    )
-    if (
-        not isinstance(validated_content_receipt, dict)
-        or validated_content_receipt.get("report_sha256")
-        != hashlib.sha256(report_bytes).hexdigest()
-    ):
-        raise ValueError(
-            "Markdown report changed before the validated render snapshot "
-            "was bound."
+    validated_content_receipt = None
+    if manual_review:
+        print("[WARNING] Manual review selected; automated receipts are not certified.")
+    else:
+        validate_rewild_for_render(
+            input_path,
+            rewild_receipt,
+            lang,
+            report_text=report_text,
         )
+        validated_content_receipt = validate_content_for_render(
+            input_path,
+            ledger,
+            content_receipt,
+            lang,
+            source_fidelity_receipt,
+            render_inputs=requested_render_inputs,
+            report_text=report_text,
+        )
+        if (
+            not isinstance(validated_content_receipt, dict)
+            or validated_content_receipt.get("report_sha256")
+            != hashlib.sha256(report_bytes).hexdigest()
+        ):
+            raise ValueError(
+                "Markdown report changed before the validated render snapshot "
+                "was bound."
+            )
     prepared = prepare_pdf_render(
         input_path,
         ledger=ledger,
@@ -2854,6 +2861,7 @@ def render_pdf(
         render_inputs=requested_render_inputs,
         report_text=report_text,
         content_receipt_data=validated_content_receipt,
+        manual_review=manual_review,
     )
     asset_collisions = artifact_collision_errors(
         {
@@ -2968,22 +2976,22 @@ def main():
     )
     parser.add_argument(
         "--rewild-receipt",
-        required=True,
+        default=None,
         help="passing Rewild receipt bound to the exact input Markdown",
     )
     parser.add_argument(
         "--ledger",
-        required=True,
+        default=None,
         help="evidence ledger bound to the exact final report",
     )
     parser.add_argument(
         "--content-receipt",
-        required=True,
+        default=None,
         help="passing Content quality receipt bound to the report and ledger",
     )
     parser.add_argument(
         "--source-fidelity-receipt",
-        required=True,
+        default=None,
         help="passing live-source receipt bound to the evidence ledger",
     )
     parser.add_argument(
@@ -2995,6 +3003,10 @@ def main():
         "--force",
         action="store_true",
         help="Replace an existing output PDF",
+    )
+    parser.add_argument(
+        "--manual-review", action="store_true",
+        help="Render after agent review when automated checks are unavailable; no receipts are certified",
     )
     args = parser.parse_args()
 
@@ -3017,6 +3029,7 @@ def main():
             source_fidelity_receipt=args.source_fidelity_receipt,
             keep_html=args.keep_html,
             force=args.force,
+            manual_review=args.manual_review,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))

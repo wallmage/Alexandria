@@ -222,3 +222,7 @@ Run `scripts/pdf_quality.py` first. It settles the mechanical questions - blank 
 Anything found here that a machine could have caught belongs in `scripts/pdf_quality.py` as a new check, with a test, before the next release.
 
 Delete only the exact task-owned environment and inspection directories after delivery.
+
+## Tooling fallback
+
+Follow the SKILL.md complete-delivery rule when automated checks are unavailable. Use `md_to_pdf.py INPUT OUTPUT --manual-review --lang LANG --template TEMPLATE` after agent source, content, language, and image review. This mode does not certify automated receipts. Reopen and inspect the resulting PDF and run available standalone PDF checks before delivery.

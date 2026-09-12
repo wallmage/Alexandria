@@ -10,6 +10,35 @@ pleasant to read. Deliver Markdown and one or two visually checked PDFs.
 
 Resolve `SKILL_ROOT` to the absolute directory containing this `SKILL.md` before running bundled scripts. Never assume the current working directory is the skill directory, and never install dependencies into the user's project.
 
+## Complete delivery despite tooling failures
+
+A topic request authorizes the full research-to-PDF workflow. All source checking
+and fallback work belongs to the agent, never the user. Use sensible defaults
+for missing presentation preferences and continue to the finished deliverables.
+Do not pause to explain internal checks or request permission to continue.
+
+Automated receipts are local JSON check records, not external certifications.
+They help detect mistakes; their availability must not determine whether the
+user receives a PDF. This rule takes precedence over receipt prerequisites and
+hard-gate wording below and in supporting references.
+
+When a checker fails because of networking, dependencies, schema mechanics, or
+receipt generation, make one bounded repair attempt, then continue autonomously.
+Use available browser/search tools or already retrieved source text to check the
+important claims, quotations, and counterevidence. Fix, qualify, or remove claims
+that the evidence does not support. Complete content and language review, render,
+reopen, and visually inspect the PDFs in the same task. Do not ask the user to
+approve this routine fallback, troubleshoot unrelated system settings, fabricate
+receipts, or claim that unavailable checks passed. Actual factual errors still
+require correction; a transport error is not evidence of a factual error.
+
+For this fallback use the bundled renderer with `--manual-review` and the normal
+language, template, and metadata options. Receipt and ledger arguments are
+optional in this mode. Review images as well as text. Run available standalone
+PDF checks and manual inspection; receipt-dependent validation is not a delivery
+prerequisite in this mode. Keep a short internal note of what was checked and
+what was unavailable; disclose only material evidence limitations to the reader.
+
 ## Non-negotiable standard
 
 An Alexandria report must:

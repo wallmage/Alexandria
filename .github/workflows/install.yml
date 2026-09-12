@@ -25,10 +25,11 @@ jobs:
         os: [macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    env:
-      ALEXANDRIA_RUNTIME_DIR: ${{ runner.temp }}/alexandria runtime
     steps:
       - uses: actions/checkout@v6
+      - name: Select an isolated runtime directory
+        shell: pwsh
+        run: '"ALEXANDRIA_RUNTIME_DIR=$env:RUNNER_TEMP/alexandria runtime" >> $env:GITHUB_ENV'
       - name: Install on macOS
         if: runner.os == 'macOS'
         run: sh scripts/install.sh

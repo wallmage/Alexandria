@@ -994,6 +994,55 @@ class ContentGateTests(unittest.TestCase):
             self.assertIn("support=", lines[0])
             self.assertIn("citation=", lines[0])
 
+    def test_run_check_can_skip_the_ledger_error_re_emission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, _receipt, _source_receipt = self.make_case(
+                directory
+            )
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["claim_support"] = [
+                {
+                    "claim_id": "C1",
+                    "paragraph": 1,
+                    "disposition": "supported",
+                    "note": "The mapped paragraph carries the claim.",
+                }
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+            ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
+            ledger_data["claims"][0]["report_paragraph"] = 1
+            ledger_data["claims"][0]["supports"] = ["C404"]
+            ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
+            report.write_text(
+                report.read_text(encoding="utf-8")
+                + "\n\nAn extra link to [an unlisted page](https://unlisted.example/x).\n",
+                encoding="utf-8",
+            )
+
+            with_ledger = run_check(report, ledger, review)
+            without_ledger = run_check(
+                report, ledger, review, include_ledger_checks=False
+            )
+            self.assertTrue(
+                any("C404" in item.message for item in with_ledger), with_ledger
+            )
+            self.assertFalse(
+                any("C404" in item.message for item in without_ledger),
+                without_ledger,
+            )
+            self.assertIn(
+                "binding/link-not-in-ledger",
+                [item.family for item in with_ledger],
+            )
+            self.assertNotIn(
+                "binding/link-not-in-ledger",
+                [item.family for item in without_ledger],
+            )
+            self.assertTrue(
+                any(item.message.startswith("C1:") for item in without_ledger),
+                without_ledger,
+            )
+
     def test_check_flag_is_dry_run(self):
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, receipt, _source_receipt = self.make_case(

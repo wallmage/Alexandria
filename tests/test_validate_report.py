@@ -1084,3 +1084,169 @@ Short.
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParagraphNumberingTests(unittest.TestCase):
+    REPORT = """# Title
+
+> Standfirst sentence.
+> 14 September 2026
+
+## Executive summary
+
+First prose paragraph cites [one](https://example.com/a).
+
+```
+fenced code
+
+with a blank line
+```
+
+| column | column |
+| --- | --- |
+
+14 September 2026
+
+Second prose paragraph cites [two](https://example.com/b).
+
+## Sources
+
+- [Primary](https://example.com/a)
+- [Secondary](https://example.com/b)
+"""
+
+    def test_split_body_paragraphs_numbers_body_prose_only(self):
+        numbered = validate_report.split_body_paragraphs(self.REPORT)
+        self.assertEqual([1, 2], [number for number, _ in numbered])
+        self.assertTrue(numbered[0][1].startswith("First prose paragraph"))
+        self.assertTrue(numbered[1][1].startswith("Second prose paragraph"))
+
+    def test_binding_candidates_use_the_body_paragraph_numbering(self):
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"},
+                {"source_id": "S2", "url": "https://example.com/b"},
+            ],
+            "claims": [
+                {
+                    "claim_id": "C5",
+                    "include_in_report": True,
+                    "source_ids": ["S1", "S2"],
+                }
+            ],
+        }
+        message = next(
+            finding.message
+            for finding in validate_report.binding_findings(self.REPORT, ledger)
+            if finding.family == "binding/claim-paragraph"
+        )
+        self.assertIn("candidates: 1, 2", message)
+
+
+class FindingClassTests(unittest.TestCase):
+    def _date_line_klass(self, date_line):
+        report = f"# Title\n\n> Standfirst.\n> {date_line}\n\nBody.\n"
+        findings = validate_report.integrity_findings(
+            report, {"report_date": "2026-09-14"}, lang="en"
+        )
+        return next(
+            finding.klass
+            for finding in findings
+            if finding.family == "integrity/date-line"
+        )
+
+    def test_structure_defects_are_class_a(self):
+        findings = validate_report.integrity_findings(
+            "Body only.\n", {}, lang=None
+        )
+        structure = [
+            finding for finding in findings
+            if finding.family == "integrity/structure"
+        ]
+        self.assertEqual(2, len(structure))
+        self.assertEqual({"A"}, {finding.klass for finding in structure})
+
+    def test_date_line_is_class_a_only_when_fix_cannot_repair_it(self):
+        self.assertEqual("F", self._date_line_klass("14  September 2026"))
+        self.assertEqual("A", self._date_line_klass("September 14, 2026"))
+
+    def test_sources_section_is_class_a_and_fabrication_stays_f(self):
+        report = "# Title\n\n> 14 September 2026\n\nCites [x](https://other.example/x).\n"
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [{"source_id": "S1", "url": "https://example.com/a"}],
+            "claims": [],
+        }
+        by_family = {
+            finding.family: finding.klass
+            for finding in validate_report.binding_findings(report, ledger)
+        }
+        self.assertEqual("A", by_family["binding/sources-section"])
+        self.assertEqual("F", by_family["binding/link-not-in-ledger"])
+
+
+class RewildReceiptLedgerBindingTests(unittest.TestCase):
+    def test_rewild_receipt_is_not_required_to_record_ledger_sha256(self):
+        from scripts.rewild_gate import run_gate
+
+        clean = (
+            "# Report\n\n## First finding\n\n"
+            + " ".join(f"word{index}" for index in range(4000))
+            + ".\n\n## Second finding\n\n"
+            + " ".join(f"term{index}" for index in range(3500))
+            + ".\n\n## Sources\n\n[Source](https://example.com)"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            source = work / "pre-rewild.md"
+            review = work / "review.json"
+            receipt = work / "rewild.json"
+            ledger = work / "ledger.json"
+            report.write_text(clean, encoding="utf-8")
+            source.write_text(clean, encoding="utf-8")
+            ledger.write_text(json.dumps({"claims": []}), encoding="utf-8")
+            review.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "completed",
+                        "report_sha256": hashlib.sha256(
+                            report.read_bytes()
+                        ).hexdigest(),
+                        "source_sha256": hashlib.sha256(
+                            source.read_bytes()
+                        ).hexdigest(),
+                        "report_lang": "en",
+                        "profile": "rewild",
+                        "fidelity_checks": {
+                            "facts_and_figures": True,
+                            "attribution_and_uncertainty": True,
+                            "direction_and_negation": True,
+                            "causality": True,
+                        },
+                        "findings": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            gate_errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+            self.assertEqual([], gate_errors)
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertNotIn("ledger_sha256", payload)
+
+            args = SimpleNamespace(
+                ledger=str(ledger),
+                rewild_receipt=str(receipt),
+                content_receipt=None,
+                source_fidelity_receipt=None,
+            )
+            errors = validate_report._receipt_hash_errors(args, report)
+            self.assertEqual([], errors)

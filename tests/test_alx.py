@@ -2744,5 +2744,403 @@ class ParkedReviewNoteTests(AlxTestCase):
         self.assertIn("alx review finish rewild", out)
 
 
+class ClaimInputRoundTripTests(AlxTestCase):
+    """Spec §10/§6.4: one round-trip per conditional claim-input path."""
+
+    EXTRACT = (
+        "Retention rose to 88 percent after the second review round, "
+        "the registry reported."
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.write_json("first.json", [CLAIM_ONE])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+
+    def fixture(self, claim_id, **extra):
+        item = {
+            "claim_id": claim_id,
+            "claim": "Retention rose to 88 percent after the second review round.",
+            "kind": "fact",
+            "importance": "supporting",
+            "source_evidence": [
+                {"source_id": "S1", "extract_or_location": self.EXTRACT}
+            ],
+        }
+        item.update(extra)
+        return item
+
+    def claim_schema(self):
+        schema = json.loads(
+            alx.validate_ledger.DEFAULT_SCHEMA.read_text(encoding="utf-8")
+        )
+        return {"$defs": schema["$defs"], "$ref": "#/$defs/claim"}
+
+    def round_trip(self, item):
+        path = self.write_json(f"{item['claim_id']}.json", [item])
+        code, out = self.run_in("claim", "add", path)
+        self.assertEqual(0, code, out)
+        claim = next(
+            entry
+            for entry in self.ledger()["claims"]
+            if entry["claim_id"] == item["claim_id"]
+        )
+        self.assertEqual(
+            [],
+            alx.validate_ledger.validate_schema(claim, self.claim_schema()),
+        )
+        for key, value in item.items():
+            self.assertEqual(value, claim[key])
+        return claim
+
+    def missing_key_is_named(self, item, key):
+        broken = {name: value for name, value in item.items() if name != key}
+        path = self.write_json("broken.json", [broken])
+        code, out = self.run_in("claim", "add", path)
+        self.assertEqual(1, code, out)
+        self.assertIn("[ledger/claim-input]", out)
+        self.assertIn(key, out)
+
+    def test_analysis_claim_round_trips_and_names_missing_reasoning(self):
+        item = self.fixture(
+            "C10",
+            kind="analysis",
+            reasoning=(
+                "The second review round is the only change between the two "
+                "retention figures."
+            ),
+        )
+        self.round_trip(item)
+        self.missing_key_is_named(item, "reasoning")
+
+    def test_estimate_claim_round_trips_and_names_missing_assumptions(self):
+        item = self.fixture(
+            "C11",
+            kind="estimate",
+            assumptions=[
+                "The review round applied one retention rule to every file."
+            ],
+        )
+        self.round_trip(item)
+        self.missing_key_is_named(item, "assumptions")
+
+    def test_response_role_round_trips_and_names_missing_responds_to(self):
+        item = self.fixture(
+            "C12",
+            person_claim_role="response",
+            responds_to_claim_ids=["C1"],
+        )
+        self.round_trip(item)
+        self.missing_key_is_named(item, "responds_to_claim_ids")
+
+    def test_resolution_role_round_trips_and_names_missing_resolves(self):
+        item = self.fixture(
+            "C13",
+            person_claim_role="resolution",
+            resolves_claim_ids=["C1"],
+        )
+        self.round_trip(item)
+        self.missing_key_is_named(item, "resolves_claim_ids")
+
+    def test_an_accountable_source_claim_round_trips(self):
+        code, out = self.run_in(
+            "source", "set", "S1", "--accountability", "court_or_regulator_record"
+        )
+        self.assertEqual(0, code, out)
+        source = next(
+            entry for entry in self.ledger()["sources"] if entry["source_id"] == "S1"
+        )
+        self.assertEqual("court_or_regulator_record", source["accountability_basis"])
+        claim = self.round_trip(self.fixture("C14"))
+        self.assertEqual(["S1"], claim["source_ids"])
+
+
+NINE_SENTENCES = (
+    "The archive published the reading room rules for named researchers.",
+    "The registry recorded the transfer of the papers to the reading room.",
+    "The archive asked the registry to confirm each finding aid entry.",
+    "The reading room admits researchers who carry a named sponsor letter.",
+    "The registry keeps a separate index of the transferred boxes.",
+    "The archive trains its staff on the handling of fragile paper.",
+    "The registry publishes a monthly note on its cataloguing work.",
+    "The archive stores the original wrappers with the catalogued boxes.",
+    "The reading room closes for one week of conservation each spring.",
+)
+
+
+def _nine_page(sentences):
+    """One page per claim, padded so each probe context stands alone.
+
+    `PROBE_CONTEXT_RADIUS` is 500 characters, so the filler between two
+    sentences keeps the removal of the last one out of its neighbour's
+    recorded context (spec §7.2.6).
+    """
+    parts = ["<html><head><title>Reading Room</title></head><body>"]
+    for index, sentence in enumerate(sentences):
+        parts.append(f"<p>{sentence}</p>")
+        parts.append("<p>" + f"Filler line {index} for the reading room. " * 24 + "</p>")
+    parts.append("</body></html>")
+    return "\n".join(parts)
+
+
+class RefreshedSourceReprobeTests(AlxTestCase):
+    """Spec §10/§6.9.2: a refreshed source re-probes every claim it carries."""
+
+    URL = "https://example.org/study"
+
+    def responses_for(self, page):
+        return {"example.org": (200, {"content-type": "text/html"}, page.encode("utf-8"))}
+
+    def claim(self, index):
+        sentence = NINE_SENTENCES[index]
+        item = {
+            "claim_id": f"C{index + 1}",
+            "claim": sentence,
+            "kind": "fact",
+            "importance": "supporting",
+            "source_evidence": [
+                {"source_id": "S1", "extract_or_location": sentence}
+            ],
+        }
+        if index == 0:
+            item["importance"] = "key"
+            item["decision_relevance"] = "The rules decide who may read the papers."
+            item["what_would_change"] = "A published rule admitting unnamed readers."
+        return item
+
+    def draft(self):
+        date_line = alx.report_contract.localized_date("en", None)
+        body = "\n\n".join(
+            f"{sentence} The study [records this]({self.URL}) for the reading room."
+            for sentence in NINE_SENTENCES
+        )
+        text = (
+            "# Reading Room\n\n"
+            "> How the archive and the registry run the reading room.\n"
+            f"> {date_line}\n\n"
+            "## Findings\n\n"
+            f"{body}\n\n"
+            "## Sources\n\n"
+            f"- [Reading Room]({self.URL})\n"
+        )
+        (self.dir / "report.md").write_text(text, encoding="utf-8")
+
+    def prepared(self):
+        self.init()
+        with mock_production_transport(self.responses_for(_nine_page(NINE_SENTENCES))):
+            code, out = self.run_in("fetch", self.URL)
+        self.assertEqual(0, code, out)
+        code, out = self.run_in(
+            "source", "set", "S1", "--provenance", "primary_independent"
+        )
+        self.assertEqual(0, code, out)
+        batch = self.write_json(
+            "nine.json", [self.claim(index) for index in range(len(NINE_SENTENCES))]
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.draft()
+        for index in range(len(NINE_SENTENCES)):
+            code, out = self.run_in(
+                "claim", "bind", f"C{index + 1}", "--paragraph", str(index + 1)
+            )
+            self.assertEqual(0, code, out)
+        patch = self.write_json("coverage.json", self.coverage_patch())
+        code, out = self.run_in("ledger", "merge", patch)
+        self.assertEqual(0, code, out)
+        code, out = self.run_in("check", "--fix")
+        self.run_in("snapshot")
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        for name in ("dir", "root", "run_alx", "run_in", "state", "ledger"):
+            setattr(reviews, name, getattr(self, name))
+        reviews.finish_reviews()
+
+    def coverage_patch(self):
+        ids = [f"C{index + 1}" for index in range(len(NINE_SENTENCES))]
+        return {
+            "coverage": [
+                {
+                    "area": "reading room",
+                    "question": "How is access to the reading room governed?",
+                    "priority": "high",
+                    "decision_relevance": "Access decides who can verify the papers.",
+                    "completion_criteria": "The published rules are recorded.",
+                    "status": "supported",
+                    "claim_ids": ids,
+                    "gap_impact": None,
+                }
+            ],
+            "synthesis": {
+                "central_judgment_claim_ids": ["C1"],
+                "counterevidence_claim_ids": [],
+                "adversarial_tests": [
+                    {
+                        "hypothesis": "The reading room admits unnamed readers.",
+                        "test": "Read the published rules for the reading room.",
+                        "claim_ids": ["C1"],
+                        "outcome": "rejected",
+                        "result": "The rules name the sponsor requirement.",
+                        "effect_on_conclusion": "The access claim stands.",
+                    }
+                ],
+                "implications": [
+                    {
+                        "statement": "Verification needs a named sponsor letter.",
+                        "claim_ids": ["C1"],
+                        "for_whom": "Archive researchers",
+                        "timing": "Immediately",
+                    }
+                ],
+                "decisions_or_takeaways": [
+                    {
+                        "statement": "Apply for a sponsor letter before travelling.",
+                        "rationale_claim_ids": ["C1"],
+                        "tradeoff": "The letter takes time to obtain.",
+                        "success_signal": "Readers are admitted on arrival.",
+                        "failure_signal": "Readers are turned away at the door.",
+                    }
+                ],
+                "scenarios": [],
+                "limitations": ["Only the archive's own page was available."],
+                "research_stop_reason": "The published rules answer the question.",
+            },
+        }
+
+    def stub_gates(self, stack):
+        """Only the two gates; the live fidelity pass must stay real."""
+
+        def bound(payload):
+            payload = dict(payload)
+            payload["report_sha256"] = alx.file_sha256(self.dir / "report.md")
+            payload["ledger_sha256"] = alx.file_sha256(self.dir / "ledger.json")
+            return json.dumps(payload)
+
+        def fake_rewild(*args, **kwargs):
+            Path(kwargs["receipt_path"]).write_text(
+                bound({"status": "passed"}), encoding="utf-8"
+            )
+            return []
+
+        def fake_content(report_path, ledger_path, note_path, receipt_path, **kwargs):
+            Path(receipt_path).write_text(bound({"status": "passed"}), encoding="utf-8")
+            return []
+
+        stack.enter_context(
+            mock.patch.object(alx.rewild_gate, "run_gate", side_effect=fake_rewild)
+        )
+        stack.enter_context(
+            mock.patch.object(
+                alx.content_gate, "run_content_gate", side_effect=fake_content
+            )
+        )
+
+    def changed_page(self):
+        """The live page loses the sentence C9 quotes; C1 (sampled) survives."""
+        return _nine_page(NINE_SENTENCES[:-1])
+
+    def issue(self, stack, *extra):
+        self.stub_gates(stack)
+        stack.enter_context(
+            mock_production_transport(self.responses_for(self.changed_page()))
+        )
+        return self.run_in("issue", "--sample-size", "1", *extra)
+
+    def test_a_claim_outside_the_sample_blocks_issue(self):
+        from contextlib import ExitStack
+
+        self.prepared()
+        with ExitStack() as stack:
+            code, out = self.issue(stack)
+        self.assertEqual(1, code, out)
+        # The live sample covered C1 only; C9 is blocked by the re-probe that
+        # the refreshed cache triggers.
+        result = json.loads(
+            (self.dir / ".alx" / "fidelity-result.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual({"C1"}, {check["claim_id"] for check in result["checks"]})
+        self.assertIn("1 source(s) refreshed", out)
+        self.assertIn("[fidelity/mismatch]", out)
+        self.assertIn("C9", out)
+        self.assertNotIn("C8", out)
+        self.assertIn("issue refused", out)
+        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+
+    def test_deliver_drops_the_claim_outside_the_sample(self):
+        from contextlib import ExitStack
+
+        self.prepared()
+        with ExitStack() as stack:
+            code, out = self.issue(stack, "--deliver")
+        self.assertEqual(0, code, out)
+        surviving = {claim["claim_id"] for claim in self.ledger()["claims"]}
+        self.assertNotIn("C9", surviving)
+        self.assertEqual(8, len(surviving))
+        self.assertIn(
+            "C9", {claim["claim_id"] for claim in self.ledger()["excluded_claims"]}
+        )
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertNotIn(NINE_SENTENCES[-1], report)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
+
+
+class VerificationNotePdfTests(AlxTestCase):
+    """Spec §10/§6.9.3: the machine-written note survives into both PDFs."""
+
+    def pdf_text(self, path):
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    def test_the_note_reaches_both_pdfs_with_matching_issue_hashes(self):
+        from contextlib import ExitStack
+
+        issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state", "set_remaining",
+        ):
+            setattr(issue_tests, name, getattr(self, name))
+        issue_tests.prepared()
+        with ExitStack() as stack:
+            # Step 2 reports a central judgment it could not re-read live, so
+            # step 3 has a non-empty note to write (spec §6.9.3).
+            issue_tests.stub_gates(
+                stack,
+                online={
+                    "status": "passed",
+                    "checks": [],
+                    "refreshed_source_ids": [],
+                    "disclosure_required": ["C1"],
+                },
+            )
+            code, out = self.run_in("issue", "--deliver")
+            self.assertEqual(0, code, out)
+            code, out = self.run_in("render")
+        self.assertEqual(0, code, out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        note = next(
+            block
+            for block in report.split("\n\n")
+            if block.startswith(alx.VERIFICATION_NOTE_PREFIX["en"])
+        )
+        receipt = json.loads(
+            (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(alx.file_sha256(self.dir / "report.md"), receipt["report_sha256"])
+        self.assertEqual(
+            alx.file_sha256(self.dir / "ledger.json"), receipt["ledger_sha256"]
+        )
+        pdfs = sorted(self.dir.glob("report-*.pdf"))
+        self.assertEqual(2, len(pdfs), pdfs)
+        wanted = re.sub(r"\s+", "", note)
+        for pdf in pdfs:
+            with self.subTest(pdf=pdf.name):
+                self.assertIn(wanted, re.sub(r"\s+", "", self.pdf_text(pdf)))
+
+
 if __name__ == "__main__":
     unittest.main()

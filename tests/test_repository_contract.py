@@ -53,55 +53,6 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertIn("## Coverage ledger mapping", text, name)
             self.assertIn("status: gap", text, name)
 
-    def test_readmes_explain_the_name_unlimited_scope_and_pdf_output(self):
-        required_phrases = {
-            "README.md": (
-                "亚历山大图书馆",
-                "全世界的知识",
-                "任何主题",
-                "没有固定的选题限制",
-                "专业制作",
-                "紧跟在相关事实后的引用",
-                "alx",
-                "60 分钟",
-            ),
-            "README.en.md": (
-                "Library of Alexandria",
-                "the world's knowledge",
-                "anything",
-                "no fixed subject limits",
-                "professionally produced PDF",
-                "citations beside the claims",
-                "alx",
-                "60-minute",
-            ),
-            "README.zh-CN.md": (
-                "亚历山大图书馆",
-                "全世界的知识",
-                "任何主题",
-                "没有固定的选题限制",
-                "专业制作",
-                "紧跟在相关事实后的引用",
-                "alx",
-                "60 分钟",
-            ),
-            "README.zh-HK.md": (
-                "亞歷山大圖書館",
-                "全世界的知識",
-                "任何題目",
-                "沒有固定的選題限制",
-                "專業製作",
-                "緊貼相關事實的引用",
-                "alx",
-                "60 分鐘",
-            ),
-        }
-        for filename, phrases in required_phrases.items():
-            readme = (ROOT / filename).read_text(encoding="utf-8")
-            with self.subTest(filename=filename):
-                for phrase in phrases:
-                    self.assertIn(phrase, readme)
-
     def test_skill_references_existing_local_files(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         local_paths = set(

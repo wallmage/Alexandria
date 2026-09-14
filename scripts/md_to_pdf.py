@@ -2449,14 +2449,16 @@ def validate_render_report_date(
     )
     if gated_date != expected:
         raise ValueError(
-            "Render report date must use the strict locale format and match "
-            f"the gated report and ledger date: {expected}."
+            "Render report date must use the strict locale format and sit in "
+            "the immediate blockquote under the H1, matching the gated report "
+            f"and ledger date: {expected}."
         )
     requested = render_inputs.get("report_date")
     if requested is not None and requested != expected:
         raise ValueError(
-            "Render report date must use the strict locale format and match "
-            f"the gated report and ledger date: {expected}."
+            "Render report date must use the strict locale format and sit in "
+            "the immediate blockquote under the H1, matching the gated report "
+            f"and ledger date: {expected}."
         )
     return expected
 
@@ -2763,6 +2765,29 @@ def write_prepared_pdf(prepared, output_path, *, asset_root):
     return output_path
 
 
+def _verify_issue_receipt(issue_receipt, input_path, ledger_path, report_bytes):
+    try:
+        payload = json.loads(Path(issue_receipt).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"issue receipt could not be read: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("issue receipt root must be an object.")
+    report_hash = hashlib.sha256(report_bytes).hexdigest()
+    if payload.get("report_sha256") != report_hash:
+        raise ValueError("issue receipt does not match the current report.")
+    if not ledger_path:
+        raise ValueError(
+            "issue receipt requires --ledger to verify the recorded ledger hash."
+        )
+    try:
+        ledger_hash = hashlib.sha256(Path(ledger_path).read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError(f"issue receipt could not hash the ledger: {exc}") from exc
+    if payload.get("ledger_sha256") != ledger_hash:
+        raise ValueError("issue receipt does not match the current ledger.")
+    return payload
+
+
 def render_pdf(
     input_path,
     output_path,
@@ -2780,6 +2805,7 @@ def render_pdf(
     ledger=None,
     content_receipt=None,
     source_fidelity_receipt=None,
+    issue_receipt=None,
     keep_html=False,
     force=False,
     manual_review=False,
@@ -2799,6 +2825,7 @@ def render_pdf(
             "Rewild receipt": rewild_receipt,
             "content receipt": content_receipt,
             "source-fidelity receipt": source_fidelity_receipt,
+            "issue receipt": issue_receipt,
             "cover image": cover_path,
         },
         {
@@ -2827,7 +2854,15 @@ def render_pdf(
             f"Markdown report could not be snapshotted for rendering: {exc}"
         ) from exc
     validated_content_receipt = None
-    if manual_review:
+    if issue_receipt:
+        payload = _verify_issue_receipt(
+            issue_receipt, input_path, ledger, report_bytes
+        )
+        validated_content_receipt = {
+            "approved_visual_assets": payload.get("approved_visual_assets") or [],
+            "report_sha256": hashlib.sha256(report_bytes).hexdigest(),
+        }
+    elif manual_review:
         print("[WARNING] Manual review selected; automated receipts are not certified.")
     else:
         validate_rewild_for_render(
@@ -3010,6 +3045,12 @@ def main():
         "--manual-review", action="store_true",
         help="Render after agent review when automated checks are unavailable; no receipts are certified",
     )
+    parser.add_argument(
+        "--issue-receipt",
+        dest="issue_receipt",
+        default=None,
+        help="offline issue.json; verify report and ledger hashes only",
+    )
     args = parser.parse_args()
 
     try:
@@ -3029,6 +3070,7 @@ def main():
             ledger=args.ledger,
             content_receipt=args.content_receipt,
             source_fidelity_receipt=args.source_fidelity_receipt,
+            issue_receipt=args.issue_receipt,
             keep_html=args.keep_html,
             force=args.force,
             manual_review=args.manual_review,

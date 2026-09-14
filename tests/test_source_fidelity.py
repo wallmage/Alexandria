@@ -1173,6 +1173,66 @@ class ProbeResilienceTests(unittest.TestCase):
         self.assertEqual("hard", finding.severity)
         self.assertEqual("extend the quote in claims/<file>", finding.fix)
 
+    VERBATIM_CJK = (
+        "他在日记中将共产党的优点概括为七大方面：“一,组织严密；二,纪律严厉；"
+        "三,精神紧张；四,手段彻底；五,军政公开......六,办事方法......"
+        "七,组织内容......”.从日记中可以看出"
+    )
+
+    def test_verbatim_window_is_one_segment(self):
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C21",
+                "source_evidence": [
+                    {"source_id": "S11", "extract_or_location": self.VERBATIM_CJK}
+                ],
+            },
+            {"source_id": "S11"},
+            f"背景铺垫。{self.VERBATIM_CJK}，反思与改革已成为常态。",
+        )
+        self.assertEqual([], findings)
+
+    def test_fabricated_tail_after_author_ellipsis_still_fails(self):
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C9",
+                "source_evidence": [
+                    {
+                        "source_id": "S1",
+                        "extract_or_location": (
+                            "A genuine quoted observation … "
+                            "and a fabricated tail nobody published"
+                        ),
+                    }
+                ],
+            },
+            {"source_id": "S1"},
+            "A genuine quoted observation appears in the cached page text here.",
+        )
+        self.assertEqual(
+            ["fidelity/mismatch"], [item.family for item in findings]
+        )
+
+    def test_short_segment_after_author_ellipsis_still_fails(self):
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C9",
+                "source_evidence": [
+                    {
+                        "source_id": "S1",
+                        "extract_or_location": (
+                            "A genuine quoted observation … short"
+                        ),
+                    }
+                ],
+            },
+            {"source_id": "S1"},
+            "A genuine quoted observation and short both appear in this page.",
+        )
+        self.assertIn(
+            "fidelity/short-segment", [item.family for item in findings]
+        )
+
     def test_cjk_ascii_punct_folded_for_probe(self):
         probes = source_fidelity.probe_strings("他说，今天很好。")
         text = source_fidelity.normalize_text("他说,今天很好.")

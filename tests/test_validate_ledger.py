@@ -3701,3 +3701,50 @@ class SchemaRemedyTests(unittest.TestCase):
                     or (location != "<root>" and field.startswith(f"{location}.")),
                     item.fix,
                 )
+
+
+VERBATIM_CJK = (
+    "他在日记中将共产党的优点概括为七大方面：“一,组织严密；二,纪律严厉；"
+    "三,精神紧张；四,手段彻底；五,军政公开......六,办事方法......"
+    "七,组织内容......”.从日记中可以看出"
+)
+
+
+class ExtractLengthVerbatimTests(unittest.TestCase):
+    @staticmethod
+    def _claim(extract):
+        return {
+            "claim_id": "C21",
+            "source_evidence": [
+                {"source_id": "S11", "extract_or_location": extract}
+            ],
+        }
+
+    def test_verbatim_window_with_in_source_ellipses_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(
+                cache, "S11", _cache_result(f"背景。{VERBATIM_CJK}，反思与改革。")
+            )
+            self.assertEqual(
+                [],
+                validate_ledger._extract_length_findings(
+                    self._claim(VERBATIM_CJK), cache_dir=cache
+                ),
+            )
+
+    def test_short_segment_after_author_ellipsis_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(
+                cache,
+                "S11",
+                _cache_result("A genuine quoted observation and short appear here."),
+            )
+            findings = validate_ledger._extract_length_findings(
+                self._claim("A genuine quoted observation … short"),
+                cache_dir=cache,
+            )
+            self.assertEqual(
+                ["ledger/extract-length"], [item.family for item in findings]
+            )

@@ -888,10 +888,22 @@ def _probe_windows(text):
 _ELLIPSIS_SPLIT = re.compile(r"\.\.\.|…")
 
 
-def _extract_segments(extract):
+def _extract_segments(extract, document=None):
+    """Split an extract into the pieces that must appear in the source.
+
+    Literal-whole-first (spec §7.2.3): an extract that occurs verbatim in the
+    normalized document is one segment. The segment rule exists only to catch a
+    fabricated tail around an author-inserted ellipsis, so quote glyphs, list
+    markers and in-source ellipses must not strand orphan fragments below the
+    floor when the whole window is already verbatim.
+    """
     text = str(extract or "").strip()
     if not text:
         return []
+    if document is not None:
+        whole = normalize_text(text)
+        if whole and whole in document:
+            return [text]
     parts = []
     outside = []
     cursor = 0
@@ -954,7 +966,7 @@ def probe_findings(claim, source, text, *, cache_meta=None):
         extract = claim.get("extract_or_location")
     document = strip_markup(text) if "<" in str(text or "") else normalize_text(text)
     findings = []
-    segments = _extract_segments(extract)
+    segments = _extract_segments(extract, document)
     usable = []
     for segment in segments:
         normalized = normalize_text(segment)

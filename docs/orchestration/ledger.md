@@ -49,3 +49,4 @@ Progress ≈ 55% by effort. Remaining: finish T1/T2/T4 fix rounds → scoped re-
 4. Regression: run `alx check` on $S/fixture (copy into a temp workspace via alx init + place files) → grouped output, no traceback.
 5. e2e clean path (spec §10): fresh dir; SKILL.md from main; Cursor `cursor-grok-4.6-medium-fast` with the friend's prompt (蒋介石日记, zh-CN); 60-min cap; then Codex gpt-6-astra control. Record timings/gate rounds here.
 6. Final judgment review (Cursor xhigh --mode ask, judgment-reviewer.md) on the merged branch; push main; `git worktree remove` each wt; `git branch -d wip/*`; report "Rulings I made" (R1, R2 + debate rulings above) to user.
+- T4 fix1 DONE: 535 pass (+3 README = T6). Critical ×2 fixed, Important fixed, minor 14 deferred. Task 4: complete pending integration.

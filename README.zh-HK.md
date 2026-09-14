@@ -10,6 +10,8 @@ Alexandria 的名字來自亞歷山大圖書館。那座圖書館曾立志匯聚
 
 [簡體中文](README.md) · [English](README.en.md) · [繁體中文（香港）](README.zh-HK.md)
 
+Alexandria 可研究任何題目，沒有固定的選題限制，志向是匯聚全世界的知識。交付走 `alx`：init → fetch → claim add → check → snapshot → review → issue → render，預算 60 分鐘。剩餘時間不足 15 分鐘時執行 `alx issue --deliver`，再執行 `alx render`。成品是專業製作的 PDF，配有緊貼相關事實的引用。
+
 ## 題目不同，追問的問題也不同
 
 研究明朝財政，與研究一間晶片公司或一套哲學思想，所需的證據和切入點各有不同。Alexandria 內置六類研究框架，按研究對象選用。跨領域題目則結合相關範疇。

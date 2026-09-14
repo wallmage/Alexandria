@@ -355,7 +355,9 @@ rendering reconciles all actual local rasters against the approved set.
 Changing pixels, adding an unreviewed image, or leaving an approval unused
 fails production. Bundled decorative template assets need no review record.
 
-Run `scripts/source_fidelity.py --online` first and issue its receipt, then run
-`scripts/content_gate.py` after the review with that receipt. Any later change
-to the report, ledger, source-fidelity receipt, review note, verifier, or
-bundled schemas invalidates the content receipt.
+Lifecycle: `alx review start content` (copies report + ledger), fill
+`reviews/content.json` per this section, `alx review finish content`. Missing or
+stale content review is Class F; `alx review restore content` reverts both files.
+`alx issue` then writes `receipts/content.json` and the source-fidelity receipt.
+Any later non-mechanical change invalidates the note; use `--iter`. Do not invoke
+standalone `content_gate.py` / `source_fidelity.py` from the runbook.

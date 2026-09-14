@@ -58,7 +58,7 @@ Assign each source a family and one or more roles. Several pages from one publis
 
 `source_family` defaults to the source URL's registrable domain, or that
 domain's leading label. Any other family name needs a
-`family_justification` of at least 40 characters saying why this source is
+`family_justification` of at least 40 characters (CJK minimum 20) saying why this source is
 genuinely independent of the others that share its domain. A declared family
 can only ever be coarser than the evidence: the validator merges sources that
 share a registrable domain or a publisher whatever they are called, and merges
@@ -153,7 +153,7 @@ figures, with an unevidenced clause ("all since patched") appended to the
 claim string.
 
 Two narrow exits exist. `derived_assertions` records a computed or inferred
-expression with a stated derivation of at least 40 characters; the expression
+expression with a stated derivation of at least 40 characters (CJK minimum 20); the expression
 must appear in the claim, must not already appear in the extract, and must
 actually excuse something. A claim carrying more than two is a claim that
 should be split. Original arithmetic belongs in `kind: estimate`, whose
@@ -170,16 +170,14 @@ be later than the most recent access date among the claim's own sources.
 
 ### Re-reading the source
 
-`scripts/source_fidelity.py` re-fetches a weighted sample of cited pages —
-central judgments and key claims first — and checks that each source's own
-`source_evidence` still appears in that source. It is the only pass
-that checks the ledger against the world rather than the report against the
-ledger. Run it with `--online` before delivery. Without `--online` it reports
-a visible skip, which is not a pass; an unreachable page is recorded as
-unverified, never as verified. Production requires
-`--receipt "$SOURCE_FIDELITY_RECEIPT"`; content review rejects a missing or
-stale receipt, and final validation verifies that receipt without fetching the
-same sources again.
+`alx issue` (step 2) re-fetches a weighted sample under policy
+`weighted-source-evidence-v2`: top-N by weight; unreachable/undecodable pairs
+are substituted by the next candidate for the same claim; issue when 0
+mismatches and unverified ≤ 25%. Central-judgment pairs still unverified set
+`disclosure_required`. Statuses are `verified|mismatch|unreachable|undecodable`.
+Offline `alx check` probes the cache; missing
+cache is `cache-missing`. Production writes `receipts/source-fidelity.json`;
+`alx render` verifies hashes without fetching again. v1 receipts remain valid.
 
 ### Freshness records
 

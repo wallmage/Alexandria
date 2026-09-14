@@ -173,6 +173,12 @@
     "completion_note": {
       "type": "string",
       "minLength": 1
+    },
+    "claim_support": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/claimSupport"
+      }
     }
   },
   "$defs": {
@@ -262,6 +268,28 @@
         },
         "disposition": {
           "const": "approved"
+        }
+      }
+    },
+    "claimSupport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "paragraph", "disposition", "note"],
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "paragraph": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "disposition": {
+          "enum": ["supported", "qualified", "removed"]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

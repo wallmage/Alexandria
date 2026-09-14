@@ -6,7 +6,7 @@ Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
-Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 (source_ids, source_family, excerpt writes for bound claims, Sources regeneration, accessed/verified_at, date-line whitespace); a Class A finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: (edit prose; waivable by alx issue --deliver)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
+Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a Class A finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: (edit prose; waivable by alx issue --deliver)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
 
 ## Ledger (`check` b / `validate_ledger`)
 
@@ -96,7 +96,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/source-ids` — F/W
 - **rule:** `source_ids` missing (warn; derived from `source_evidence`) or naming a source the evidence does not carry (hard).
-- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`
+- **fix:** `alx check --fix` (derives `source_ids` from `source_evidence`)
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C5 has extracts on S1,S2; `source_ids` empty.
 
@@ -138,8 +138,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/coverage` — W
 - **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims).
-- **fix:** `alx ledger merge coverage.json`
-- **remove:** `alx claim drop C<n> --apply`
+- **fix:** `alx ledger merge coverage.json` (`--fix` repairs no coverage linkage)
+- **remove:** n/a (Class A)
 - **example:** area `supported` with an empty `claim_ids`.
 
 ### `ledger/synthesis` — F
@@ -150,7 +150,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/reference` — F
 - **rule:** cross-reference between claims, people or sources does not resolve.
-- **fix:** `alx check --fix`
+- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `responds_to_claim_ids: ["C12"]`; no C12.
 
@@ -169,9 +169,9 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `���` inside a quotation.
 
 ### `integrity/quotation-lost` / `fidelity/quotation-lost` — F
-- **rule:** a snapshot quoted span (「」『』“”‘’ or straight "…" ≥ 4 chars) is missing verbatim from the report. `validate_report` emits the `integrity/` spelling, `rewild_gate` the `fidelity/` one.
-- **fix:** `alx snapshot --restore`
-- **remove:** `alx snapshot --restore`
+- **rule:** a snapshot quoted span (「」『』“”‘’ or straight "…" ≥ 4 chars) is missing verbatim from the report. `validate_report` emits the `integrity/` spelling, `rewild_gate` the `fidelity/` one. A span that lived inside a paragraph `claim drop --apply` deleted is an allowed loss and never reported.
+- **fix:** n/a — the restore is the whole repair, printed once as the remove
+- **remove:** `alx snapshot --restore` (restores the snapshot minus the mechanically dropped paragraphs)
 - **example:** 「原始日記」 dropped during humanize.
 
 ### `integrity/encoding` — F
@@ -208,7 +208,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `binding/claim-paragraph` — F
 - **rule:** an `include_in_report` claim maps to zero or to more than one paragraph.
-- **fix:** `alx claim bind C<n> --paragraph N`
+- **fix:** `alx claim bind C<n> --paragraph N` — `N` is the body-paragraph number of `validate_report.split_body_paragraphs`, the one numbering `check`, `claim bind`, `claim drop` and the claim→paragraph table all print.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** ambiguous: candidates 12, 19.
 
@@ -246,7 +246,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `fidelity/context-changed` — F
 - **rule:** the probe is present but a recorded probe-context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing.
-- **fix:** `alx fetch --id S<n> --refresh`, then re-probe.
+- **fix:** `alx fetch --id S<n> --refresh, then alx claim add claims/<file>` — the refresh alone keeps the recorded probe contexts; `claim add` re-confirms the extract and re-binds them.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** S7 paragraph now begins "Correction:".
 
@@ -314,8 +314,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `rewild/checker` — A
 - **rule:** bookkeeping: unreadable files, unsupported language, checker subprocess failure or timeout (120 s under `alx`, 300 s standalone).
-- **fix:** `alx check`
-- **remove:** `alx snapshot --restore`
+- **fix:** `alx issue --deliver`
+- **remove:** n/a (Class A)
 - **example:** Rewild checker timed out after 120 seconds.
 
 ### `rewild/humanization` — A

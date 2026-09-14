@@ -2298,6 +2298,23 @@ def _reference_findings(data):
     family_of = _source_family_index(sources_by_id)
     errors.extend(_source_family_errors(sources_by_id))
 
+    # The schema floor is 20 so CJK notes fit; the script-aware floor keeps a
+    # Latin note substantive (40) without punishing CJK prose (20).
+    for source_id, source in sorted(sources_by_id.items()):
+        note = _text(source.get("accountability_note"))
+        threshold = _prose_minimum(note)
+        if note and len(note) < threshold:
+            errors.append(
+                _f(
+                    "ledger/provenance",
+                    f"{source_id}: accountability_note must say what makes the "
+                    "source accountable (threshold "
+                    f"{threshold}, actual {len(note)}).",
+                    ids=[source_id],
+                    fix=f"alx source set {source_id}",
+                )
+            )
+
     for item in coverage:
         if not isinstance(item, dict) or item.get("status") != "supported":
             continue

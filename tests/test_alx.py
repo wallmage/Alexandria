@@ -370,6 +370,16 @@ class FetchTests(AlxTestCase):
         self.assertEqual("https://example.org/study", source["url"])
         self.assertIn("http://example.org/study", source["aliases"])
 
+    def test_dead_host_keeps_its_real_reason_class(self):
+        """An http:// URL is promoted, so the failure is the https one, named."""
+        self.init()
+        with mock_production_transport(responses()):
+            code, out = self.run_in("fetch", "http://dead.example.org/study")
+        self.assertEqual(1, code)
+        self.assertIn("(dns:", out)
+        self.assertNotIn("plaintext-http", out)
+        self.assertIn("https was tried in place of http://dead.example.org/study", out)
+
     def test_non_http_scheme_is_rejected(self):
         self.init()
         code, out = self.run_in("fetch", "ftp://example.org/study")
@@ -762,6 +772,21 @@ class LedgerMergeTests(AlxTestCase):
         code, out = self.run_in("ledger", "merge", patch)
         self.assertEqual(0, code, out)
         self.assertEqual("P1", self.ledger()["people"][0]["person_id"])
+
+    def test_unmergeable_keys_are_warned_and_ignored(self):
+        """§6.5 forbids only claims/sources; other keys are ignored, not refused."""
+        self.bootstrap()
+        patch = self.write_json(
+            "patch.json",
+            {"brief": {"decision_or_use": "a call"}, "excluded_claims": [], "notes": 1},
+        )
+        code, out = self.run_in("ledger", "merge", patch)
+        self.assertEqual(0, code, out)
+        self.assertIn("WARN: ignored key(s) not merged", out)
+        self.assertIn("excluded_claims, notes", out)
+        ledger = self.ledger()
+        self.assertEqual("a call", ledger["brief"]["decision_or_use"])
+        self.assertNotIn("notes", ledger)
 
 
 class CheckTests(AlxTestCase):
@@ -2367,6 +2392,28 @@ class DeliveryRoundTests(AlxTestCase):
         # `render` refuses unless this hash is the delivered report, so the
         # dropped paragraph can never reach a PDF.
         self.assertEqual(alx.file_sha256(self.dir / "report.md"), receipt["report_sha256"])
+
+    def test_the_auto_drop_prints_one_line_and_one_worklog_entry(self):
+        """H1: the auto-drop reports what it did; it is not a remedy to run."""
+        from contextlib import ExitStack
+
+        issue_tests = self.helper()
+        issue_tests.prepared()
+        with ExitStack() as stack:
+            issue_tests.stub_gates(stack)
+            self.live_sequence(
+                stack, [self.mismatch_result(), self.passed_result()]
+            )
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        drops = [line for line in out.splitlines() if line.startswith("auto-remedy:")]
+        self.assertEqual(1, len(drops), out)
+        self.assertRegex(drops[0], r"^auto-remedy: claim C2 dropped \(.+\)\.$")
+        self.assertNotIn("alx claim drop", out)
+        worklog = (self.dir / "worklog.md").read_text(encoding="utf-8").splitlines()
+        auto = [line for line in worklog if "auto-drop" in line]
+        self.assertEqual(1, len(auto), worklog)
+        self.assertTrue(auto[0].endswith("issue auto-drop C2"), auto[0])
 
     def test_a_stale_source_fidelity_receipt_is_never_hashed_in(self):
         from contextlib import ExitStack

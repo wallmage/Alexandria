@@ -1238,11 +1238,10 @@ def build_parser(invocation=None):
         dest="final_once",
         help="reuse a supplied fidelity result JSON instead of a live re-fetch",
     )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="accepted for CLI convention; this command writes no output file",
-    )
+    # Spec §7.5 gives `--force` one job: overwriting output files. This command
+    # writes none, so the flag is hidden and rejected rather than silently
+    # accepted.
+    parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
@@ -1344,7 +1343,13 @@ def _apply_fidelity_result(path):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     invocation = " ".join(["validate_report.py", *argv])
-    args = build_parser(invocation=invocation).parse_args(argv)
+    parser = build_parser(invocation=invocation)
+    args = parser.parse_args(argv)
+    if args.force:
+        parser.error(
+            "--force is not accepted here: validate_report writes no output "
+            "files, so there is nothing to overwrite."
+        )
     markdown_path = Path(args.markdown)
     try:
         text = markdown_path.read_text(encoding="utf-8")

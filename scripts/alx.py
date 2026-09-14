@@ -1228,9 +1228,14 @@ def _fetch_one(ws, state, ledger, args, url, lines):
     )
     source_id = _next_id(ledger["sources"], "S", "source_id")
     if result.status == "unreachable":
+        # The real class is printed, never relabelled `plaintext-http`: an agent
+        # told the host is dead does not retry it over https.
+        suffix = " — not added"
+        if target != url:
+            suffix += f"; https was tried in place of {url}"
         lines.append(
             f"{source_id} UNREACHABLE ({result.reason_class}: {result.reason})"
-            " — not added"
+            f"{suffix}"
         )
         return False
     if result.status != "ok":
@@ -1722,6 +1727,10 @@ def cmd_claim_drop(args):
 # --------------------------------------------------------------------------
 
 
+#: Spec §6.5: `ledger merge` deep-merges only these keys.
+MERGEABLE_LEDGER_KEYS = frozenset({"brief", "people", "coverage", "synthesis"})
+
+
 def _deep_merge(target, patch):
     for key, value in patch.items():
         if isinstance(value, dict) and isinstance(target.get(key), dict):
@@ -1742,16 +1751,24 @@ def cmd_ledger_merge(args):
             file=sys.stderr,
         )
         return 1
-    for key, value in patch.items():
-        if isinstance(value, list):
-            ledger[key] = value
-        elif isinstance(value, dict):
+    # Spec §6.5: only these four keys merge; anything else is ignored with a WARN.
+    merged = [key for key in patch if key in MERGEABLE_LEDGER_KEYS]
+    ignored = [key for key in patch if key not in MERGEABLE_LEDGER_KEYS]
+    for key in merged:
+        value = patch[key]
+        if isinstance(value, dict):
             _deep_merge(ledger.setdefault(key, {}), value)
         else:
             ledger[key] = value
     ws.save_ledger(ledger)
     findings = adopt(_ledger_findings(ws, ledger))
     lines = [render_grouped(findings)] if findings else ["Ledger merged; no findings."]
+    if ignored:
+        lines.insert(
+            0,
+            f"WARN: ignored key(s) not merged by `ledger merge`: {', '.join(ignored)} "
+            f"(mergeable: {', '.join(sorted(MERGEABLE_LEDGER_KEYS))}).",
+        )
     _emit(ws, state, "ledger merge", ", ".join(patch), lines)
     return 1 if hard_findings(findings) else 0
 
@@ -2984,11 +3001,19 @@ def _auto_remedies(ws, state, ledger, findings, lines):
         for value in item.ids:
             if re.fullmatch(r"C\d+", str(value)) and value not in claim_ids:
                 claim_ids.append(value)
+    dropped = []
     for claim_id in claim_ids:
         if claim_id not in {claim.get("claim_id") for claim in ledger.get("claims", [])}:
             continue
+        paragraph, _co_mapped, _dependents = _drop_plan(ws, state, ledger, claim_id)
         apply_drop(ws, state, ledger, claim_id, "Class-F finding at issue.")
-        lines.append(f"auto-remedy: `{remedy('claim-drop', claim_id=claim_id)}`.")
+        where = f"paragraph {paragraph}" if paragraph else "unmapped"
+        lines.append(f"auto-remedy: claim {claim_id} dropped ({where}).")
+        dropped.append(claim_id)
+    if dropped:
+        stamp = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        with ws.worklog.open("a", encoding="utf-8") as handle:
+            handle.write(f"{stamp} issue auto-drop {', '.join(dropped)}\n")
     return ws.load_state(), ws.load_ledger()
 
 

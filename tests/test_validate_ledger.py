@@ -1498,6 +1498,19 @@ class LivingPersonSafetyTests(unittest.TestCase):
         self.assertIn("needs two independent source families", joined)
         self.assertIn("needs an accountable source", joined)
 
+    def test_accountability_note_has_a_script_aware_prose_floor(self):
+        """H7: schema floor 20 fits CJK; Latin notes still owe 40 characters."""
+        data = living_harm_ledger()
+        data["sources"][0]["accountability_note"] = "A signed docket entry."
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("accountability_note", joined)
+        self.assertIn("threshold 40, actual 22", joined)
+        data["sources"][0]["accountability_note"] = "监管机构在其案卷中公布了签署的执法记录。"
+        self.assertNotIn(
+            "accountability_note", " ".join(validate_ledger.validate_references(data))
+        )
+
     def test_right_of_reply_cannot_be_omitted(self):
         data = living_harm_ledger()
         data["claims"][1]["human_harm_review"]["right_of_reply"] = None

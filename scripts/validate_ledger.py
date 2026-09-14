@@ -3444,10 +3444,10 @@ def validate_references(data):
 def collect_findings(ledger, *, schema_path=None, cache_dir=None):
     schema_file = Path(schema_path) if schema_path else DEFAULT_SCHEMA
     schema = json.loads(schema_file.read_text(encoding="utf-8"))
-    findings = [
-        _f("ledger/schema", item, fix="set field schema_version")
-        for item in validate_schema(ledger, schema)
-    ]
+    findings = []
+    for item in validate_schema(ledger, schema):
+        location, _, detail = item.partition(": ")
+        findings.append(_f("ledger/schema", item, fix=schema_remedy(location, detail)))
     findings.extend(_reference_findings(ledger))
     if cache_dir:
         findings.extend(_offline_probe_findings(ledger, cache_dir))
@@ -3655,6 +3655,72 @@ def claim_findings(claim, ledger, *, cache_dir=None):
             _offline_probe_findings({"claims": [working], "sources": ledger.get("sources")}, cache_dir)
         )
     return findings
+
+
+def _halved_minimums(node):
+    """Return the schema with every prose floor doubled back to the full one."""
+    if isinstance(node, dict):
+        return {
+            key: value * 2
+            if key == "minLength" and isinstance(value, int) and value > 1
+            else _halved_minimums(value)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_halved_minimums(item) for item in node]
+    return node
+
+
+def prose_floor_errors(data, schema):
+    """J3: a schema's string minimums are the CJK floor (spec §7.1 halving).
+
+    Non-CJK prose must meet the full floor, which is twice the schema's, and
+    the message states threshold and actual the way every other length rule
+    does. CJK text is already bounded by the schema itself.
+    """
+    try:
+        from jsonschema import Draft202012Validator
+    except ModuleNotFoundError:
+        return []
+
+    validator = Draft202012Validator(_halved_minimums(schema))
+    errors = []
+    for error in sorted(validator.iter_errors(data), key=lambda item: list(item.path)):
+        if error.validator != "minLength" or not isinstance(error.instance, str):
+            continue
+        if _prose_minimum(error.instance) == _CJK_PROSE_MIN:
+            continue
+        location = ".".join(str(part) for part in error.absolute_path) or "<root>"
+        errors.append(
+            f"{location}: {error.instance!r} is too short "
+            f"(threshold {error.validator_value}, actual {len(error.instance)})"
+        )
+    return errors
+
+
+#: J2: the remedy of a schema finding names the field the schema error named.
+#: `claims.*` re-enters through `claim add`; the four mergeable sections through
+#: `ledger merge`; anything else is edited in `ledger.json`.
+_SCHEMA_REQUIRED_RE = re.compile(r"'([^']+)' is a required property")
+_SCHEMA_PATH_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+MERGEABLE_SECTIONS = ("brief", "people", "coverage", "synthesis")
+
+
+def schema_remedy(location, detail=""):
+    """Return the pinned remedy for one schema error, or "" when it names none."""
+    path = "" if location in {"", "<root>"} or not _SCHEMA_PATH_RE.match(location) else location
+    required = _SCHEMA_REQUIRED_RE.search(detail)
+    if required:
+        field = required.group(1)
+        path = f"{path}.{field}" if path else field
+    if not path or not _SCHEMA_PATH_RE.match(path):
+        return ""
+    section = path.split(".", 1)[0]
+    if section == "claims":
+        return f"set field {path} in claims/*.json, then alx claim add claims/*.json"
+    if section in MERGEABLE_SECTIONS:
+        return f"set field {path} in {section} via alx ledger merge"
+    return f"set field {path} in ledger.json"
 
 
 def validate_schema(data, schema):

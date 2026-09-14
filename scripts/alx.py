@@ -165,6 +165,8 @@ REMEDY_TEMPLATES = {
 CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+$"),
     re.compile(r"^set field \S+ in \S+, then alx claim add \S+$"),
+    # J2: a brief/people/coverage/synthesis field re-enters through the merge.
+    re.compile(r"^set field \S+ in \S+ via alx ledger merge$"),
     re.compile(r"^alx fetch --id S\d+ --refresh, then alx claim add \S+$"),
     re.compile(r"^extend the quote in \S+$"),
     re.compile(r"^extend the report body in report\.md$"),
@@ -510,14 +512,10 @@ def _remedies(item, *, paragraphs=0):
     if family.startswith("rewild/"):
         return remedy("issue-deliver"), ""
     if family == "ledger/schema":
+        # J2: one derivation of the field, shared with T2, so the remedy can
+        # never name a field the schema error did not name.
         location, _, detail = item.message.partition(": ")
-        required = re.search(r"'([^']+)' is a required property", detail)
-        field = required.group(1) if required else location.rsplit(".", 1)[-1]
-        file = "claims/*.json" if location.startswith("claims.") else "ledger.json"
-        return (
-            set_field(field or "schema_version", file),
-            _drop_or_refresh(item),
-        )
+        return validate_ledger.schema_remedy(location, detail), _drop_or_refresh(item)
     # Ruling R10: the fallback for an unmatched family is never `check --fix`.
     if adopted_class(item) == "A":
         return remedy("edit-prose"), ""
@@ -2237,6 +2235,23 @@ def _rewild_findings(ws, state):
     )
 
 
+#: J3: each note's schema, whose string minimums are the CJK floor; the full
+#: non-CJK floor is enforced here and by `content_gate` (spec §7.1 halving).
+REVIEW_SCHEMAS = {
+    "rewild": ROOT / "references" / "rewild-review.schema.json",
+    "content": ROOT / "references" / "content-review.schema.json",
+}
+
+
+def _prose_floor_missing(note, kind):
+    return [
+        f"{error} ({kind}-review schema)"
+        for error in validate_ledger.prose_floor_errors(
+            note, _read_json(REVIEW_SCHEMAS[kind])
+        )
+    ]
+
+
 def _note_completeness(ws, state, ledger, kind):
     """Offline completeness of one review note (spec §6.7f)."""
     path = ws.reviews / f"{kind}.json"
@@ -2266,6 +2281,7 @@ def _note_completeness(ws, state, ledger, kind):
                     f"findings[{index}].disposition (must be resolved for "
                     f"category {item.get('category')})"
                 )
+        missing.extend(_prose_floor_missing(note, kind))
         return missing
     scores = note.get("scores") or {}
     for name in CONTENT_SCORE_KEYS:
@@ -2275,7 +2291,7 @@ def _note_completeness(ws, state, ledger, kind):
         elif entry["score"] < 4:
             missing.append(f"scores.{name}.score (is {entry['score']}, below 4)")
         if not str(entry.get("rationale") or "").strip():
-            missing.append(f"scores.{name}.rationale (20+ chars)")
+            missing.append(f"scores.{name}.rationale (20+ chars, CJK 10+)")
     checks = note.get("checks") or {}
     missing.extend(
         f"checks.{name} (must be true)"
@@ -2323,6 +2339,7 @@ def _note_completeness(ws, state, ledger, kind):
             note, _read_json(content_gate.CONTENT_REVIEW_SCHEMA)
         )
     )
+    missing.extend(_prose_floor_missing(note, kind))
     return missing
 
 
@@ -2655,6 +2672,14 @@ def _status_line(state, findings, remaining):
     )
 
 
+def _length_line(ws, state):
+    """Section (a): the same count, unit and band every length rule uses (R12)."""
+    lang = state.get("lang", "en")
+    count, unit = report_blocks.report_length(ws.report_text(), lang)
+    floor, ceiling, _unit = report_contract.report_length_policy(lang)
+    return f"length {count} {unit}; floor {floor}, ceiling {ceiling}"
+
+
 def cmd_check(args):
     ws, state, ledger = _open(args)
     state["counters"]["check"] = state["counters"].get("check", 0) + 1
@@ -2663,7 +2688,10 @@ def cmd_check(args):
     ledger = ws.load_ledger()
     _elapsed, remaining = _minutes(state)
     rows = sorted(mapping.items(), key=lambda row: _claim_order(row[0]))
-    lines = [f"claim->paragraph ({len(rows)} claims):" if rows else "claim->paragraph: none"]
+    lines = [_length_line(ws, state)]
+    lines.append(
+        f"claim->paragraph ({len(rows)} claims):" if rows else "claim->paragraph: none"
+    )
     lines += [f"  {claim_id}={paragraph}" for claim_id, paragraph in rows]
     lines += [
         render_grouped(findings),
@@ -2696,7 +2724,7 @@ CONTENT_NOTE_GUIDE = (
         "integer 1-5; 4 or more passes",
         "one key each: " + ", ".join(CONTENT_SCORE_KEYS),
     ),
-    ("scores.<key>.rationale", "text, 20+ chars", "why that score"),
+    ("scores.<key>.rationale", "text, 20+ chars (CJK 10+)", "why that score"),
     (
         "checks.<key>",
         "true | false; all must be true",
@@ -2707,7 +2735,7 @@ CONTENT_NOTE_GUIDE = (
         "one object per H2 section, at least one",
         'keys: section_heading, purpose, new_value, evidence_or_reasoning, '
         "limitation_or_tradeoff, contribution_to_governing_question "
-        '(20+ chars each), disposition="keep"',
+        '(10+ CJK / 20+ other chars each), disposition="keep"',
     ),
     (
         "findings[]",
@@ -2727,7 +2755,8 @@ CONTENT_NOTE_GUIDE = (
         "visual_assets[]",
         "may stay empty",
         "keys: path, sha256, usage body|cover|body_and_cover, "
-        'visible_text_and_claims_review (20+ chars), disposition="approved"',
+        'visible_text_and_claims_review (10+ CJK / 20+ other chars), '
+        'disposition="approved"',
     ),
     ("completion_note", "text", "what you checked and what stands"),
     (
@@ -3497,7 +3526,10 @@ def build_parser():
     init.add_argument("--reader", help="file holding the intended reader")
     init.add_argument("--budget-minutes", type=int, default=60)
     init.add_argument("--force", action="store_true")
-    init.set_defaults(handler=cmd_init)
+    init.set_defaults(
+        handler=cmd_init,
+        file_args=(("--subject", "subject"), ("--reader", "reader")),
+    )
 
     fetch = subparsers.add_parser("fetch", help="fetch sources into the cache")
     fetch.add_argument("urls", nargs="*")
@@ -3520,7 +3552,13 @@ def build_parser():
     source_set.add_argument("--published")
     source_set.add_argument("--undated-reason", dest="undated_reason")
     source_set.add_argument("--family-justification", dest="family_justification")
-    source_set.set_defaults(handler=cmd_source_set)
+    source_set.set_defaults(
+        handler=cmd_source_set,
+        file_args=(
+            ("--undated-reason", "undated_reason"),
+            ("--family-justification", "family_justification"),
+        ),
+    )
 
     find = subparsers.add_parser("find", help="verbatim windows from the cache")
     find.add_argument("source_id")
@@ -3539,7 +3577,7 @@ def build_parser():
     claim_sub = claim.add_subparsers(dest="claim_command", required=True)
     claim_add = claim_sub.add_parser("add")
     claim_add.add_argument("files", nargs="+")
-    claim_add.set_defaults(handler=cmd_claim_add)
+    claim_add.set_defaults(handler=cmd_claim_add, file_args=(("FILE", "files"),))
     claim_drop = claim_sub.add_parser("drop")
     claim_drop.add_argument("claim_id")
     claim_drop.add_argument("--apply", action="store_true")
@@ -3554,7 +3592,7 @@ def build_parser():
     ledger_sub = ledger.add_subparsers(dest="ledger_command", required=True)
     ledger_merge = ledger_sub.add_parser("merge")
     ledger_merge.add_argument("patch")
-    ledger_merge.set_defaults(handler=cmd_ledger_merge)
+    ledger_merge.set_defaults(handler=cmd_ledger_merge, file_args=(("PATCH", "patch"),))
 
     snapshot = subparsers.add_parser("snapshot", help="pre-humanization snapshot")
     snapshot.add_argument("--iter", action="store_true")
@@ -3592,9 +3630,34 @@ def build_parser():
     return parser
 
 
+def missing_file_arguments(args):
+    """J1: every FILE-typed argument is a path, checked before any handler runs.
+
+    D10 routes free text through files, so prose passed inline must fail with
+    one line and exit 2, never with a `FileNotFoundError` from deep in a
+    command. `file_args` on each subparser names the flags that take a path.
+    """
+    missing = []
+    for flag, dest in getattr(args, "file_args", ()):
+        value = getattr(args, dest, None)
+        for path in value if isinstance(value, list) else [value]:
+            if path and not Path(path).is_file():
+                missing.append(flag)
+    return missing
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    missing = missing_file_arguments(args)
+    for flag in missing:
+        print(
+            f"{flag} expects a file path; write the text to a file and pass "
+            "the path (D10)",
+            file=sys.stderr,
+        )
+    if missing:
+        return 2
     try:
         return args.handler(args)
     except SystemExit as exc:

@@ -26,7 +26,11 @@ try:
         safe_link_destination,
     )
     from .report_blocks import mask_verification_note, validation_report_blocks
-    from .validate_ledger import validate_references, validate_schema
+    from .validate_ledger import (
+        prose_floor_errors,
+        validate_references,
+        validate_schema,
+    )
     from .validate_report import (
         SOURCE_HEADINGS,
         _foundation_urls,
@@ -51,7 +55,11 @@ except ImportError:
         safe_link_destination,
     )
     from report_blocks import mask_verification_note, validation_report_blocks
-    from validate_ledger import validate_references, validate_schema
+    from validate_ledger import (
+        prose_floor_errors,
+        validate_references,
+        validate_schema,
+    )
     from validate_report import (
         SOURCE_HEADINGS,
         _foundation_urls,
@@ -120,14 +128,15 @@ def _read_json(path, label):
         return None, [f"{label} could not be read: {exc}"]
 
 
-def _schema_errors(data, schema_path, label):
+def _schema_errors(data, schema_path, label, *, prose_floor=False):
     schema, errors = _read_json(schema_path, f"{label} schema")
     if errors:
         return errors
-    return [
-        f"{label} {error}"
-        for error in validate_schema(data, schema)
-    ]
+    found = [f"{label} {error}" for error in validate_schema(data, schema)]
+    if prose_floor:
+        # J3: the schema carries the CJK floor; non-CJK prose owes the full one.
+        found.extend(f"{label} {error}" for error in prose_floor_errors(data, schema))
+    return found
 
 
 def _normalized(text):
@@ -517,7 +526,7 @@ def run_check(
             findings.extend(binding_findings(report_text, ledger))
     if isinstance(review, dict) and review:
         for error in _schema_errors(
-            review, CONTENT_REVIEW_SCHEMA, "Content review:"
+            review, CONTENT_REVIEW_SCHEMA, "Content review:", prose_floor=True
         ):
             findings.append(_finding("content/check", error))
         ledger_language = (
@@ -737,7 +746,9 @@ def run_content_gate(
         _schema_errors(ledger, EVIDENCE_LEDGER_SCHEMA, "Evidence ledger:")
     )
     errors.extend(
-        _schema_errors(review, CONTENT_REVIEW_SCHEMA, "Content review:")
+        _schema_errors(
+            review, CONTENT_REVIEW_SCHEMA, "Content review:", prose_floor=True
+        )
     )
     if not isinstance(ledger, dict) or not isinstance(review, dict):
         return errors

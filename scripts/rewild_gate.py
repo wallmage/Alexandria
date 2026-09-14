@@ -1426,15 +1426,15 @@ def _length_errors(text, report_lang):
             )
         )
     try:
+        from .report_blocks import report_length
         from .report_contract import report_length_policy
     except ImportError:
+        from report_blocks import report_length
         from report_contract import report_length_policy
 
-    if report_lang == "en":
-        count = len(re.findall(r"\b[\w'-]+\b", prose, re.UNICODE))
-    else:
-        count = len(re.findall(r"[A-Za-z0-9\u3400-\u9fff]", prose))
-    minimum, maximum, unit = report_length_policy(report_lang)
+    # R12: one length definition for every consumer (report_blocks).
+    count, unit = report_length(text, report_lang)
+    minimum, maximum, _unit = report_length_policy(report_lang)
     if count < minimum:
         errors.append(
             f"Rewild report has {count} {unit}; minimum is {minimum}."

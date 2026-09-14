@@ -5,9 +5,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.content_gate import (
+    _schema_errors,
+    run_check,
+    run_content_gate,
+    validate_content_receipt,
+)
 from scripts.content_gate import main as content_gate_main
-from scripts.content_gate import run_check, run_content_gate, validate_content_receipt
 from scripts.source_fidelity import issue_source_fidelity_receipt
+from scripts.validate_ledger import prose_floor_errors, validate_schema
 from tests.source_fidelity_transport import mock_production_transport
 
 ROOT = Path(__file__).parents[1]
@@ -1102,3 +1108,81 @@ class ContentGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CjkReviewNoteFloorTests(unittest.TestCase):
+    """J3: the content-review schema carries the CJK floor (spec §7.1 halving).
+
+    A schema cannot be script-aware, so its string minimums are the CJK floor
+    and the gate keeps the full floor for non-CJK prose, with threshold and
+    actual in the message.
+    """
+
+    CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
+    ZH_15 = "1915年残13天没有逐日表。"
+    EN_15 = "Thin, unusable"
+
+    def schema(self):
+        return json.loads(self.CONTENT_REVIEW_SCHEMA.read_text(encoding="utf-8"))
+
+    def note(self, text):
+        return {
+            "section_reviews": [
+                {
+                    "section_heading": "Findings",
+                    "purpose": "Advance the report's governing question fully.",
+                    "new_value": "Adds distinct evidence and decision value.",
+                    "evidence_or_reasoning": "Supported by the bound ledger.",
+                    "limitation_or_tradeoff": text,
+                    "contribution_to_governing_question": "Moves to the judgment.",
+                    "disposition": "keep",
+                }
+            ]
+        }
+
+    def floor_errors(self, text):
+        return [
+            error
+            for error in prose_floor_errors(self.note(text), self.schema())
+            if "limitation_or_tradeoff" in error
+        ]
+
+    def schema_errors(self, text):
+        return [
+            error
+            for error in validate_schema(self.note(text), self.schema())
+            if "limitation_or_tradeoff" in error
+        ]
+
+    def test_chinese_note_of_15_characters_passes_schema_and_floor(self):
+        self.assertEqual(15, len(self.ZH_15))
+        self.assertEqual([], self.schema_errors(self.ZH_15))
+        self.assertEqual([], self.floor_errors(self.ZH_15))
+
+    def test_english_note_of_15_characters_fails_the_full_floor(self):
+        self.assertEqual(14, len(self.EN_15))
+        self.assertEqual([], self.schema_errors(self.EN_15))
+        errors = self.floor_errors(self.EN_15)
+        self.assertTrue(
+            any("threshold 20, actual 14" in error for error in errors), errors
+        )
+
+    def test_the_gate_reports_the_floor_with_the_schema_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "content-review.schema.json"
+            path.write_text(
+                self.CONTENT_REVIEW_SCHEMA.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            zh = _schema_errors(
+                self.note(self.ZH_15), path, "Content review:", prose_floor=True
+            )
+            en = _schema_errors(
+                self.note(self.EN_15), path, "Content review:", prose_floor=True
+            )
+        self.assertEqual(
+            [], [error for error in zh if "limitation_or_tradeoff" in error]
+        )
+        self.assertTrue(
+            any("limitation_or_tradeoff" in error for error in en), en
+        )

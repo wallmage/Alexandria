@@ -4,9 +4,9 @@ import re
 from dataclasses import dataclass
 
 try:
-    from .report_contract import canonical_visible_text
+    from .report_contract import canonical_visible_text, report_length_policy
 except ImportError:
-    from report_contract import canonical_visible_text
+    from report_contract import canonical_visible_text, report_length_policy
 
 SOURCE_HEADINGS = frozenset(
     {
@@ -401,3 +401,41 @@ def mask_verification_note(text):
             for character in text[block.start : block.end]
         )
     return "".join(masked)
+
+
+def report_body_prose(text):
+    """R12: the one visible prose body the length policy is measured on.
+
+    Front matter (the H1 and the standfirst/date blockquote under it), every
+    other heading, the Sources section and the machine-written Verification
+    note are not the writer's measured body; tables, lists and pull quotes are.
+    """
+    ranges = bibliography_ranges(text)
+    prefixes = tuple(VERIFICATION_NOTE_PREFIXES.values())
+    pieces = []
+    for block in report_blocks(text):
+        if block.kind == "heading":
+            continue
+        if any(start <= block.start < end for start, end in ranges):
+            continue
+        if block.text.startswith(prefixes):
+            continue
+        if block.kind == "blockquote" and not pieces:
+            continue
+        pieces.append(block.text)
+    return "\n\n".join(pieces)
+
+
+def report_length(text, lang):
+    """R12: the one length definition -> (count, unit).
+
+    `validate_report`'s integrity check, `rewild_gate`'s floor/ceiling, `alx
+    check` and SKILL.md all count here, so a report can never be long enough
+    for one of them and short for another. Words for `en`, non-whitespace
+    characters for zh-CN/zh-HK, unit label from `report_length_policy`.
+    """
+    _minimum, _maximum, unit = report_length_policy(lang)
+    body = report_body_prose(text)
+    if unit == "words":
+        return len(re.findall(r"\b[\w'-]+\b", body, re.UNICODE)), unit
+    return len(re.sub(r"\s+", "", body)), unit

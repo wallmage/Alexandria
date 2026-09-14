@@ -63,15 +63,24 @@ def group(findings):
     return grouped
 
 
-def render_grouped(findings, *, per_family=5):
+CLASS_LABELS = {"F": " (F)", "A": " (A, waivable by --deliver)"}
+
+
+def render_grouped(findings, *, per_family=5, with_class=False):
     records = [item for item in findings if is_finding(item)]
     hard = [item for item in records if item.severity == "hard"]
     warn = [item for item in records if item.severity == "warn"]
     lines = [f"=== HARD {len(hard)} (blocks issue) ==="]
 
+    def label(members):
+        if not with_class:
+            return ""
+        classes = {item.klass for item in members}
+        return CLASS_LABELS["F" if "F" in classes else "A"]
+
     def emit(items):
         for family, members in group(items).items():
-            lines.append(f"[{family}] {len(members)}")
+            lines.append(f"[{family}] {len(members)}{label(members)}")
             shown = members[:per_family]
             for item in shown:
                 prefix = f"{', '.join(item.ids)}: " if item.ids else ""
@@ -88,7 +97,11 @@ def render_grouped(findings, *, per_family=5):
     emit(hard)
     lines.append(f"=== WARN {len(warn)} ===")
     emit(warn)
-    lines.append(f"=== STATUS: {len(hard)} hard, {len(warn)} warn ===")
+    split = ""
+    if with_class:
+        class_f = len([item for item in hard if item.klass == "F"])
+        split = f" ({class_f} Class F, {len(hard) - class_f} Class A)"
+    lines.append(f"=== STATUS: {len(hard)} hard{split}, {len(warn)} warn ===")
     return "\n".join(lines)
 
 

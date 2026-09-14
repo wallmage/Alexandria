@@ -6,6 +6,8 @@ Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
+Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 (source_ids, source_family, excerpt writes for bound claims, Sources regeneration, accessed/verified_at, date-line whitespace); a Class A finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: (edit prose; waivable by alx issue --deliver)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
+
 ## Ledger (`check` b / `validate_ledger`)
 
 ### `ledger/quantity` — F
@@ -76,14 +78,14 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 ### `ledger/triangulation` — F
 - **rule:** `triangulation.status`/`rationale` contradicts the merged source families.
-- **fix:** `alx check --fix` (recomputes from the ledger).
+- **fix:** set field triangulation in claims/<file>
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `status: met` with one family.
 
 ### `ledger/host-conflict` — F
 - **rule:** sources presented as independent share one host; reported in one pass with provenance per id.
-- **fix:** `alx source set S<n> --provenance P`
-- **remove:** `alx fetch --id S<n> --refresh`
+- **fix:** `alx source set S<n> --family-justification FILE` (free text via file, D10)
+- **remove:** n/a (the justification is the repair)
 - **example:** S3 and S7 both on `example.org`.
 
 ### `ledger/source-family` — W
@@ -94,14 +96,14 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 ### `ledger/source-ids` — F/W
 - **rule:** `source_ids` missing (warn; derived from `source_evidence`) or naming a source the evidence does not carry (hard).
-- **fix:** `alx check --fix`
+- **fix:** set field supports in claims/<file>
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C5 has extracts on S1,S2; `source_ids` empty.
 
 ### `ledger/https` — F
 - **rule:** `source.url` is not https (aliases may be http).
-- **fix:** `alx fetch <https url>` and re-point the claim.
-- **remove:** `alx fetch --id S<n> --refresh`
+- **fix:** `alx fetch <https form of the url>` (`--refresh` re-fetches the http url and fails again).
+- **remove:** n/a
 - **example:** `http://records.example.org/a`.
 
 ### `ledger/freshness` — F
@@ -156,13 +158,13 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 ### `integrity/control-chars` — F
 - **rule:** C0 except `\t\n\r` in the report or the snapshot.
-- **fix:** before snapshot, delete the bad bytes in `report.md`; after `alx snapshot`, `alx snapshot --restore`.
+- **fix:** n/a (the restore is the repair; `alx` prints one remedy, never the same one twice)
 - **remove:** `alx snapshot --restore`
 - **example:** U+0001 in paragraph 12 (limit 0).
 
 ### `integrity/replacement-char` — F
 - **rule:** U+FFFD in the report (mis-decoded paste).
-- **fix:** `alx snapshot --restore`
+- **fix:** n/a (printed as the remove remedy only)
 - **remove:** `alx snapshot --restore`
 - **example:** `���` inside a quotation.
 
@@ -180,20 +182,20 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 ### `integrity/structure` — A
 - **rule:** missing H1, standfirst blockquote, or Sources H2 last.
-- **fix:** `alx check --fix`
+- **fix:** (edit prose; waivable by alx issue --deliver) — `--fix` writes no headings.
 - **remove:** n/a
 - **example:** two H1 headings.
 
 ### `integrity/date-line` — A
 - **rule:** strict-locale date line absent or ≠ `ledger.report_date`.
-- **fix:** `alx check --fix`
+- **fix:** `alx check --fix` when only the whitespace of the line under the H1 is wrong; otherwise (placement or format) (edit prose; waivable by alx issue --deliver).
 - **remove:** n/a
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.
 
 ### `integrity/length` — F
 - **rule:** report length outside the validator's band (en 7,500–15,000 words; zh 5,000–10,000 non-ws chars). Below the floor arrives as a warning (Class A); above the ceiling is hard.
-- **fix:** extend the report body in report.md.
-- **remove:** delete paragraph `<n>` of report.md
+- **fix:** extend the report body in report.md (below the floor; Class A).
+- **remove:** delete paragraph `<n>` of report.md (above the ceiling)
 - **example:** 16,400 words; ceiling 15,000.
 
 ## Binding (`check` c / `validate_report`, `alx`)
@@ -212,7 +214,7 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 ### `binding/excerpt-missing` — F
 - **rule:** an `include_in_report` claim has an empty `report_excerpts`.
-- **fix:** `alx check --fix` (writes the excerpt for unambiguous mappings).
+- **fix:** `alx claim bind C<n> --paragraph N` — `--fix` writes the excerpt of a bound claim in the same run, so a surviving finding is unbound.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C6 bound to paragraph 8, `report_excerpts: []`.
 
@@ -251,13 +253,13 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 ### `fidelity/cache-missing` — F
 - **rule:** an extract probe has no `sources/S<n>.txt`.
 - **fix:** `alx fetch --id S<n> --refresh`
-- **remove:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a
 - **example:** S4 cache file absent.
 
 ### `fidelity/cache-detached` — F
 - **rule:** `sources/S<n>.meta.json` url ≠ ledger url, or `text_sha256` ≠ sha of `sources/S<n>.txt`.
 - **fix:** `alx fetch --id S<n> --refresh`
-- **remove:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a
 - **example:** S1.txt hand-edited after the fetch.
 
 ### `fidelity/unreachable` — F offline / A online
@@ -294,20 +296,20 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 ### `rewild/ai-vocabulary` — A
 - **rule:** the checker's "AI vocabulary" section, length-scaled, counted on quote-masked prose.
-- **fix:** rewrite the flagged sentences, then `alx check`.
-- **remove:** `alx snapshot --restore`
+- **fix:** (edit prose; waivable by alx issue --deliver)
+- **remove:** n/a — no Class A finding carries a remove remedy (ruling R8).
 - **example:** "delve" ×7 at 8,000 words.
 
 ### `rewild/style` — A (warn)
 - **rule:** every other checker section — Rhythm, Openers, Serial enumeration, Paragraphs, Paragraph closers, Punctuation.
-- **fix:** rewrite the flagged sentences, then `alx check`.
-- **remove:** `alx snapshot --restore`
+- **fix:** (edit prose; waivable by alx issue --deliver)
+- **remove:** n/a (ruling R8).
 - **example:** 9 consecutive sentences open with the subject.
 
 ### `rewild/length` — A
 - **rule:** length floor or ceiling, language and script checks (en 7,500–15,000 words; zh 5,000–10,000 non-ws chars).
-- **fix:** `alx check` after extending the report body in report.md.
-- **remove:** `alx snapshot --restore`
+- **fix:** (edit prose; waivable by alx issue --deliver)
+- **remove:** n/a (ruling R8).
 - **example:** report has 68 words; minimum is 7,500.
 
 ### `rewild/checker` — A

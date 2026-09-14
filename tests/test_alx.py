@@ -128,6 +128,7 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^extend the quote in \S+$"),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
+    re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
 )
 
 
@@ -1406,6 +1407,220 @@ class SkillRunbookTests(unittest.TestCase):
             with self.subTest(command=line):
                 self.assertNotIn("$", command)
                 parser.parse_args(shlex.split(command))
+
+
+class CheckOutputTests(AlxTestCase):
+    """Spec §6.7/§6.10: the printed line must be true for a weak model."""
+
+    def item(self, **kwargs):
+        base = dict(
+            family="ledger/quantity",
+            severity="hard",
+            klass="F",
+            ids=["C1", "S1"],
+            message="C1: quantity '1916' is not in the extract",
+            fix="alx find S1 1916",
+            remove="alx claim drop C1 --apply",
+        )
+        base.update(kwargs)
+        return alx.Finding(**base)
+
+    def rendered(self, item):
+        return alx.render_grouped(alx.adopt([item]))
+
+    def finding_lines(self, text):
+        return [line for line in text.splitlines() if line.startswith("  ")]
+
+    def grouped_block(self, text):
+        lines = text.splitlines()
+        start = next(i for i, line in enumerate(lines) if line.startswith("=== HARD"))
+        end = next(i for i, line in enumerate(lines) if line.startswith("=== STATUS:"))
+        return "\n".join(lines[start:end])
+
+    # item 1 --------------------------------------------------------------
+    def test_producer_remedies_are_printed_once_and_kept(self):
+        rendered = self.rendered(self.item())
+        self.assertEqual(1, rendered.count("alx find S1 1916"), rendered)
+        self.assertEqual(1, rendered.count("alx claim drop C1 --apply"), rendered)
+        self.assertNotIn("alx find S1 C1", rendered)
+
+    def test_a_generic_remedy_is_added_only_when_the_producer_has_none(self):
+        rendered = self.rendered(
+            self.item(
+                family="ledger/reference",
+                ids=["C23", "C10", "C23"],
+                message="Analysis has circular support: C23 -> C10 -> C23",
+                fix="",
+                remove="",
+            )
+        )
+        self.assertIn("Fix: set field supports in claims/*.json", rendered)
+        self.assertIn("Remove: `alx claim drop C23 --apply`", rendered)
+        self.assertNotIn("alx check --fix", rendered)
+
+    def test_an_embedded_remedy_sentence_is_not_printed_twice(self):
+        rendered = self.rendered(
+            self.item(
+                message=(
+                    "C1: quantity '1916' is not in the extract. "
+                    "Remove: `alx claim drop C1 --apply`."
+                )
+            )
+        )
+        self.assertEqual(1, rendered.count("alx claim drop C1 --apply"), rendered)
+
+    def test_the_same_remedy_is_never_both_fix_and_remove(self):
+        rendered = self.rendered(
+            self.item(
+                family="fidelity/quotation-lost",
+                ids=[],
+                message="Quoted span missing from the report: 「原始日記」",
+                fix="alx snapshot --restore",
+                remove="alx snapshot --restore",
+            )
+        )
+        self.assertEqual(1, rendered.count("alx snapshot --restore"), rendered)
+
+    def test_https_and_host_conflict_get_the_remedy_that_works(self):
+        https = self.rendered(
+            self.item(
+                family="ledger/https",
+                ids=["S5"],
+                message="S5: source.url must be https (actual: http://jds.example.cn/a)",
+                fix="alx fetch --id S5 --refresh",
+                remove="",
+            )
+        )
+        self.assertIn("Fix: alx fetch https://jds.example.cn/a", https)
+        self.assertNotIn("--provenance", https)
+        conflict = self.rendered(
+            self.item(
+                family="ledger/host-conflict",
+                ids=["S12", "S14"],
+                message=(
+                    "Sources on host www.example.com declare different "
+                    "independence classes without a family_justification"
+                ),
+                fix="alx source set S12",
+                remove="",
+            )
+        )
+        self.assertIn("--family-justification", conflict)
+        self.assertNotIn("--provenance", conflict)
+
+    def test_find_is_never_printed_with_a_claim_id_as_the_keyword(self):
+        rendered = self.rendered(self.item(fix="", remove=""))
+        self.assertNotIn("alx find S1 C1", rendered)
+        self.assertIn("alx find S1 1916", rendered)
+        bare = self.rendered(
+            self.item(ids=["C1", "S1"], message="C1: quantity is uncovered", fix="", remove="")
+        )
+        self.assertNotIn("alx find", bare)
+        self.assertIn("extend the quote in claims/*.json", bare)
+
+    # addendum ------------------------------------------------------------
+    def test_a_class_a_finding_never_carries_a_remove_remedy(self):
+        for family in ("rewild/length", "rewild/ai-vocabulary", "rewild/style"):
+            with self.subTest(family=family):
+                rendered = self.rendered(
+                    self.item(
+                        family=family,
+                        klass="A",
+                        ids=[],
+                        message="the report is below the length floor",
+                        fix="",
+                        remove="",
+                    )
+                )
+                self.assertNotIn("Remove:", rendered)
+                self.assertNotIn("alx snapshot --restore", rendered)
+                self.assertIn(
+                    "Fix: (edit prose; waivable by alx issue --deliver)", rendered
+                )
+
+    # item 2 --------------------------------------------------------------
+    def break_the_date_line_and_the_supports(self):
+        expected = alx.report_contract.localized_date("en", None)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        report = report.replace(f"> {expected}\n", "").replace(
+            "## Findings", f"{expected}\n\n## Findings"
+        )
+        (self.dir / "report.md").write_text(report, encoding="utf-8")
+        ledger = self.ledger()
+        by_id = {claim["claim_id"]: claim for claim in ledger["claims"]}
+        by_id["C1"]["supports"] = ["C2"]
+        by_id["C2"]["supports"] = ["C1"]
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def test_check_fix_is_only_advertised_where_it_repairs_and_converges(self):
+        self.bootstrap()
+        self.break_the_date_line_and_the_supports()
+        _code, first = self.run_in("check", "--fix")
+        self.assertIn("integrity/date-line", first)
+        self.assertIn("ledger/reference", first)
+        self.assertNotIn("Fix: alx check --fix", first)
+        _code, second = self.run_in("check", "--fix")
+        self.assertEqual(self.grouped_block(first), self.grouped_block(second))
+
+    def test_an_unrepairable_date_line_is_class_a_with_a_prose_remedy(self):
+        self.bootstrap()
+        self.break_the_date_line_and_the_supports()
+        _code, out = self.run_in("check", "--fix")
+        line = next(
+            line for line in self.finding_lines(out) if "Date line" in line
+        )
+        self.assertIn("(edit prose; waivable by alx issue --deliver)", line)
+        self.assertIn("[integrity/date-line] 1 (A, waivable by --deliver)", out)
+
+    # item 3 --------------------------------------------------------------
+    def test_family_headers_and_the_status_line_carry_the_class(self):
+        self.bootstrap()
+        (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
+        _code, out = self.run_in("check")
+        self.assertRegex(out, r"\[fidelity/cache-detached\] \d+ \(F\)")
+        self.assertRegex(out, r"=== STATUS: \d+ hard \(\d+ Class F, \d+ Class A\), \d+ warn ===")
+
+    # item 4 --------------------------------------------------------------
+    def test_the_claim_paragraph_table_lists_every_included_claim(self):
+        self.bootstrap()
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        second = self.ledger()["sources"][1]["url"]
+        report = report.replace(f"[registry note]({second})", "registry note", 1)
+        (self.dir / "report.md").write_text(report, encoding="utf-8")
+        _code, out = self.run_in("check")
+        self.assertIn("C1=1", out)
+        self.assertIn("C2=unbound (no candidate)", out)
+
+    # item 5 --------------------------------------------------------------
+    def test_source_set_records_a_family_justification_from_a_file(self):
+        self.bootstrap()
+        path = self.root / "family.txt"
+        path.write_text(
+            "The two pages are separately edited desks of the same host.\n",
+            encoding="utf-8",
+        )
+        code, out = self.run_in(
+            "source", "set", "S1", "--family-justification", path
+        )
+        self.assertEqual(0, code, out)
+        source = self.ledger()["sources"][0]
+        self.assertEqual(
+            "The two pages are separately edited desks of the same host.",
+            source["family_justification"],
+        )
+
+    # item 6 --------------------------------------------------------------
+    def test_no_finding_line_is_longer_than_300_characters(self):
+        rendered = self.rendered(
+            self.item(message="C1: quantity '1916' is uncovered. " + "窗" * 400)
+        )
+        for line in self.finding_lines(rendered):
+            self.assertLessEqual(len(line), alx.MAX_FINDING_CHARS, line)
+        self.assertIn("…", rendered)
+        self.assertIn("Fix: alx find S1 1916", rendered)
+        self.assertIn("Remove: `alx claim drop C1 --apply`", rendered)
 
 
 class RemedyTests(AlxTestCase):

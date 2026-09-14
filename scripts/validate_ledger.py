@@ -2446,18 +2446,24 @@ def _reference_findings(data):
                         remove=_drop(claim_id),
                     )
                 )
+        rationale = (
+            _text(person_claim_assessment.get("rationale"))
+            if isinstance(person_claim_assessment, dict)
+            else ""
+        )
         if protected_people and (
             not isinstance(person_claim_assessment, dict)
             or person_claim_assessment.get("classification")
             != person_claim_role
-            or len(_text(person_claim_assessment.get("rationale")))
-            < _prose_minimum(person_claim_assessment.get("rationale"))
+            or len(rationale) < _prose_minimum(rationale)
         ):
             errors.append(
                 _f(
                     "ledger/person",
                     f"{claim_id}: protected-person claim needs a substantive "
-                    "person_claim_assessment matching person_claim_role.",
+                    "person_claim_assessment matching person_claim_role "
+                    f"(rationale threshold {_prose_minimum(rationale)}, actual "
+                    f"{len(rationale)}).",
                     ids=[claim_id],
                     fix="set field person_claim_assessment",
                     remove=_drop(claim_id),
@@ -2950,12 +2956,14 @@ def _reference_findings(data):
                     privacy_basis
                     not in {"self_disclosed", "court_or_regulator_record"}
                     or not valid_privacy_source
-                    or len(relevance) < 40
+                    or len(relevance) < _prose_minimum(relevance)
                 ):
                     errors.append(
                         f"{claim_id}: sensitive private information needs "
                         "self-disclosure or a court/regulator record plus a "
-                        "specific governing-question justification."
+                        "specific governing-question justification "
+                        f"(threshold {_prose_minimum(relevance)}, actual "
+                        f"{len(relevance)})."
                     )
         for relation in ("supports", "contradicts"):
             related_claims = claim.get(relation, [])

@@ -398,7 +398,7 @@
         "family_justification": {
           "description": "Why this source is genuinely independent of the other sources sharing its host or registrable domain. Required to override the domain-derived family or to carry a different provenance class from a same-host source.",
           "type": ["string", "null"],
-          "minLength": 40
+          "minLength": 20
         },
         "roles": {
           "type": "array",
@@ -426,7 +426,7 @@
         },
         "accountability_note": {
           "type": ["string", "null"],
-          "minLength": 40
+          "minLength": 20
         },
         "limitations": {
           "type": ["string", "null"]
@@ -690,7 +690,7 @@
         },
         "governing_question_relevance": {
           "type": "string",
-          "minLength": 40
+          "minLength": 20
         }
       }
     },
@@ -1021,7 +1021,7 @@
               },
               "derivation": {
                 "type": "string",
-                "minLength": 40
+                "minLength": 20
               }
             }
           }
@@ -1102,7 +1102,7 @@
             },
             "rationale": {
               "type": "string",
-              "minLength": 40
+              "minLength": 20
             }
           }
         },

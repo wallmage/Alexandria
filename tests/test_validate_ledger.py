@@ -3568,3 +3568,64 @@ class OfflineContextChangeTests(unittest.TestCase):
             families = [item.family for item in findings]
             self.assertIn("fidelity/context-changed", families)
             self.assertNotIn("fidelity/mismatch", families)
+
+
+class CjkRationaleMinimumTests(unittest.TestCase):
+    """Spec §7.1: rationale minimums are halved for CJK prose (40 -> 20).
+
+    The schema cannot be script-aware, so it carries the CJK floor of 20 and
+    `validate_ledger` keeps the 40-character floor for non-CJK prose.
+    """
+
+    ZH_29 = "本主張指控在世主要當事人涉及刑事不當行為，因此需完整審查。"
+    ZH_15 = "本主張指控刑事不當行為，需複核"
+    EN_30 = "Living subject alleged fraud x"
+
+    def _ledger(self, rationale):
+        data = living_harm_ledger()
+        data["claims"][-1]["person_claim_assessment"]["rationale"] = rationale
+        return data
+
+    def _schema(self):
+        return json.loads(
+            (ROOT / "references" / "evidence-ledger.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def _person_errors(self, rationale):
+        return [
+            error
+            for error in validate_ledger.validate_references(self._ledger(rationale))
+            if "person_claim_assessment" in error
+        ]
+
+    def _schema_errors(self, rationale):
+        return [
+            error
+            for error in validate_ledger.validate_schema(
+                self._ledger(rationale), self._schema()
+            )
+            if "rationale" in error
+        ]
+
+    def test_chinese_rationale_of_29_characters_passes_schema_and_validator(self):
+        self.assertEqual(29, len(self.ZH_29))
+        self.assertEqual([], self._schema_errors(self.ZH_29))
+        self.assertEqual([], self._person_errors(self.ZH_29))
+
+    def test_chinese_rationale_of_15_characters_fails_both(self):
+        self.assertEqual(15, len(self.ZH_15))
+        self.assertTrue(self._schema_errors(self.ZH_15))
+        errors = self._person_errors(self.ZH_15)
+        self.assertTrue(
+            any("threshold 20, actual 15" in error for error in errors), errors
+        )
+
+    def test_english_rationale_of_30_characters_fails_the_validator(self):
+        self.assertEqual(30, len(self.EN_30))
+        self.assertEqual([], self._schema_errors(self.EN_30))
+        errors = self._person_errors(self.EN_30)
+        self.assertTrue(
+            any("threshold 40, actual 30" in error for error in errors), errors
+        )

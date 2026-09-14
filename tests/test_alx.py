@@ -1992,6 +1992,36 @@ class IntegrationHoleTests(AlxTestCase):
             with self.subTest(path=path):
                 self.assertIn(path, out)
 
+    def test_a_producer_remedy_names_the_real_claim_file(self):
+        rendered = alx.render_grouped(
+            alx.adopt(
+                [
+                    alx.Finding(
+                        family="ledger/reference",
+                        severity="hard",
+                        klass="F",
+                        ids=["C1", "P3"],
+                        message=(
+                            "C1: claim names registered person P3 but does "
+                            "not link that person_id."
+                        ),
+                        fix=(
+                            "set field person_ids in claims/*.json, "
+                            "then alx claim add claims/*.json"
+                        ),
+                        remove="",
+                    )
+                ],
+                claim_files={"C1": "claims/c1.json"},
+            )
+        )
+        self.assertIn(
+            "set field person_ids in claims/c1.json, "
+            "then alx claim add claims/c1.json",
+            rendered,
+        )
+        self.assertNotIn("set field supports", rendered)
+
     # addendum ------------------------------------------------------------
     def test_a_claim_field_remedy_names_the_claim_add_round_trip(self):
         rendered = alx.render_grouped(

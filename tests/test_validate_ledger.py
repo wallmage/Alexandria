@@ -3701,3 +3701,57 @@ class SchemaRemedyTests(unittest.TestCase):
                     or (location != "<root>" and field.startswith(f"{location}.")),
                     item.fix,
                 )
+
+
+class ClaimRemedyTests(unittest.TestCase):
+    def _fixes(self, data, needle):
+        return [
+            item.fix
+            for item in validate_ledger.collect_findings(data)
+            if needle in item.message
+        ]
+
+    def test_unlinked_person_remedy_names_person_ids(self):
+        data = living_harm_ledger()
+        claim = data["claims"][-1]
+        claim["claim"] = "Alex Doe embezzled public funds."
+        claim["person_ids"] = []
+        claim.pop("person_claim_role", None)
+        claim["human_harm_review"] = None
+        self.assertEqual(
+            [
+                "set field person_ids in claims/*.json, "
+                "then alx claim add claims/*.json"
+            ],
+            self._fixes(data, "does not link that person_id"),
+        )
+
+    def test_duplicate_evidence_remedy_names_source_evidence(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["source_evidence"] = [
+            {"source_id": "S1", "extract_or_location": "The registry records it."},
+            {"source_id": "S1", "extract_or_location": "A duplicate record."},
+        ]
+        self.assertEqual(
+            [
+                "set field source_evidence in claims/*.json, "
+                "then alx claim add claims/*.json"
+            ],
+            self._fixes(data, "duplicate source_evidence for S1"),
+        )
+
+    def test_month_day_extract_remedy_asks_for_the_year(self):
+        extract = "登記簿は12月10日に決定を記録した。"
+        data = ledger_with_fact(
+            claim="The registry recorded the decision on 1936-12-10.",
+            extract_or_location=extract,
+            source_evidence=[{"source_id": "S2", "extract_or_location": extract}],
+        )
+        self.assertEqual(
+            [
+                "add a second extract from S2 that states the year "
+                "(alx find S2 1936), or reword the claim to the source's "
+                "form (12月10日)"
+            ],
+            self._fixes(data, "quantity '1936-12-10' appears in claim"),
+        )

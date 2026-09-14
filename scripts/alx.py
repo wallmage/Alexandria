@@ -169,6 +169,13 @@ CLOSED_IMPERATIVES = (
     # J2: a brief/people/coverage/synthesis field re-enters through the merge.
     re.compile(r"^set field \S+ in \S+ via alx ledger merge$"),
     re.compile(r"^alx fetch --id S\d+ --refresh, then alx claim add \S+$"),
+    # A month-day extract cannot be found under the claim's full date: the
+    # repair is a second extract stating the year, or the source's own wording.
+    re.compile(
+        r"^add a second extract from S\d+ that states the year "
+        r"\(alx find S\d+ [^()]+\), or reword the claim to the source's "
+        r"form \(.+\)$"
+    ),
     re.compile(r"^extend the quote in \S+$"),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
@@ -602,6 +609,12 @@ def _named_file(item):
     )
 
 
+def _with_claim_file(text, item, claim_files):
+    """K5: a producer remedy names the real claim input when `alx` knows it."""
+    named = (claim_files or {}).get(_pick_id(item, "C"))
+    return str(text).replace("claims/*.json", named) if text and named else text
+
+
 def _completed_remedy(text, item):
     """`set field x` from a producer becomes the closed imperative in full."""
     match = _BARE_SET_FIELD.match(str(text or "").strip())
@@ -664,7 +677,7 @@ def adopt(findings, *, online=False, paragraphs=0, claim_files=None):
             continue
         seen.add(key)
         klass = adopted_class(item, online=online)
-        fix = _completed_remedy(item.fix, item)
+        fix = _with_claim_file(_completed_remedy(item.fix, item), item, claim_files)
         fix = fix if valid_remedy(fix) else ""
         remove = _completed_remedy(getattr(item, "remove", ""), item)
         remove = remove if valid_remedy(remove) else ""

@@ -965,6 +965,31 @@ def _quantity_granularity_only(claim_forms, evidence_forms):
     return True
 
 
+def _claim_field_fix(field):
+    """A claim field re-enters the ledger only through `claim add`."""
+    return f"set field {field} in claims/*.json, then alx claim add claims/*.json"
+
+
+def _date_fragment_offer(claim_forms, evidence_rows):
+    """Return (year, source form) when an extract offers the claim's date
+    without its year: `alx find` on the full date would match nothing."""
+    for form in sorted(claim_forms):
+        parts = _parse_date_form(form)
+        if not parts or not all(parts):
+            continue
+        year, month, day = parts
+        fragment = f"d:*-{int(month):02d}-{int(day):02d}"
+        for entry in evidence_rows or ():
+            if not isinstance(entry, dict):
+                continue
+            for display, _, forms, _ in _scan_quantities(
+                entry.get("extract_or_location")
+            ):
+                if fragment in forms:
+                    return year, display
+    return None
+
+
 def _scan_quantities(text):
     """Yield (display, claim_forms, evidence_forms, is_word) for a string.
 
@@ -1685,14 +1710,28 @@ def _evidence_coverage_findings(claim, dated_fields=(), inherited_evidence=""):
                 "extracts offer " + (", ".join(sorted(evidence_forms)) or "none")
             )
         fix = f"alx find {find_id} {display}" if find_id else "set field extract_or_location"
+        detail = (
+            f"Quote the figure from the source via `{fix}`, or record it in "
+            "derived_assertions with its derivation."
+        )
+        offer = _date_fragment_offer(
+            claim_forms, evidence_rows if isinstance(evidence_rows, list) else []
+        )
+        if offer and find_id:
+            offer_year, offer_form = offer
+            fix = (
+                f"add a second extract from {find_id} that states the year "
+                f"(alx find {find_id} {offer_year}), or reword the claim to "
+                f"the source's form ({offer_form})"
+            )
+            detail = "The extract states the month and day but not the year."
         errors.append(
             _f(
                 "ledger/quantity",
                 f"{claim_id}: quantity '{display}' appears in claim but not in "
                 f"extract_or_location (claim {', '.join(sorted(claim_forms))}; "
-                f"{'; '.join(offered)}). Quote the figure from the source via "
-                f"`{fix}`, or record it in derived_assertions with its "
-                f"derivation. Remove: `{_drop(claim_id)}`.",
+                f"{'; '.join(offered)}). {detail} "
+                f"Remove: `{_drop(claim_id)}`.",
                 ids=_ids_in(f"{claim_id} {find_id or ''}"),
                 fix=fix,
                 remove=_drop(claim_id),
@@ -2387,7 +2426,12 @@ def _reference_findings(data):
                 errors.append(f"{claim_id} references unknown source {source_id}.")
         for source_id in _duplicates(evidence_ids):
             errors.append(
-                f"{claim_id}: duplicate source_evidence for {source_id}."
+                _f(
+                    "ledger/reference",
+                    f"{claim_id}: duplicate source_evidence for {source_id}.",
+                    fix=_claim_field_fix("source_evidence"),
+                    remove=_drop(claim_id),
+                )
             )
         for source_id in evidence_ids:
             if source_id not in source_links:
@@ -2501,8 +2545,13 @@ def _reference_findings(data):
                 and person_id not in person_links
             ):
                 errors.append(
-                    f"{claim_id}: claim names registered person {person_id} "
-                    "but does not link that person_id."
+                    _f(
+                        "ledger/reference",
+                        f"{claim_id}: claim names registered person {person_id} "
+                        "but does not link that person_id.",
+                        fix=_claim_field_fix("person_ids"),
+                        remove=_drop(claim_id),
+                    )
                 )
         if harmful_text:
             if (

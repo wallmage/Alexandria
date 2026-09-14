@@ -22,20 +22,10 @@ if str(SCRIPT_DIR) not in sys.path:
 from artifact_safety import artifact_collision_errors, publish_temp_file  # noqa: E402
 from gate_severity import emit_findings, warning  # noqa: E402
 
-try:  # MERGE NOTE: gate_severity owns Finding; this stands in until it lands.
-    from gate_severity import Finding
+try:
+    from .gate_severity import Finding, hard_errors, render_grouped
 except ImportError:
-    from dataclasses import dataclass, field
-
-    @dataclass
-    class Finding:
-        family: str
-        severity: str
-        klass: str
-        ids: list = field(default_factory=list)
-        message: str = ""
-        fix: str = ""
-        remove: str = ""
+    from gate_severity import Finding, hard_errors, render_grouped
 
 ROOT = Path(__file__).resolve().parents[1]
 FIDELITY_NOTES_SCHEMA = ROOT / "references" / "rewild-fidelity-notes.schema.json"
@@ -918,7 +908,10 @@ def _fidelity_prose(text):
     pieces.append(text[cursor:])
     marked = _CITATION_GROUP.sub("", "".join(pieces))
     text = _LINK_SENTINEL.sub(lambda match: labels[int(match.group(1))], marked)
-    return _checker_prose(text)
+    # Quoted spans are masked here for the same reason the style tiers mask
+    # them: a quotation added or rewritten during Rewild carries the source's
+    # negation, direction and causal words, not the writer's own claim.
+    return _mask_quoted_spans(_checker_prose(text))
 
 
 #: Spans whose words belong to a source, not to the writer: CJK and curly
@@ -991,7 +984,7 @@ def _control_char_findings(label, text):
                 f"{label} contains {sum(counts.values())} control or "
                 f"replacement character(s); the limit is 0: {listed}."
             ),
-            fix=_RESTORE,
+            fix="",
             remove=_RESTORE,
         )
     ]
@@ -1015,7 +1008,7 @@ def _quotation_findings(source_text, report_text):
                 "Quoted span of the pre-Rewild source is missing from the "
                 f"report; the limit is 0 lost quotations: {span}"
             ),
-            fix=_RESTORE,
+            fix="",
             remove=_RESTORE,
         )
         for span in dict.fromkeys(_QUOTED_SPAN.findall(source_text))
@@ -1575,8 +1568,11 @@ _CHECK_CLASSES = {
     "review/rewild": "A",
 }
 
+#: Every family `rewild_gate` can emit; `references/gate-errors.md` lists them.
+FAMILIES = frozenset(_CHECK_CLASSES)
 
-def _finding(family, message, *, severity="hard", fix=_RESTORE):
+
+def _finding(family, message, *, severity="hard", fix=""):
     klass = _CHECK_CLASSES[family]
     return Finding(
         family=family,
@@ -1690,7 +1686,6 @@ def run_check(report_path, source_path, *, lang, review_note_path=None):
             f"Unresolved style warning: {item.get('section')}: "
             f"{item.get('message')}",
             severity="warn",
-            fix=_RESTORE,
         )
         for item in result.get("warnings", [])
         if item not in hard_warnings
@@ -1994,16 +1989,14 @@ def main(argv=None):
             lang=args.lang,
             review_note_path=args.review_note,
         )
-        return emit_findings(
-            [
-                finding.message
-                if finding.severity == "hard"
-                else warning(finding.message)
-                for finding in findings
-            ],
-            ok_message="[OK] Rewild check found no hard finding.",
-            transform=_console_safe,
+        print(
+            _console_safe(render_grouped(findings), sys.stderr),
+            file=sys.stderr,
         )
+        if hard_errors(findings):
+            return 1
+        print("[OK] Rewild check found no hard finding.")
+        return 0
     for name, value in (("--review-note", args.review_note), ("--receipt", args.receipt)):
         if not value:
             parser.error(f"{name} is required unless --check is used")

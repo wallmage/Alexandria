@@ -191,6 +191,30 @@ class AlignmentRobustnessTests(unittest.TestCase):
         self.assertNotIn("changelog)", prose)
         self.assertIn("Usage grew sharply", prose)
 
+    def test_quoted_spans_are_masked_from_fidelity_prose(self):
+        from scripts.rewild_gate import _fidelity_prose, _semantic_fidelity_errors
+
+        # A quotation added or rewritten during Rewild carries someone else's
+        # words. Negation, direction and causal tells inside it are not the
+        # writer's own claim, so the semantic tier must not read them; the
+        # style tiers already mask the same spans.
+        source = (
+            "# T\n\n## Body\n\nThe minister rejected the plan. "
+            "Costs stayed above the forecast.\n"
+        )
+        report = (
+            "# T\n\n## Body\n\nThe minister rejected the plan, saying "
+            '"we did not move below the forecast". '
+            "Costs stayed above the forecast.\n"
+        )
+        self.assertNotIn("did not move", _fidelity_prose(report))
+        self.assertEqual(
+            [],
+            _semantic_fidelity_errors(
+                _fidelity_prose(source), _fidelity_prose(report), "en"
+            ),
+        )
+
     def test_true_direction_reversal_in_edited_clause_still_fails(self):
         from scripts.rewild_gate import _semantic_fidelity_errors
 

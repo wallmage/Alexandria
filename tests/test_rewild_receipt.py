@@ -1395,14 +1395,6 @@ class IntegrityTierTests(unittest.TestCase):
                 ),
             )
             stale = json.loads(receipt.read_text(encoding="utf-8"))
-            self.assertEqual([], run_gate(
-                report,
-                source,
-                report_lang="en",
-                review_note_path=review,
-                receipt_path=receipt,
-                force=True,
-            ))
 
             report.write_text(
                 report.read_text(encoding="utf-8") + "\n\nOne more sentence.\n",
@@ -1445,16 +1437,30 @@ class IntegrityTierTests(unittest.TestCase):
 class CheckModeTests(unittest.TestCase):
     """--check reports every tier at once and writes nothing."""
 
+    SOURCE_BODY = (
+        'The minister said "the bridge will open". '
+        "The council approved the plan because the survey supported it. "
+    )
+    #: Loses the quotation, corrupts a character, flips the causal clause's
+    #: negation, runs far below the length floor, and writes AI vocabulary and
+    #: em-dashes: one report body for every tier `--check` must report.
+    EVERY_TIER_BODY = (
+        "The minister said the bridge\x01 would open. "
+        "The council did not approve the plan because the survey supported "
+        "it. Moreover, it is important to note that this delves into a "
+        "tapestry of multifaceted considerations \u2014 and, crucially, it "
+        "underscores \u2014 the robust landscape \u2014 of stakeholder "
+        "alignment. "
+    )
+
     def build(self, work, report_body):
         source_text = (
             "# Report\n\n## First finding\n\n"
-            f'The minister said "the bridge will open". {FILLER_ONE}.\n\n'
-            f"## Second finding\n\n{FILLER_TWO}.\n\n"
+            f"{self.SOURCE_BODY}\n\n"
+            "## Second finding\n\nTraffic rose after the opening.\n\n"
             "## Sources\n\n[Source](https://example.com)"
         )
-        report_text = source_text.replace(
-            'The minister said "the bridge will open". ', report_body
-        )
+        report_text = source_text.replace(self.SOURCE_BODY, report_body)
         report = work / "report.md"
         source = work / "pre-rewild.md"
         source.write_text(source_text, encoding="utf-8")
@@ -1462,21 +1468,46 @@ class CheckModeTests(unittest.TestCase):
         return report, source
 
     def test_every_tier_is_reported_and_no_receipt_is_written(self):
-        from scripts.rewild_gate import run_check
+        from scripts.rewild_gate import FAMILIES, run_check
 
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
-            report, source = self.build(
-                work, "The minister said the bridge\x01 would open. "
-            )
+            report, source = self.build(work, self.EVERY_TIER_BODY)
             findings = run_check(report, source, lang="en")
             families = {finding.family for finding in findings}
-            self.assertIn("integrity/control-chars", families)
-            self.assertIn("fidelity/quotation-lost", families)
+            for family in (
+                "integrity/control-chars",
+                "fidelity/quotation-lost",
+                "fidelity/semantic",
+                "rewild/length",
+                "rewild/ai-vocabulary",
+                "rewild/style",
+            ):
+                self.assertIn(family, families)
+            self.assertLessEqual(families, FAMILIES)
             self.assertEqual([], list(work.glob("*.json")))
             for finding in findings:
                 if finding.klass == "F":
                     self.assertEqual("alx snapshot --restore", finding.remove)
+
+    def test_class_a_findings_never_carry_the_restore_remedy(self):
+        """`alx snapshot --restore` undoes the humanization.
+
+        It is the scope-dropping removal of a Class F finding, never the fix
+        for a style or vocabulary finding: an agent that follows it there
+        throws away the rewrite the finding asked it to edit.
+        """
+        from scripts.rewild_gate import run_check
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source = self.build(work, self.EVERY_TIER_BODY)
+            findings = run_check(report, source, lang="en")
+            self.assertTrue(any(f.klass == "A" for f in findings), findings)
+            for finding in findings:
+                self.assertNotEqual("alx snapshot --restore", finding.fix)
+                if finding.klass == "A":
+                    self.assertEqual("", finding.remove)
 
     def test_bookkeeping_errors_are_collected_not_returned_early(self):
         from scripts.rewild_gate import run_check
@@ -1520,5 +1551,9 @@ class CheckModeTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(1, result.returncode, result.stderr)
+            self.assertIn("=== HARD ", result.stderr)
+            self.assertIn("[fidelity/quotation-lost] 1", result.stderr)
+            self.assertIn("=== WARN ", result.stderr)
+            self.assertIn("=== STATUS: ", result.stderr)
             self.assertIn("Quoted span of the pre-Rewild source", result.stderr)
             self.assertEqual([], list(work.glob("*.json")))

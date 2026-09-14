@@ -168,6 +168,8 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+, then alx claim add \S+$"),
     # J2: a brief/people/coverage/synthesis field re-enters through the merge.
     re.compile(r"^set field \S+ in \S+ via alx ledger merge$"),
+    # R23: a synthesis field names no claim file; the merge is the whole repair.
+    re.compile(r"^set field \S+, then alx ledger merge \S+$"),
     re.compile(r"^alx fetch --id S\d+ --refresh, then alx claim add \S+$"),
     # A month-day extract cannot be found under the claim's full date: the
     # repair is a second extract stating the year, or the source's own wording.
@@ -692,6 +694,9 @@ def adopt(findings, *, online=False, paragraphs=0, claim_files=None):
             fix, remove = _remedies(
                 item, paragraphs=paragraphs, claim_files=claim_files
             )
+            # R20: `alx`'s own remedy names the real claim input too; only the
+            # producer's remedy passed through _with_claim_file before.
+            fix = _with_claim_file(fix, item, claim_files)
             if klass == "A":
                 remove = ""
         if remove and remove == fix:
@@ -1058,6 +1063,9 @@ def claim_probe_findings(ws, ledger, claim):
             source_fidelity.probe_findings(
                 claim, sources.get(source_id, {"source_id": source_id}), text,
                 cache_meta=meta,
+                # R22: probe THIS entry; a second passage from the same page is
+                # legitimate evidence and must be checked on its own.
+                extract=record.get("extract_or_location"),
             )
         )
     return findings
@@ -1589,7 +1597,11 @@ def cmd_claim_add(args):
                 )
                 if not is_finding(item_finding)
                 or item_finding.family in CLAIM_ADD_FAMILIES
-            ]
+            ],
+            # R20/K5: the file a rejected claim came from is known right here;
+            # `state` only learns it after the claim is accepted, so a failing
+            # claim used to be told to edit `claims/*.json`.
+            claim_files=sources,
         )
         # R13: warn-tier findings are advice; only hard ones refuse the upsert.
         hard = hard_findings(findings)

@@ -11,7 +11,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Ledger (`check` b / `validate_ledger`)
 
 ### `ledger/quantity` — F
-- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged.
+- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year.
 - **fix:** `alx find S<n> TOKEN` then extend quote, or reword claim to dated form.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
@@ -23,7 +23,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** claim says "all since patched"; extract has figures only.
 
 ### `ledger/direction` — F
-- **rule:** increased/decreased (and numeric/legal carriers) must appear in extracts. Bare `under|below|settled` without a carrier is not a trigger.
+- **rule:** increased/decreased (and numeric/legal carriers) must appear in extracts. Bare `under|below|settled` without a carrier is not a trigger. R17: the negation window stops at ASCII `.`/`;` as well as `。`/`；`, so a 未/不 in an earlier sentence of a scraped Chinese page no longer denies the evidence; and two CJK carriers bind on a shared four-character phrase, since the 0.75 bigram ratio is unreachable for Chinese clauses.
 - **fix:** quote the directional sentence or drop the clause.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** "increased 12%" vs extract "12% in 2024".
@@ -119,7 +119,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** S4 has no `published` and no reason.
 
 ### `ledger/person` — F/W
-- **rule:** person-linked claim without a registered person, or `living_status: unknown`. R15 (W): a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix` and warns; the harm rules then run on the linked claim and stay hard.
+- **rule:** person-linked claim without a registered person, or `living_status: unknown`. R15 (W): a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix` and warns; the harm rules then run on the linked claim and stay hard. R20 (F): both protected-person messages name the person (`P3 Yang (living_status living)`), one prints the allowed roles verbatim (`neutral|harmful|sensitive_private_fact|response|resolution`) with the got-value, the other the assessment shape (`{"classification": <person_claim_role>, "rationale": >=N chars}`) with the computed floor and the actual length; the remedy names the claim's own input file.
 - **fix:** `alx ledger merge people.json` (auto-link warn: `alx check --fix`)
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C3 names P1 while P1 status is `unknown`.
@@ -148,10 +148,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `central_judgment_claim_ids: ["C9"]`; C9 was dropped.
 
-### `ledger/reference` — F
-- **rule:** cross-reference between claims, people or sources does not resolve.
-- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`
-- **remove:** `alx claim drop C<n> --apply`
+### `ledger/reference` — F/W
+- **rule:** cross-reference between claims, people or sources does not resolve. R22: two or more `source_evidence` entries with the same `source_id` are legitimate (two passages from one page) — no finding, and each entry is probed on its own. R23 (W): counterevidence with no adversarial test is a thin synthesis, not a fabrication. R24: `as_of` up to 1 day after `verified_at` is timezone drift (UTC fetch vs local date); past that the finding names both dates and the threshold.
+- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`; untested counterevidence: `set field synthesis.adversarial_tests, then alx ledger merge synthesis`; as_of drift: set field as_of in claims/<file>, then `alx claim add claims/<file>`
+- **remove:** `alx claim drop C<n> --apply` (none on the Class A adversarial-test warn)
 - **example:** `responds_to_claim_ids: ["C12"]`; no C12.
 
 ## Integrity (`check` a / `validate_report`)

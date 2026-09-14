@@ -948,15 +948,18 @@ def probe_strings(extract):
     return unique
 
 
-def probe_findings(claim, source, text, *, cache_meta=None):
-    """Offline probe of one claim/source extract against cached text."""
+def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
+    """Offline probe of one claim/source extract against cached text.
+
+    R22: one source may carry several evidence entries, so the caller names the
+    entry to probe; without one, the first entry for the source is probed.
+    """
     claim = claim if isinstance(claim, dict) else {}
     source = source if isinstance(source, dict) else {}
     claim_id = str(claim.get("claim_id") or "")
     source_id = str(source.get("source_id") or "")
     evidence = claim.get("source_evidence")
-    extract = None
-    if isinstance(evidence, list):
+    if extract is None and isinstance(evidence, list):
         for entry in evidence:
             if isinstance(entry, dict) and entry.get("source_id") == source_id:
                 extract = entry.get("extract_or_location")

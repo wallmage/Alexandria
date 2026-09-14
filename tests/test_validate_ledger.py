@@ -3733,21 +3733,31 @@ class ExtractLengthVerbatimTests(unittest.TestCase):
                 ),
             )
 
-    def test_short_segment_after_author_ellipsis_still_fails(self):
-        with tempfile.TemporaryDirectory() as directory:
-            cache = Path(directory)
-            source_fidelity.write_cache(
-                cache,
-                "S11",
-                _cache_result("A genuine quoted observation and short appear here."),
-            )
-            findings = validate_ledger._extract_length_findings(
-                self._claim("A genuine quoted observation … short"),
-                cache_dir=cache,
-            )
-            self.assertEqual(
-                ["ledger/extract-length"], [item.family for item in findings]
-            )
+    def test_short_piece_after_author_ellipsis_is_never_flagged(self):
+        # R13: pieces carry no length floor; only the whole extract warns.
+        self.assertEqual(
+            [],
+            validate_ledger._extract_length_findings(
+                self._claim("A genuine quoted observation … short")
+            ),
+        )
+
+    def test_short_whole_extract_is_a_warn_not_a_hard_finding(self):
+        findings = validate_ledger._extract_length_findings(self._claim("short"))
+        self.assertEqual(["ledger/extract-length"], [i.family for i in findings])
+        self.assertEqual("warn", findings[0].severity)
+        self.assertEqual("A", findings[0].klass)
+        self.assertIn("threshold 20", findings[0].message)
+        self.assertIn("length 5", findings[0].message)
+        self.assertEqual("extend the quote in claims/<file>", findings[0].fix)
+
+    def test_twelve_character_cjk_extract_carries_no_warn(self):
+        self.assertEqual(
+            [], validate_ledger._extract_length_findings(self._claim("一二三四五六七八九十十一"))
+        )
+        short = validate_ledger._extract_length_findings(self._claim("一二三四五"))
+        self.assertEqual(["ledger/extract-length"], [i.family for i in short])
+        self.assertIn("threshold 10", short[0].message)
 
 class ClaimRemedyTests(unittest.TestCase):
     def _fixes(self, data, needle):

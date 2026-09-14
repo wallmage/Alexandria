@@ -279,7 +279,6 @@ DEGRADE_MINUTES = 15
 ONLINE_CAP_MINUTES = 4
 EXCERPT_CHARS = 60
 MIN_EXTRACT_CHARS = 20
-MIN_SEGMENT_CHARS = 8
 MAX_WINDOW_CHARS = 300
 MAX_FINDING_CHARS = 300
 
@@ -452,7 +451,7 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
         )
     if family == "fidelity/mismatch":
         return _quote_or_find(item, source_id, claim_id)
-    if family in {"fidelity/short-segment", "ledger/extract-length"}:
+    if family == "ledger/extract-length":
         return (
             remedy("extend-quote", file="claims/*.json"),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
@@ -1473,7 +1472,6 @@ CLAIM_ADD_FAMILIES = frozenset(
         "ledger/reference",
         "ledger/excluded-supports",
         "fidelity/mismatch",
-        "fidelity/short-segment",
         # `fidelity/context-changed` is deliberately absent: spec §7.2.6 makes
         # `claim add` the re-confirm step of the remedy, so it probes without
         # context comparison (a lost extract is still fidelity/mismatch) and
@@ -1481,6 +1479,15 @@ CLAIM_ADD_FAMILIES = frozenset(
         "fidelity/cache-missing",
     }
 )
+
+def _warn_lines(claim_id, warns):
+    """Advice printed under a WARN header, after the claim's result line."""
+    if not warns:
+        return []
+    return [f"{claim_id} WARN"] + [
+        f"  [{item.family}] {item.message} — fix: {item.fix}" for item in warns
+    ]
+
 
 def _batch_findings(ws, ledger, item, seen_ids):
     """Only what `alx` owns: batch uniqueness and cache presence (spec §6.4)."""
@@ -1583,12 +1590,16 @@ def cmd_claim_add(args):
                 or item_finding.family in CLAIM_ADD_FAMILIES
             ]
         )
-        for item_finding in findings:
+        # R13: warn-tier findings are advice; only hard ones refuse the upsert.
+        hard = hard_findings(findings)
+        warns = [item for item in findings if item.severity == "warn"]
+        for item_finding in hard:
             lines.append(
                 f"{claim_id} FAIL [{item_finding.family}] {item_finding.message}"
                 f" — fix: {item_finding.fix}"
             )
-        if hard_findings(findings):
+        if hard:
+            lines.extend(_warn_lines(claim_id, warns))
             failed = True
             continue
         claim = expand_claim_input(ws, item, ledger)
@@ -1619,6 +1630,7 @@ def cmd_claim_add(args):
         lines.append(
             f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
         )
+        lines.extend(_warn_lines(claim_id, warns))
     ws.save_ledger(ledger)
     state["counters"]["claims"] = len(ledger["claims"])
     ws.save_state(state)

@@ -3636,42 +3636,15 @@ def _claim_input_schema_findings(claim):
     ]
 
 
-def _cached_documents(claim, cache_dir):
-    """Normalized cache text for every source this claim cites."""
-    if not cache_dir:
-        return []
-    try:
-        from source_fidelity import normalize_text, read_cache, strip_markup
-    except ImportError:
-        return []
-    source_ids = list(claim.get("source_ids") or [])
-    source_ids.extend(
-        entry.get("source_id")
-        for entry in claim.get("source_evidence") or []
-        if isinstance(entry, dict) and entry.get("source_id")
-    )
-    documents = []
-    for source_id in dict.fromkeys(source_ids):
-        cached = read_cache(cache_dir, source_id)
-        if cached is None:
-            continue
-        text = cached[0]
-        documents.append(
-            strip_markup(text) if "<" in str(text or "") else normalize_text(text)
-        )
-    return documents
-
-
-def _is_verbatim(text, documents):
-    if not documents:
-        return False
-    from source_fidelity import normalize_text
-
-    whole = normalize_text(text)
-    return bool(whole) and any(whole in document for document in documents)
+_CJK_CHARACTER = re.compile("[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
 
 
 def _extract_length_findings(claim, *, cache_dir=None):
+    """Ruling R13: length is advice, never a fabrication check.
+
+    The whole extract may read short; only `fidelity/mismatch` decides whether
+    it is real. Ellipsis-separated pieces carry no length floor at all.
+    """
     findings = []
     claim_id = claim.get("claim_id", "")
     texts = []
@@ -3680,48 +3653,25 @@ def _extract_length_findings(claim, *, cache_dir=None):
     for entry in claim.get("source_evidence") or []:
         if isinstance(entry, dict) and entry.get("extract_or_location"):
             texts.append(str(entry.get("extract_or_location")))
-    documents = _cached_documents(claim, cache_dir)
     for text in texts:
         folded = unicodedata.normalize("NFKC", text)
         compact = re.sub(r"\s+", "", folded)
-        if len(compact) < 20:
+        threshold = 10 if _CJK_CHARACTER.search(compact) else 20
+        if len(compact) < threshold:
             findings.append(
                 Finding(
                     family="ledger/extract-length",
-                    severity="hard",
-                    klass="F",
+                    severity="warn",
+                    klass="A",
                     ids=_ids_in(claim_id),
                     message=(
                         f"{claim_id}: extract length {len(compact)} is below "
-                        "threshold 20; extend the quote"
+                        f"threshold {threshold}; extend the quote"
                     ),
                     fix="extend the quote in claims/<file>",
-                    remove=_drop(claim_id),
+                    remove="",
                 )
             )
-        # Literal-whole-first: a window that is verbatim in the cached source
-        # was not assembled around an author ellipsis, so it is not split.
-        if _is_verbatim(text, documents):
-            continue
-        for segment in re.split(r"…|\.\.\.", folded):
-            piece = re.sub(r"\s+", "", segment)
-            if not any(character.isalnum() for character in piece):
-                continue
-            if len(piece) < 8:
-                findings.append(
-                    Finding(
-                        family="ledger/extract-length",
-                        severity="hard",
-                        klass="F",
-                        ids=_ids_in(claim_id),
-                        message=(
-                            f"{claim_id}: extract segment length {len(piece)} "
-                            "is below threshold 8; extend the quote"
-                        ),
-                        fix="extend the quote in claims/<file>",
-                        remove=_drop(claim_id),
-                    )
-                )
     return findings
 
 

@@ -524,7 +524,8 @@ class ClaimTests(AlxTestCase):
         )
         self.assertEqual(meta["fetched_at"][:10], claim["verified_at"])
 
-    def test_missing_claim_id_and_short_segment_are_reported_together(self):
+    def test_missing_claim_id_fails_while_a_warned_claim_is_upserted(self):
+        # R13: the short extract is present in the source, so it only warns.
         self.init()
         self.fetch("https://example.org/study")
         bad = dict(CLAIM_ONE)
@@ -542,8 +543,29 @@ class ClaimTests(AlxTestCase):
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(1, code)
         self.assertIn("add claim_id", out)
+        self.assertIn("C9 WARN", out)
         self.assertIn("extend the quote", out)
-        self.assertEqual([], self.ledger()["claims"])
+        self.assertEqual(["C9"], [c["claim_id"] for c in self.ledger()["claims"]])
+
+    def test_warn_only_claim_is_accepted(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        short = {
+            "claim_id": "C9",
+            "claim": "The archive released documents.",
+            "kind": "fact",
+            "importance": "supporting",
+            "source_evidence": [
+                {"source_id": "S1", "extract_or_location": "The archive"}
+            ],
+        }
+        batch = self.write_json("claims.json", [short])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code)
+        self.assertIn("C9 added", out)
+        self.assertIn("C9 WARN", out)
+        self.assertNotIn("FAIL", out)
+        self.assertEqual(["C9"], [c["claim_id"] for c in self.ledger()["claims"]])
 
     def test_fabricated_extract_fails_the_offline_probe(self):
         self.init()

@@ -1147,7 +1147,7 @@ class ProbeResilienceTests(unittest.TestCase):
         )
         self.assertTrue(any(probe in text for probe in probes), (probes, text))
 
-    def test_short_segment_is_hard_finding_not_skipped(self):
+    def test_short_extract_present_in_source_passes(self):
         findings = source_fidelity.probe_findings(
             {"claim_id": "C9"},
             {"source_id": "S1"},
@@ -1155,6 +1155,7 @@ class ProbeResilienceTests(unittest.TestCase):
         )
         # empty extract: no findings
         self.assertEqual([], findings)
+        # R13: length is not a fabrication check; presence is.
         findings = source_fidelity.probe_findings(
             {
                 "claim_id": "C9",
@@ -1165,13 +1166,7 @@ class ProbeResilienceTests(unittest.TestCase):
             {"source_id": "S1"},
             "short is present in the cached page text here",
         )
-        families = [item.family for item in findings]
-        self.assertIn("fidelity/short-segment", families)
-        finding = next(
-            item for item in findings if item.family == "fidelity/short-segment"
-        )
-        self.assertEqual("hard", finding.severity)
-        self.assertEqual("extend the quote in claims/<file>", finding.fix)
+        self.assertEqual([], findings)
 
     VERBATIM_CJK = (
         "他在日记中将共产党的优点概括为七大方面：“一,组织严密；二,纪律严厉；"
@@ -1213,7 +1208,7 @@ class ProbeResilienceTests(unittest.TestCase):
             ["fidelity/mismatch"], [item.family for item in findings]
         )
 
-    def test_short_segment_after_author_ellipsis_still_fails(self):
+    def test_short_piece_after_author_ellipsis_passes_when_present(self):
         findings = source_fidelity.probe_findings(
             {
                 "claim_id": "C9",
@@ -1229,9 +1224,39 @@ class ProbeResilienceTests(unittest.TestCase):
             {"source_id": "S1"},
             "A genuine quoted observation and short both appear in this page.",
         )
-        self.assertIn(
-            "fidelity/short-segment", [item.family for item in findings]
+        self.assertEqual([], findings)
+
+    def test_two_character_cjk_quotes_joined_by_ellipsis_pass(self):
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C9",
+                "source_evidence": [
+                    {"source_id": "S1", "extract_or_location": "「雪耻」…「復仇」"}
+                ],
+            },
+            {"source_id": "S1"},
+            "他在日记中写下「雪耻」二字，又在下一页写下「復仇」二字。",
         )
+        self.assertEqual([], findings)
+
+    def test_short_piece_absent_from_source_is_mismatch(self):
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C9",
+                "source_evidence": [
+                    {
+                        "source_id": "S1",
+                        "extract_or_location": "A genuine quoted observation … xyz",
+                    }
+                ],
+            },
+            {"source_id": "S1"},
+            "A genuine quoted observation appears in the cached page text here.",
+        )
+        self.assertEqual(
+            ["fidelity/mismatch"], [item.family for item in findings]
+        )
+        self.assertIn("xyz", findings[0].message)
 
     def test_cjk_ascii_punct_folded_for_probe(self):
         probes = source_fidelity.probe_strings("他说，今天很好。")

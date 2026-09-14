@@ -1076,10 +1076,13 @@ Short.
                 )
         online.assert_not_called()
 
-    def test_force_flag_is_accepted(self):
-        parser = validate_report.build_parser()
-        args = parser.parse_args(["report.md", "--force"])
-        self.assertTrue(args.force)
+    def test_force_is_hidden_and_rejected(self):
+        """§7.5: `--force` overwrites output files; this command writes none."""
+        self.assertNotIn("--force", validate_report.build_parser().format_help())
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit):
+            validate_report.main(["report.md", "--force"])
+        self.assertIn("--force is not accepted here", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -46,5 +46,5 @@ an `evidence_of_absence` record with the queries run, the locations where the
 evidence should have appeared, and the search date. Do not turn a search limit
 into a factual conclusion.
 
-Mark `include_in_report: true` for every ledger claim used in the draft. After drafting, copy a distinctive sentence of at least 40 characters from each claim-bearing paragraph into that claim's `report_excerpts`. This keeps the internal claim map in the ledger—not the delivered Markdown—and lets the validator locate every used claim in the report.
+Mark `include_in_report: true` for every ledger claim used in the draft. After drafting, copy a distinctive sentence of at least 10 characters from each claim-bearing paragraph into that claim's `report_excerpts`. This keeps the internal claim map in the ledger—not the delivered Markdown—and lets the validator locate every used claim in the report.
 

@@ -10,7 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-from tests.source_fidelity_transport import mock_production_transport
+from tests.source_fidelity_transport import (
+    CHANGED_CONTEXT_PAGE,
+    fixture_responses,
+    mock_production_transport,
+)
 
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "source_fidelity.py"
 SPEC = importlib.util.spec_from_file_location("source_fidelity", MODULE_PATH)
@@ -426,7 +430,6 @@ class SafeTargetTests(unittest.TestCase):
             "_request_pinned",
             side_effect=[
                 ssl.SSLEOFError("transient one"),
-                ssl.SSLEOFError("transient two"),
                 response,
             ],
         ) as request:
@@ -436,7 +439,8 @@ class SafeTargetTests(unittest.TestCase):
             )
 
         self.assertEqual("example domain", source_fidelity.strip_markup(fetched.text))
-        self.assertEqual(3, request.call_count)
+        # Spec §6.11: 1 retry → 2 attempts. Was 3 (DEFAULT_FETCH_ATTEMPTS).
+        self.assertEqual(2, request.call_count)
 
 class SamplingTests(unittest.TestCase):
     def test_central_and_key_claims_are_sampled_first(self):
@@ -655,7 +659,8 @@ class FidelityTests(unittest.TestCase):
             sample_size=0,
         )
         self.assertEqual("incomplete", result["status"])
-        self.assertEqual(2, result["counts"]["unverified"])
+        # Status vocab is unreachable|undecodable, not unverified (§7.2.2).
+        self.assertEqual(2, result["counts"]["unreachable"])
         self.assertTrue(
             all(
                 "Could not verify" in check["detail"]
@@ -664,10 +669,7 @@ class FidelityTests(unittest.TestCase):
             result["checks"],
         )
         self.assertTrue(source_fidelity.fidelity_errors(result))
-        self.assertEqual(
-            [],
-            source_fidelity.fidelity_errors(result, allow_unverified=True),
-        )
+        self.assertNotIn("--allow-unverified", " ".join(source_fidelity.fidelity_errors(result)))
 
     def test_offline_run_is_a_visible_skip_and_never_a_pass(self):
         result = source_fidelity.check_source_fidelity(ledger(), sample_size=0)
@@ -966,11 +968,17 @@ class FidelityTests(unittest.TestCase):
                     )
                 )
 
-            self.assertTrue(
+            # Whole-document hash equality dropped (§7.2.6). Distant
+            # correction outside the probe window is not a context change.
+            self.assertFalse(
                 any(
                     "source document changed" in error.casefold()
                     for error in errors
                 ),
+                errors,
+            )
+            self.assertFalse(
+                any("context changed" in error.casefold() for error in errors),
                 errors,
             )
 
@@ -993,6 +1001,714 @@ class FidelityTests(unittest.TestCase):
                     ),
                     sample_size=0,
                 )
+
+
+class ResilienceFetchTests(unittest.TestCase):
+    @staticmethod
+    def public_resolver(_host, _port, **_kwargs):
+        return [(2, 1, 6, "", ("93.184.216.34", 443))]
+
+    def test_fetch_document_decodes_gbk_from_meta_charset(self):
+        with mock_production_transport(
+            {"gbk.example.org": fixture_responses()["gbk.example.org"]},
+            module=source_fidelity,
+        ):
+            result = source_fidelity.fetch_document(
+                "https://gbk.example.org/page",
+                timeout=10,
+            )
+        self.assertEqual("ok", result.status)
+        self.assertIn("简体中文", result.text)
+        self.assertEqual("gbk", result.charset.casefold())
+        self.assertEqual("GBK标题页", result.title)
+        self.assertEqual("2026-03-01", result.published)
+
+    def test_fetch_document_honors_utf8_bom_before_meta(self):
+        with mock_production_transport(
+            {"bom.example.org": fixture_responses()["bom.example.org"]},
+            module=source_fidelity,
+        ):
+            result = source_fidelity.fetch_document(
+                "https://bom.example.org/page",
+            )
+        self.assertEqual("ok", result.status)
+        self.assertIn("BOM encoded visible text", result.text)
+        self.assertEqual("BOM Title", result.title)
+        self.assertEqual("2026-04-02", result.published)
+
+    def test_cross_domain_redirect_is_unreachable_with_final_url(self):
+        responses = {
+            "example.org": (
+                302,
+                {"location": "https://evil.example.net/final"},
+                b"",
+            ),
+            "evil.example.net": (
+                200,
+                {"content-type": "text/html"},
+                b"<p>other registrable domain</p>",
+            ),
+        }
+        with mock_production_transport(responses, module=source_fidelity):
+            result = source_fidelity.fetch_document("https://example.org/start")
+        self.assertEqual("unreachable", result.status)
+        self.assertEqual("cross-domain-redirect", result.reason_class)
+        self.assertIn("evil.example.net", result.reason)
+
+    def test_http_403_is_unreachable_http_status(self):
+        with mock_production_transport(
+            {"blocked.example.org": fixture_responses()["blocked.example.org"]},
+            module=source_fidelity,
+        ):
+            result = source_fidelity.fetch_document(
+                "https://blocked.example.org/secret",
+            )
+        self.assertEqual("unreachable", result.status)
+        self.assertEqual("http-403", result.reason_class)
+        self.assertEqual(403, result.http_status)
+
+    def test_timeout_is_unreachable_and_retries_once(self):
+        calls = []
+
+        def boom(target, *, timeout):
+            del target
+            calls.append(timeout)
+            raise TimeoutError("slow")
+
+        with (
+            mock.patch.object(
+                source_fidelity.socket, "getaddrinfo",
+                side_effect=self.public_resolver,
+            ),
+            mock.patch.object(
+                source_fidelity, "_request_pinned", side_effect=boom,
+            ),
+        ):
+            result = source_fidelity.fetch_document(
+                "https://slow.example.org/page",
+                timeout=10,
+            )
+        self.assertEqual("unreachable", result.status)
+        self.assertEqual("timeout", result.reason_class)
+        self.assertEqual(2, len(calls))
+
+    def test_deadline_expires_before_fetch(self):
+        result = source_fidelity.fetch_document(
+            "https://example.org/page",
+            deadline=0,
+        )
+        self.assertEqual("unreachable", result.status)
+        self.assertEqual("timeout", result.reason_class)
+
+    def test_plaintext_http_reason_class_exists(self):
+        result = source_fidelity.fetch_document("http://example.org/page")
+        self.assertEqual("unreachable", result.status)
+        self.assertEqual("plaintext-http", result.reason_class)
+
+    def test_fffd_ratio_over_one_percent_is_undecodable(self):
+        garbage = (
+            "<html><body>" + ("\ufffd" * 20) + "ok</body></html>"
+        ).encode("utf-8")
+        with mock_production_transport(
+            {
+                "bad.example.org": (
+                    200,
+                    {"content-type": "text/plain; charset=utf-8"},
+                    garbage,
+                )
+            },
+            module=source_fidelity,
+        ):
+            result = source_fidelity.fetch_document(
+                "https://bad.example.org/x",
+            )
+        self.assertEqual("undecodable", result.status)
+
+    def test_browser_like_user_agent(self):
+        self.assertIn("Mozilla/5.0", source_fidelity.USER_AGENT)
+
+
+class ProbeResilienceTests(unittest.TestCase):
+    def test_ellipsis_splits_inside_quoted_spans(self):
+        probes = source_fidelity.probe_strings(
+            '"Alpha evidence belongs to source one. … Beta clause after ellipsis."'
+        )
+        joined = " ".join(probes)
+        self.assertIn("alpha evidence belongs to source one.", joined)
+        self.assertIn("beta clause after ellipsis.", joined)
+        self.assertFalse(any("…" in probe or "..." in probe for probe in probes))
+
+    def test_quote_glyph_families_fold_on_both_sides(self):
+        probes = source_fidelity.probe_strings(
+            '「Alpha evidence belongs to source one。」'
+        )
+        text = source_fidelity.strip_markup(
+            "<p>“Alpha evidence belongs to source one.”</p>"
+        )
+        self.assertTrue(any(probe in text for probe in probes), (probes, text))
+
+    def test_short_segment_is_hard_finding_not_skipped(self):
+        findings = source_fidelity.probe_findings(
+            {"claim_id": "C9"},
+            {"source_id": "S1"},
+            "enough surrounding document text for a match",
+        )
+        # empty extract: no findings
+        self.assertEqual([], findings)
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C9",
+                "source_evidence": [
+                    {"source_id": "S1", "extract_or_location": "short"}
+                ],
+            },
+            {"source_id": "S1"},
+            "short is present in the cached page text here",
+        )
+        families = [item.family for item in findings]
+        self.assertIn("fidelity/short-segment", families)
+        finding = next(
+            item for item in findings if item.family == "fidelity/short-segment"
+        )
+        self.assertEqual("hard", finding.severity)
+        self.assertEqual("extend the quote in claims/<file>", finding.fix)
+
+    def test_cjk_ascii_punct_folded_for_probe(self):
+        probes = source_fidelity.probe_strings("他说，今天很好。")
+        text = source_fidelity.normalize_text("他说,今天很好.")
+        self.assertTrue(any(probe in text for probe in probes), probes)
+
+
+class CacheAndPolicyTests(unittest.TestCase):
+    def test_cache_round_trip_and_offline_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            result = source_fidelity.FetchResult(
+                status="ok",
+                reason_class="",
+                reason="",
+                text="<p>Alpha evidence belongs to source one.</p>",
+                charset="utf-8",
+                url="https://example.org/a",
+                final_url="https://example.org/a",
+                aliases=["https://example.org/a"],
+                http_status=200,
+                title="Alpha",
+                published=None,
+                text_sha256="",
+            )
+            source_fidelity.write_cache(cache, "S1", result)
+            txt, meta = source_fidelity.cache_paths(cache, "S1")
+            self.assertTrue(txt.is_file())
+            self.assertTrue(meta.is_file())
+            text, stored = source_fidelity.read_cache(cache, "S1")
+            self.assertIn("alpha evidence belongs to source one.", text)
+            for key in (
+                "url",
+                "final_url",
+                "aliases",
+                "http_status",
+                "charset",
+                "title",
+                "published",
+                "fetched_at",
+                "text_sha256",
+                "transport",
+            ):
+                self.assertIn(key, stored)
+            value = ledger()
+            value["claims"] = value["claims"][:1]
+            value["sources"] = value["sources"][:1]
+            value["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+                '"Alpha evidence belongs to source one."'
+            )
+            checked = source_fidelity.check_source_fidelity(
+                value,
+                cache_dir=cache,
+                online=False,
+                sample_size=0,
+            )
+            self.assertEqual("verified", checked["checks"][0]["status"])
+
+    def test_online_refreshes_cache_and_lists_source_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            value = ledger()
+            value["claims"] = value["claims"][:1]
+            value["sources"] = value["sources"][:1]
+            value["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+                '"Alpha evidence belongs to source one."'
+            )
+            checked = source_fidelity.check_source_fidelity(
+                value,
+                fetcher=fake_fetcher(
+                    {
+                        "https://example.org/pricing": (
+                            "<p>Alpha evidence belongs to source one.</p>"
+                        )
+                    }
+                ),
+                cache_dir=cache,
+                online=True,
+                sample_size=0,
+            )
+            self.assertIn("S1", checked.get("refreshed_source_ids", []))
+            self.assertIsNotNone(source_fidelity.read_cache(cache, "S1"))
+
+    def test_policy_v2_substitutes_and_sets_disclosure(self):
+        value = ledger()
+        value["synthesis"] = {"central_judgment_claim_ids": ["C2"]}
+        value["sources"].append(
+            {"source_id": "S9", "url": "https://example.org/other"}
+        )
+        value["claims"][1]["source_ids"] = ["S2", "S9"]
+        value["claims"][1]["source_evidence"] = [
+            {
+                "source_id": "S2",
+                "extract_or_location": (
+                    '"72% of teams reported daily use in 2026"'
+                ),
+            },
+            {
+                "source_id": "S9",
+                "extract_or_location": '"Claude Code: Included"',
+            },
+        ]
+        def fetch(url):
+            if url == "https://example.net/adoption":
+                raise OSError("down")
+            return PRICING_PAGE
+
+        result = source_fidelity.check_source_fidelity(
+            value,
+            fetcher=fetch,
+            online=True,
+            sample_size=1,
+        )
+        self.assertEqual(["S9"], [check["source_id"] for check in result["checks"]])
+        self.assertEqual(["verified"], [check["status"] for check in result["checks"]])
+        self.assertEqual([], result["disclosure_required"])
+
+        value["claims"][1]["source_ids"] = ["S2"]
+        value["claims"][1]["source_evidence"] = value["claims"][1]["source_evidence"][:1]
+        failed = source_fidelity.check_source_fidelity(
+            value,
+            fetcher=fetch,
+            online=True,
+            sample_size=1,
+        )
+        self.assertEqual(["unreachable"], [check["status"] for check in failed["checks"]])
+        self.assertEqual(["C2"], failed["disclosure_required"])
+
+    def test_v1_receipt_still_validates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            receipt_path = work / "source-receipt.json"
+            with mock_production_transport(
+                receipt_responses(),
+                module=source_fidelity,
+            ):
+                source_fidelity.issue_source_fidelity_receipt(
+                    ledger_path,
+                    receipt_path,
+                    sample_size=0,
+                    policy="weighted-source-evidence-v1",
+                )
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["policy"]["name"] = "weighted-source-evidence-v1"
+            self.assertEqual(
+                [],
+                source_fidelity.validate_source_fidelity_receipt(
+                    ledger_path, receipt
+                ),
+            )
+
+    def test_context_change_is_hard_finding_quoting_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            first = source_fidelity.FetchResult(
+                status="ok",
+                reason_class="",
+                reason="",
+                text=PRICING_PAGE,
+                charset="utf-8",
+                url="https://context.example.org/p",
+                final_url="https://context.example.org/p",
+                aliases=[],
+                http_status=200,
+                title="Pricing",
+                published=None,
+                text_sha256="",
+            )
+            source_fidelity.write_cache(cache, "S1", first)
+            claim = ledger()["claims"][0]
+            probes = source_fidelity.probe_strings(
+                claim["source_evidence"][0]["extract_or_location"]
+            )
+            source_fidelity.record_probe_contexts(cache, "S1", "C1", probes)
+            changed = source_fidelity.FetchResult(
+                status="ok",
+                reason_class="",
+                reason="",
+                text=CHANGED_CONTEXT_PAGE.decode("utf-8"),
+                charset="utf-8",
+                url="https://context.example.org/p",
+                final_url="https://context.example.org/p",
+                aliases=[],
+                http_status=200,
+                title="Pricing",
+                published=None,
+                text_sha256="",
+            )
+            source_fidelity.write_cache(cache, "S1", changed)
+            text, meta = source_fidelity.read_cache(cache, "S1")
+            self.assertIn("C1", meta.get("probe_contexts") or {})
+            findings = source_fidelity.probe_findings(
+                claim,
+                {"source_id": "S1", "url": "https://context.example.org/p"},
+                text,
+                cache_meta=meta,
+            )
+            families = [item.family for item in findings]
+            self.assertIn("fidelity/context-changed", families)
+            message = next(
+                item.message
+                for item in findings
+                if item.family == "fidelity/context-changed"
+            )
+            self.assertIn("re-read", message.casefold())
+            self.assertTrue(
+                any(marker in message for marker in ("更正", "correction", "retract")),
+                message,
+            )
+
+
+class CliResilienceTests(unittest.TestCase):
+    def test_cli_sections_and_no_allow_unverified_help(self):
+        help_text = source_fidelity.build_parser().format_help()
+        self.assertNotIn("--allow-unverified", help_text)
+        self.assertIn("--force", help_text)
+        self.assertIn("--explain", help_text)
+        self.assertIn("--cache-dir", help_text)
+        self.assertIn("--online", help_text)
+
+    def test_explain_prints_probes_without_fetch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = Path(directory) / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            stderr, stdout = io.StringIO(), io.StringIO()
+            with (
+                mock.patch.object(source_fidelity, "default_fetcher") as fetch,
+                redirect_stderr(stderr),
+                redirect_stdout(stdout),
+            ):
+                code = source_fidelity.main(
+                    [str(ledger_path), "--explain", "C1"]
+                )
+            self.assertEqual(0, code)
+            fetch.assert_not_called()
+            self.assertIn("claude code: included", stdout.getvalue().casefold())
+
+    def test_force_overwrites_receipt_after_printing_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            receipt_path = work / "receipt.json"
+            receipt_path.write_text("{}", encoding="utf-8")
+            stderr = io.StringIO()
+            with (
+                mock_production_transport(
+                    {
+                        "example.org": (
+                            200,
+                            {"content-type": "text/html"},
+                            b"<p>nope</p>",
+                        ),
+                        "example.net": (
+                            200,
+                            {"content-type": "text/html"},
+                            b"<p>nope</p>",
+                        ),
+                    },
+                    module=source_fidelity,
+                ),
+                redirect_stderr(stderr),
+            ):
+                code = source_fidelity.main(
+                    [
+                        str(ledger_path),
+                        "--online",
+                        "--receipt",
+                        str(receipt_path),
+                        "--force",
+                        "--sample-size",
+                        "0",
+                    ]
+                )
+            self.assertNotEqual(0, code)
+            self.assertIn("mismatch", stderr.getvalue().casefold())
+            self.assertIn("===", stderr.getvalue())
+
+    def test_hard_findings_block_and_out_is_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(
+                cache,
+                "S1",
+                source_fidelity.FetchResult(
+                    status="ok",
+                    reason_class="",
+                    reason="",
+                    text=PRICING_PAGE,
+                    charset="utf-8",
+                    url="https://example.org/pricing",
+                    final_url="https://example.org/pricing",
+                    aliases=[],
+                    http_status=200,
+                    title="Pricing",
+                    published=None,
+                    text_sha256="",
+                ),
+            )
+            value = ledger()
+            value["claims"] = value["claims"][:1]
+            value["sources"] = value["sources"][:1]
+            probes = source_fidelity.probe_strings(
+                value["claims"][0]["source_evidence"][0]["extract_or_location"]
+            )
+            source_fidelity.record_probe_contexts(cache, "S1", "C1", probes)
+            source_fidelity.write_cache(
+                cache,
+                "S1",
+                source_fidelity.FetchResult(
+                    status="ok",
+                    reason_class="",
+                    reason="",
+                    text=CHANGED_CONTEXT_PAGE.decode("utf-8"),
+                    charset="utf-8",
+                    url="https://example.org/pricing",
+                    final_url="https://example.org/pricing",
+                    aliases=[],
+                    http_status=200,
+                    title="Pricing",
+                    published=None,
+                    text_sha256="",
+                ),
+            )
+            checked = source_fidelity.check_source_fidelity(
+                value,
+                cache_dir=cache,
+                online=False,
+                sample_size=0,
+            )
+            errors = source_fidelity.fidelity_errors(
+                checked, policy=source_fidelity.POLICY_V2
+            )
+            self.assertTrue(
+                any("context" in error.casefold() for error in errors),
+                errors,
+            )
+            ledger_path = Path(directory) / "ledger.json"
+            ledger_path.write_text(json.dumps(value), encoding="utf-8")
+            out = Path(directory) / "out.json"
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                code = source_fidelity.main(
+                    [
+                        str(ledger_path),
+                        "--cache-dir",
+                        str(cache),
+                        "--out",
+                        str(out),
+                        "--sample-size",
+                        "0",
+                    ]
+                )
+            self.assertNotEqual(0, code)
+            written = json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(written["findings"])
+            self.assertIsInstance(written["findings"][0], dict)
+
+    def test_v2_fidelity_errors_tolerate_unverified_quorum(self):
+        value = ledger()
+        extra = []
+        for index in range(3, 5):
+            sid = f"S{index}"
+            cid = f"C{index}"
+            value["sources"].append(
+                {"source_id": sid, "url": f"https://example.org/p{index}"}
+            )
+            extra.append(
+                {
+                    "claim_id": cid,
+                    "importance": "supporting",
+                    "include_in_report": True,
+                    "source_ids": [sid],
+                    "source_evidence": [
+                        {
+                            "source_id": sid,
+                            "extract_or_location": '"Claude Code: Included"',
+                        }
+                    ],
+                }
+            )
+        value["claims"].extend(extra)
+        pages = {
+            "https://example.org/pricing": PRICING_PAGE,
+            "https://example.org/p3": PRICING_PAGE,
+            "https://example.org/p4": PRICING_PAGE,
+        }
+
+        def fetch(url):
+            if url == "https://example.net/adoption":
+                raise OSError("down")
+            return pages[url]
+
+        result = source_fidelity.check_source_fidelity(
+            value,
+            fetcher=fetch,
+            online=True,
+            sample_size=0,
+        )
+        self.assertEqual(1, result["counts"]["unreachable"])
+        self.assertTrue(
+            source_fidelity.fidelity_errors(result),
+        )
+        self.assertEqual(
+            [],
+            source_fidelity.fidelity_errors(
+                result, policy=source_fidelity.POLICY_V2
+            ),
+        )
+
+    def test_v2_receipt_issues_after_substitution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            value = ledger()
+            value["sources"].append(
+                {"source_id": "S9", "url": "https://example.org/other"}
+            )
+            value["claims"][1]["source_ids"] = ["S2", "S9"]
+            value["claims"][1]["source_evidence"] = [
+                {
+                    "source_id": "S2",
+                    "extract_or_location": (
+                        '"72% of teams reported daily use in 2026"'
+                    ),
+                },
+                {
+                    "source_id": "S9",
+                    "extract_or_location": '"Claude Code: Included"',
+                },
+            ]
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(value), encoding="utf-8")
+            receipt_path = work / "receipt.json"
+            responses = receipt_responses()
+            responses["example.net"] = (
+                403,
+                {"content-type": "text/html"},
+                b"no",
+            )
+            with mock_production_transport(responses, module=source_fidelity):
+                result = source_fidelity.issue_source_fidelity_receipt(
+                    ledger_path,
+                    receipt_path,
+                    sample_size=0,
+                )
+            self.assertTrue(receipt_path.is_file())
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                "weighted-source-evidence-v2",
+                receipt["policy"]["name"],
+            )
+            pairs = {
+                (check["claim_id"], check["source_id"])
+                for check in receipt["checks"]
+            }
+            self.assertIn(("C2", "S9"), pairs)
+            self.assertEqual(
+                [],
+                source_fidelity.validate_source_fidelity_receipt(
+                    ledger_path, receipt
+                ),
+            )
+            self.assertIn("S1", result.get("refreshed_source_ids", []) + [
+                check["source_id"] for check in result["checks"]
+            ])
+
+    def test_receipt_online_is_one_live_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = Path(directory) / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            receipt_path = Path(directory) / "receipt.json"
+            calls = []
+            with mock_production_transport(
+                receipt_responses(),
+                module=source_fidelity,
+            ):
+                inner = source_fidelity._request_pinned
+
+                def counted(target, *, timeout):
+                    calls.append(target.host)
+                    return inner(target, timeout=timeout)
+
+                with mock.patch.object(
+                    source_fidelity,
+                    "_request_pinned",
+                    side_effect=counted,
+                ):
+                    code = source_fidelity.main(
+                        [
+                            str(ledger_path),
+                            "--online",
+                            "--receipt",
+                            str(receipt_path),
+                            "--sample-size",
+                            "0",
+                        ]
+                    )
+            self.assertEqual(0, code)
+            self.assertEqual(2, len(calls), calls)
+
+    def test_stale_receipt_overwritten_without_force(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            ledger_path = work / "ledger.json"
+            ledger_path.write_text(json.dumps(ledger()), encoding="utf-8")
+            receipt_path = work / "receipt.json"
+            receipt_path.write_text(
+                json.dumps(
+                    {
+                        "ledger_sha256": "0" * 64,
+                        "status": "passed",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock_production_transport(
+                receipt_responses(),
+                module=source_fidelity,
+            ):
+                code = source_fidelity.main(
+                    [
+                        str(ledger_path),
+                        "--online",
+                        "--receipt",
+                        str(receipt_path),
+                        "--sample-size",
+                        "0",
+                    ]
+                )
+            self.assertEqual(0, code)
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                source_fidelity.file_sha256(ledger_path),
+                receipt["ledger_sha256"],
+            )
 
 
 if __name__ == "__main__":

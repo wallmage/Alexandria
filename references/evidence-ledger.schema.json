@@ -73,6 +73,39 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "excluded_claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim_id", "reason", "dropped_at"],
+        "additionalProperties": true,
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dropped_at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tooling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alx_version": {
+          "type": "string"
+        },
+        "state_path": {
+          "type": "string"
+        }
+      }
     }
   },
   "allOf": [
@@ -310,6 +343,14 @@
           "type": "string",
           "format": "uri",
           "pattern": "^https?://"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
         },
         "publisher": {
           "type": "string",

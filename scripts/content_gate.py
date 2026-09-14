@@ -25,17 +25,16 @@ try:
         safe_image_destination,
         safe_link_destination,
     )
-    from .report_blocks import validation_report_blocks
+    from .report_blocks import mask_verification_note, validation_report_blocks
     from .validate_ledger import validate_references, validate_schema
     from .validate_report import (
         SOURCE_HEADINGS,
-        _body_and_sources,
-        _body_paragraphs,
         _foundation_urls,
         _h2_sections,
         binding_findings,
         extract_markdown_urls,
         normalize_url,
+        split_body_paragraphs,
         validate_report_against_ledger,
     )
 except ImportError:
@@ -51,17 +50,16 @@ except ImportError:
         safe_image_destination,
         safe_link_destination,
     )
-    from report_blocks import validation_report_blocks
+    from report_blocks import mask_verification_note, validation_report_blocks
     from validate_ledger import validate_references, validate_schema
     from validate_report import (
         SOURCE_HEADINGS,
-        _body_and_sources,
-        _body_paragraphs,
         _foundation_urls,
         _h2_sections,
         binding_findings,
         extract_markdown_urls,
         normalize_url,
+        split_body_paragraphs,
         validate_report_against_ledger,
     )
 
@@ -477,13 +475,22 @@ def _receipt_is_stale(receipt_path, report_path, ledger_path):
     return recorded_report != report_hash or recorded_ledger != ledger_hash
 
 
-def run_check(report_path, ledger_path, review_note_path=None):
-    """All content-review checks as findings; writes nothing."""
+def run_check(
+    report_path, ledger_path, review_note_path=None, *, include_ledger_checks=True
+):
+    """All content-review checks as findings; writes nothing.
+
+    ``include_ledger_checks=False`` drops the ledger-error re-emission:
+    validate_ledger owns those families, and `alx check` already prints them,
+    so repeating them here would double every ledger finding.
+    """
     findings = []
     report_path = Path(report_path)
     ledger_path = Path(ledger_path)
     try:
-        report_text = report_path.read_text(encoding="utf-8")
+        report_text = mask_verification_note(
+            report_path.read_text(encoding="utf-8")
+        )
     except OSError as exc:
         findings.append(
             _finding("content/check", f"Final report could not be read: {exc}")
@@ -499,7 +506,7 @@ def run_check(report_path, ledger_path, review_note_path=None):
             findings.append(_finding("content/check", error))
         review = review or {}
     claim_support = _claim_support_map(review)
-    if isinstance(ledger, dict):
+    if isinstance(ledger, dict) and include_ledger_checks:
         for error in validate_references(ledger):
             findings.append(_finding("content/check", error))
         for error in validate_report_against_ledger(report_text, ledger):
@@ -590,8 +597,7 @@ def run_check(report_path, ledger_path, review_note_path=None):
 
 def _per_claim_binding_findings(report_text, ledger, claim_support):
     findings = []
-    body, _, _, _ = _body_and_sources(report_text)
-    paragraphs = _body_paragraphs(body)
+    paragraphs = [block for _number, block in split_body_paragraphs(report_text)]
     sources_by_id = {
         source.get("source_id"): source
         for source in ledger.get("sources", [])

@@ -814,6 +814,21 @@ def _predicate_is_negated(clause, predicate, report_lang):
     return any(token in prefix for token in NEGATIONS[report_lang])
 
 
+def _mask_verification_note(text):
+    """Blank the machine-written Verification note before every tier.
+
+    `alx issue` writes that paragraph (spec §6.9); it is not the writer's
+    prose, so it is never counted for style, semantic fidelity, quantities or
+    quotation preservation.
+    """
+    try:
+        from .report_blocks import mask_verification_note
+    except ImportError:
+        from report_blocks import mask_verification_note
+
+    return mask_verification_note(text)
+
+
 def _checker_prose(text):
     """Return report-body prose for Rewild, preserving Markdown table cells."""
     try:
@@ -1648,7 +1663,7 @@ def run_check(
         )
     if len(texts) < 2:
         return findings
-    report_text = texts["report"]
+    report_text = _mask_verification_note(texts["report"])
     source_text = texts["pre-Rewild source"]
 
     findings.extend(_integrity_findings(report_text, source_text))
@@ -1763,7 +1778,7 @@ def run_gate(
             errors.append(f"{label} file must be UTF-8 text: {exc}")
     if errors:
         return errors
-    report_text = texts["report"]
+    report_text = _mask_verification_note(texts["report"])
     source_text = texts["pre-Rewild source"]
     # Integrity first: corrupted prose is not a style judgment, and every
     # later tier would be measuring mangled text.

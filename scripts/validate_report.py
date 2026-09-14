@@ -355,8 +355,8 @@ def _report_prose(text, sections):
     return text
 
 
-def _finding(family, message, *, ids=None, severity="hard", fix="", remove=""):
-    klass = "F" if severity == "hard" else "A"
+def _finding(family, message, *, ids=None, severity="hard", fix="", remove="", klass=None):
+    klass = klass or ("F" if severity == "hard" else "A")
     return Finding(
         family=family,
         severity=severity,
@@ -442,12 +442,41 @@ def _body_and_sources(text):
     return text[:source_start], text[source_start:], sections, source_index
 
 
-def _body_paragraphs(body):
-    return [
-        paragraph
-        for paragraph in re.split(r"\n\s*\n", body)
-        if paragraph.strip()
-    ]
+#: A standfirst date line on its own block, in either locale form
+#: (`report_contract.localized_date`).
+_DATE_LINE_RE = re.compile(
+    r"^(?:\d{4}年\d{1,2}月\d{1,2}日|\d{1,2}\s+[A-Za-z]+\s+\d{4})$"
+)
+
+
+def split_body_paragraphs(text):
+    """The one body-paragraph numbering of the system (spec §6.7c).
+
+    1-based over body prose blocks. The H1, the standfirst blockquote, the
+    date line, every other heading, fenced code, tables and the Sources
+    section are not numbered, so `alx claim bind C5 --paragraph N`,
+    validate_report and content_gate all mean the same N.
+    """
+    body, _source_text, _sections, _source_index = _body_and_sources(text)
+    masked = _mask_fenced_code(body)
+    spans = []
+    cursor = 0
+    for match in re.finditer(r"\n\s*\n", masked):
+        spans.append((cursor, match.start()))
+        cursor = match.end()
+    spans.append((cursor, len(masked)))
+    numbered = []
+    for start, end in spans:
+        stripped = masked[start:end].strip()
+        if not stripped:
+            continue
+        first = stripped.splitlines()[0].strip()
+        if first.startswith(("#", ">", "|")):
+            continue
+        if _DATE_LINE_RE.match(stripped):
+            continue
+        numbered.append((len(numbered) + 1, body[start:end].strip()))
+    return numbered
 
 
 def _immediate_blockquote_lines(text):
@@ -504,7 +533,7 @@ def binding_findings(text, ledger):
             )
         )
 
-    paragraphs = _body_paragraphs(body)
+    paragraphs = split_body_paragraphs(text)
     sources_by_id = {
         source.get("source_id"): source
         for source in ledger.get("sources", [])
@@ -533,7 +562,7 @@ def binding_findings(text, ledger):
             continue
         foundation_urls = _foundation_urls(claim, sources_by_id)
         candidates = []
-        for index, paragraph in enumerate(paragraphs, start=1):
+        for index, paragraph in paragraphs:
             paragraph_urls = {normalize_url(url) for url in extract_markdown_urls(paragraph)}
             if foundation_urls & paragraph_urls:
                 candidates.append(index)
@@ -555,6 +584,7 @@ def binding_findings(text, ledger):
                 "binding/sources-section",
                 "Sources H2 must be last and equal the cited-source list.",
                 fix="run `alx check --fix`",
+                klass="A",
             )
         )
     else:
@@ -564,6 +594,7 @@ def binding_findings(text, ledger):
                     "binding/sources-section",
                     "Sources must be the last H2 section.",
                     fix="run `alx check --fix`",
+                    klass="A",
                 )
             )
         cited = {normalize_url(url) for url in extract_markdown_urls(body)}
@@ -574,6 +605,7 @@ def binding_findings(text, ledger):
                     "binding/sources-section",
                     "Sources section must equal the cited-source list.",
                     fix="run `alx check --fix`",
+                    klass="A",
                 )
             )
     return findings
@@ -605,6 +637,7 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
                 "integrity/structure",
                 "Report needs one H1 title.",
                 fix="add an H1 title",
+                klass="A",
             )
         )
     if not blockquote_lines:
@@ -613,6 +646,7 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
                 "integrity/structure",
                 "Report needs a standfirst blockquote immediately under the H1.",
                 fix="add the standfirst blockquote under the H1",
+                klass="A",
             )
         )
     expected_date = None
@@ -628,12 +662,19 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
     except ValueError:
         expected_date = None
     if expected_date and expected_date not in blockquote_lines:
+        # `check --fix` repairs date-line whitespace only; anything else is a
+        # formatting defect it cannot repair, so spec §6.10 makes it Class A.
+        folded = re.sub(r"\s+", "", expected_date)
+        repairable = any(
+            re.sub(r"\s+", "", line) == folded for line in blockquote_lines
+        )
         findings.append(
             _finding(
                 "integrity/date-line",
                 "Date line must use the strict locale format and sit in the "
                 f"immediate blockquote under the H1: {expected_date}.",
                 fix="put the locale date on the immediate blockquote under the H1",
+                klass="F" if repairable else "A",
             )
         )
     if lang:
@@ -1235,22 +1276,25 @@ def _receipt_hash_errors(args, markdown_path):
             ledger_hash = hashlib.sha256(Path(args.ledger).read_bytes()).hexdigest()
         except OSError as exc:
             errors.append(f"Evidence ledger could not be hashed: {exc}")
-    for _flag, value, label, report_bound in (
-        ("--rewild-receipt", args.rewild_receipt, "Rewild gate receipt", True),
+    # The Rewild receipt is not ledger-bound: rewild_gate.run_gate records the
+    # report, pre-Rewild source and checker hashes only. The source-fidelity
+    # receipt binds claims to sources, so it records a ledger hash and no
+    # report hash; the report hash lives in receipts/issue.json.
+    for _flag, value, label, report_bound, ledger_bound in (
+        ("--rewild-receipt", args.rewild_receipt, "Rewild gate receipt", True, False),
         (
             "--content-receipt",
             args.content_receipt,
             "Content quality gate receipt",
             True,
+            True,
         ),
-        # The source-fidelity receipt binds claims to sources, so it records a
-        # ledger hash and no report hash; the report hash lives in
-        # receipts/issue.json.
         (
             "--source-fidelity-receipt",
             args.source_fidelity_receipt,
             "source-fidelity receipt",
             False,
+            True,
         ),
     ):
         if not value or not Path(value).is_file():
@@ -1272,7 +1316,7 @@ def _receipt_hash_errors(args, markdown_path):
                 f"{label} report_sha256 does not match the current report."
             )
         recorded_ledger = payload.get("ledger_sha256")
-        if ledger_hash:
+        if ledger_hash and ledger_bound:
             if not recorded_ledger:
                 errors.append(f"{label} does not record ledger_sha256.")
             elif recorded_ledger != ledger_hash:

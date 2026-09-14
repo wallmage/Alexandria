@@ -3447,8 +3447,15 @@ def _offline_probe_findings(ledger, cache_dir):
             cached = read_cache(cache_dir, source_id)
             if cached is None:
                 continue
-            text, _meta = cached
-            findings.extend(probe_findings(claim, sources.get(source_id, {}), text))
+            text, meta = cached
+            # cache_meta carries the recorded probe contexts, so offline
+            # `check` produces fidelity/context-changed (spec §7.2.6) instead
+            # of waiting for a successful live receipt.
+            findings.extend(
+                probe_findings(
+                    claim, sources.get(source_id, {}), text, cache_meta=meta
+                )
+            )
     return findings
 
 

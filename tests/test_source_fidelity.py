@@ -1713,3 +1713,74 @@ class CliResilienceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProbeContextReconfirmationTests(unittest.TestCase):
+    EXTRACT = "The tariff rose to 12 percent in 2026."
+
+    def _result(self, text):
+        return source_fidelity.FetchResult(
+            status="ok",
+            reason_class="",
+            reason="",
+            text=text,
+            charset="utf-8",
+            url="https://example.org/p",
+            final_url="https://example.org/p",
+            aliases=[],
+            http_status=200,
+            title="Tariffs",
+            published=None,
+            text_sha256="",
+        )
+
+    def _claim(self):
+        return {
+            "claim_id": "C1",
+            "source_ids": ["S1"],
+            "source_evidence": [
+                {"source_id": "S1", "extract_or_location": self.EXTRACT}
+            ],
+        }
+
+    def _families(self, cache):
+        text, meta = source_fidelity.read_cache(cache, "S1")
+        return [
+            item.family
+            for item in source_fidelity.probe_findings(
+                self._claim(),
+                {"source_id": "S1", "url": "https://example.org/p"},
+                text,
+                cache_meta=meta,
+            )
+        ]
+
+    def _refreshed_cache(self, directory):
+        cache = Path(directory)
+        source_fidelity.write_cache(
+            cache,
+            "S1",
+            self._result(f"Background as researched. {self.EXTRACT} Closing line."),
+        )
+        source_fidelity.record_probe_contexts(
+            cache, "S1", "C1", source_fidelity.probe_strings(self.EXTRACT)
+        )
+        source_fidelity.write_cache(
+            cache,
+            "S1",
+            self._result(f"A rewritten opening. {self.EXTRACT} A rewritten close."),
+        )
+        return cache
+
+    def test_refresh_alone_keeps_the_context_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = self._refreshed_cache(directory)
+            self.assertIn("fidelity/context-changed", self._families(cache))
+
+    def test_recording_after_refresh_clears_the_context_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = self._refreshed_cache(directory)
+            source_fidelity.record_probe_contexts(
+                cache, "S1", "C1", source_fidelity.probe_strings(self.EXTRACT)
+            )
+            self.assertEqual([], self._families(cache))

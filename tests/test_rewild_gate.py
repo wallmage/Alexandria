@@ -1021,3 +1021,45 @@ class StyleMaskingTests(unittest.TestCase):
         long = " ".join(f"word{index}" for index in range(4000))
         self.assertEqual(1, module.vocabulary_budget(short, "en"))
         self.assertEqual(8, module.vocabulary_budget(long, "en"))
+
+
+class VerificationNoteMaskTests(unittest.TestCase):
+    """The machine-written note (spec §6.9) is never scored as the writer's prose."""
+
+    NOTE = (
+        "核查说明：C3、C7 的在线核验未通过，涉及 12.5% 的数值差异；"
+        "S4 在核验时无法访问。"
+    )
+
+    def _run(self, paragraph):
+        from scripts.rewild_gate import run_check
+
+        base = (ROOT / "tests" / "fixtures" / "golden" / "zh-CN" / "report.md").read_text(
+            encoding="utf-8"
+        )
+        offset = base.rfind("\n## ")
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            source = work / "pre-rewild.md"
+            report = work / "report.md"
+            source.write_text(base, encoding="utf-8")
+            report.write_text(
+                f"{base[:offset]}\n\n{paragraph}\n{base[offset:]}", encoding="utf-8"
+            )
+            return run_check(report, source, lang="zh-CN")
+
+    def test_prefixes_cover_every_report_language(self):
+        from scripts.report_blocks import VERIFICATION_NOTE_PREFIXES
+
+        self.assertEqual({"en", "zh-CN", "zh-HK"}, set(VERIFICATION_NOTE_PREFIXES))
+        self.assertEqual("核查说明：", VERIFICATION_NOTE_PREFIXES["zh-CN"])
+
+    def test_note_paragraph_is_masked_from_every_tier(self):
+        unprefixed = self.NOTE.split("：", 1)[1]
+        self.assertTrue(
+            any(
+                "figures not in the original" in finding.message
+                for finding in self._run(unprefixed)
+            )
+        )
+        self.assertEqual([], self._run(self.NOTE))

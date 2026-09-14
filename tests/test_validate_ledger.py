@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,12 @@ ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location("validate_ledger", MODULE_PATH)
 validate_ledger = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(validate_ledger)
+
+FIDELITY_SPEC = importlib.util.spec_from_file_location(
+    "source_fidelity", ROOT / "scripts" / "source_fidelity.py"
+)
+source_fidelity = importlib.util.module_from_spec(FIDELITY_SPEC)
+FIDELITY_SPEC.loader.exec_module(source_fidelity)
 
 
 def valid_quality_ledger():
@@ -3495,3 +3502,69 @@ class ResilienceLedgerApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+EXTRACT = "The tariff rose to 12 percent in 2026."
+
+
+def _cache_result(text):
+    return source_fidelity.FetchResult(
+        status="ok",
+        reason_class="",
+        reason="",
+        text=text,
+        charset="utf-8",
+        url="https://example.org/p",
+        final_url="https://example.org/p",
+        aliases=[],
+        http_status=200,
+        title="Tariffs",
+        published=None,
+        text_sha256="",
+    )
+
+
+def _probe_ledger():
+    return {
+        "schema_version": 4,
+        "sources": [{"source_id": "S1", "url": "https://example.org/p"}],
+        "claims": [
+            {
+                "claim_id": "C1",
+                "source_ids": ["S1"],
+                "source_evidence": [
+                    {"source_id": "S1", "extract_or_location": EXTRACT}
+                ],
+            }
+        ],
+    }
+
+
+class OfflineContextChangeTests(unittest.TestCase):
+    def test_collect_findings_reports_context_change_from_the_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(
+                cache,
+                "S1",
+                _cache_result(
+                    f"Background as researched. {EXTRACT} A neutral closing line."
+                ),
+            )
+            source_fidelity.record_probe_contexts(
+                cache, "S1", "C1", source_fidelity.probe_strings(EXTRACT)
+            )
+            source_fidelity.write_cache(
+                cache,
+                "S1",
+                _cache_result(
+                    f"更正: the earlier framing was withdrawn. {EXTRACT} "
+                    "A rewritten closing line."
+                ),
+            )
+            findings = validate_ledger.collect_findings(
+                _probe_ledger(), cache_dir=cache
+            )
+            families = [item.family for item in findings]
+            self.assertIn("fidelity/context-changed", families)
+            self.assertNotIn("fidelity/mismatch", families)

@@ -169,7 +169,9 @@ def main():
         "requirements_sha256": hashlib.sha256((ROOT / "requirements.txt").read_bytes()).hexdigest(),
         "verified_languages": ["en", "zh-CN", "zh-HK"],
     }
-    (ROOT / ".runtime.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    text = json.dumps(manifest, indent=2) + "\n"
+    for target in (runtime / ".runtime.json", ROOT / ".runtime.json"):
+        target.write_text(text, encoding="utf-8")
     print("Installation verified.")
 
 

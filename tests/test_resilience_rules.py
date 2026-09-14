@@ -291,6 +291,30 @@ class YearMonthFragmentCoverageTests(unittest.TestCase):
             self.assertIn("d:1945-08", findings[0].message)
 
 
+class YearInsideTheExtractCoverageTests(unittest.TestCase):
+    """R14: the year written inside the extract itself covers a month-day
+    fragment, with or without a cache (run 5, C9: content gate had no page)."""
+
+    EXTRACT = "1936年12月,\"西安事變\"爆發前數小時.12月11日,蔣寫張學良形色急遽."
+
+    def claim(self):
+        return {
+            "claim_id": "C9",
+            "claim": "1936年12月11日蒋介石写张学良形色急遽。",
+            "kind": "fact",
+            "importance": "key",
+            "source_ids": ["S2"],
+            "source_evidence": [
+                {"source_id": "S2", "extract_or_location": self.EXTRACT}
+            ],
+        }
+
+    def test_year_in_the_extract_covers_the_full_date_without_a_cache(self):
+        self.assertEqual(
+            [], quantity_findings(self.claim(), valid_quality_ledger(), None)
+        )
+
+
 class EvidenceEntryProbeTests(unittest.TestCase):
     """R22: two passages from one page are evidence, and each is probed."""
 

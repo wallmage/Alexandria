@@ -3853,7 +3853,7 @@ def _cached_documents(claim, cache_dir):
 
 
 def source_year_text(claim, ledger, cache_dir=None):
-    """R14 haystack: cached text plus title/published of this claim's sources."""
+    """R14 haystack: the claim's own extracts, cached text, title/published."""
     sources_by_id = {
         source.get("source_id"): source
         for source in (ledger or {}).get("sources") or []
@@ -3865,7 +3865,12 @@ def source_year_text(claim, ledger, cache_dir=None):
         for entry in claim.get("source_evidence") or []
         if isinstance(entry, dict)
     )
-    parts = _cached_documents(claim, cache_dir)
+    parts = [
+        _text(entry.get("extract_or_location"))
+        for entry in claim.get("source_evidence") or []
+        if isinstance(entry, dict)
+    ]
+    parts.extend(_cached_documents(claim, cache_dir))
     for source_id in dict.fromkeys(cited):
         source = sources_by_id.get(source_id) or {}
         parts.extend([_text(source.get("title")), _text(source.get("published"))])

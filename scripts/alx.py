@@ -214,6 +214,7 @@ CLASS_A_FAMILIES = frozenset(
 MECHANICAL_FIX_FAMILIES = frozenset(
     {
         "ledger/source-ids",  # source_ids derived from source_evidence
+        "ledger/person",  # person_ids derived from registered names (R15)
         "ledger/source-family",  # source_family from the registrable domain
         "ledger/freshness",  # accessed / verified_at refreshed from cache meta
         "binding/excerpt-missing",  # excerpt writes for unambiguous mappings
@@ -1585,7 +1586,8 @@ def cmd_claim_add(args):
         )
         for item_finding in findings:
             lines.append(
-                f"{claim_id} FAIL [{item_finding.family}] {item_finding.message}"
+                f"{claim_id} {'WARN' if item_finding.severity == 'warn' else 'FAIL'}"
+                f" [{item_finding.family}] {item_finding.message}"
                 f" — fix: {item_finding.fix}"
             )
         if hard_findings(findings):
@@ -2689,6 +2691,9 @@ def mechanical_fixes(ws, state, ledger):
                 derived.append(source_id)
         if derived:
             claim["source_ids"] = derived
+        claim["person_ids"] = validate_ledger.derive_person_ids(
+            claim, ledger.get("people")
+        )
         stamps = sorted(
             (
                 meta_by_source.get(source_id, {}).get("fetched_at", "")[:10]

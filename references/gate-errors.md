@@ -6,12 +6,12 @@ Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
-Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a Class A finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: (edit prose; waivable by alx issue --deliver)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
+Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a Class A finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: (edit prose; waivable by alx issue --deliver)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
 
 ## Ledger (`check` b / `validate_ledger`)
 
 ### `ledger/quantity` — F
-- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts.
+- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged.
 - **fix:** `alx find S<n> TOKEN` then extend quote, or reword claim to dated form.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
@@ -118,9 +118,9 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx fetch --id S<n> --refresh`
 - **example:** S4 has no `published` and no reason.
 
-### `ledger/person` — F
-- **rule:** person-linked claim without a registered person, or `living_status: unknown`.
-- **fix:** `alx ledger merge people.json`
+### `ledger/person` — F/W
+- **rule:** person-linked claim without a registered person, or `living_status: unknown`. R15 (W): a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix` and warns; the harm rules then run on the linked claim and stay hard.
+- **fix:** `alx ledger merge people.json` (auto-link warn: `alx check --fix`)
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C3 names P1 while P1 status is `unknown`.
 

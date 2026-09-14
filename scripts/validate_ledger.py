@@ -269,6 +269,31 @@ def mentions_person_alias(text, person):
             return True
     return False
 
+def _auto_link_finding(claim_id, auto_linked):
+    return _f(
+        "ledger/person",
+        f"{claim_id}: claim names registered person {', '.join(auto_linked)}; "
+        "person_ids auto-linked.",
+        severity="warn",
+        ids=[claim_id, *auto_linked],
+        fix="alx check --fix",
+    )
+
+
+def derive_person_ids(claim, people):
+    """R15: recorded person_ids plus every registered person the claim names."""
+    linked = claim.get("person_ids")
+    linked = list(linked) if isinstance(linked, list) else []
+    text = _text(claim.get("claim"))
+    for person in people or ():
+        if not isinstance(person, dict):
+            continue
+        person_id = person.get("person_id")
+        if person_id and person_id not in linked and mentions_person_alias(text, person):
+            linked.append(person_id)
+    return linked
+
+
 _NUMBER_WORDS = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -965,6 +990,30 @@ def _quantity_granularity_only(claim_forms, evidence_forms):
     return True
 
 
+def _year_documented_coverage(claim_forms, evidence_forms, source_text):
+    """R14: a month-day (or day) fragment covers the claim's full date when the
+    parts the extract omits are stated elsewhere in the same source (cached
+    text, title or published date). Without that text the rule is unchanged."""
+    if not source_text:
+        return False
+    for claim_form in claim_forms:
+        parts = _parse_date_form(claim_form)
+        if not parts:
+            continue
+        year, month, day = parts
+        if not (year and month and day):
+            continue
+        if not re.search(rf"(?<!\d){year}(?!\d)", source_text):
+            continue
+        if f"d:*-{int(month):02d}-{int(day):02d}" in evidence_forms:
+            return True
+        if f"d:*-*-{int(day):02d}" in evidence_forms and re.search(
+            rf"(?<!\d){int(month)}\s*月|-{int(month):02d}-", source_text
+        ):
+            return True
+    return False
+
+
 def _claim_field_fix(field):
     """A claim field re-enters the ledger only through `claim add`."""
     return f"set field {field} in claims/*.json, then alx claim add claims/*.json"
@@ -1594,7 +1643,9 @@ def _evidence_carries_assertion(
     return False
 
 
-def _evidence_coverage_findings(claim, dated_fields=(), inherited_evidence=""):
+def _evidence_coverage_findings(
+    claim, dated_fields=(), inherited_evidence="", source_text=""
+):
     """Require claim assertions to be covered by the recorded evidence.
 
     `dated_fields` carries the dates the ledger already records in its own
@@ -1685,6 +1736,8 @@ def _evidence_coverage_findings(claim, dated_fields=(), inherited_evidence=""):
             )
             continue
         if _quantity_is_covered(claim_forms, evidence_forms):
+            continue
+        if _year_documented_coverage(claim_forms, evidence_forms, source_text):
             continue
         evidence_rows = claim.get("source_evidence")
         offered = []
@@ -2101,7 +2154,7 @@ def _supports_cycles(claims_by_id):
     return sorted(cycles)
 
 
-def _reference_findings(data):
+def _reference_findings(data, cache_dir=None):
     """Check ID uniqueness and links that JSON Schema cannot express."""
     if not isinstance(data, dict):
         return []
@@ -2458,6 +2511,16 @@ def _reference_findings(data):
             )
         person_links = claim.get("person_ids", [])
         person_links = person_links if isinstance(person_links, list) else []
+        # R15: naming a registered person is a mechanical linkage repair, not a
+        # refusal; the harm rules below then run on the linked set.
+        auto_linked = [
+            person_id
+            for person_id in derive_person_ids(claim, people_by_id.values())
+            if person_id not in person_links
+        ]
+        if auto_linked:
+            errors.append(_auto_link_finding(claim_id, auto_linked))
+            person_links = person_links + auto_linked
         for person_id in person_links:
             if person_id not in people_by_id:
                 errors.append(
@@ -2539,20 +2602,6 @@ def _reference_findings(data):
             HUMAN_HARM_PATTERN.search(claim_text)
             or SENSITIVE_PRIVATE_PATTERN.search(claim_text)
         )
-        for person_id, person in people_by_id.items():
-            if (
-                mentions_person_alias(claim_text, person)
-                and person_id not in person_links
-            ):
-                errors.append(
-                    _f(
-                        "ledger/reference",
-                        f"{claim_id}: claim names registered person {person_id} "
-                        "but does not link that person_id.",
-                        fix=_claim_field_fix("person_ids"),
-                        remove=_drop(claim_id),
-                    )
-                )
         if harmful_text:
             if (
                 brief.get("archetype") == "person"
@@ -3102,7 +3151,9 @@ def _reference_findings(data):
                 if related_id in claims_by_id
             )
         errors.extend(
-            _evidence_coverage_findings(claim, ledger_dates, inherited)
+            _evidence_coverage_findings(
+                claim, ledger_dates, inherited, source_year_text(claim, data, cache_dir)
+            )
         )
         errors.extend(
             _absence_errors(claim, report_day)
@@ -3500,7 +3551,7 @@ def collect_findings(ledger, *, schema_path=None, cache_dir=None):
     for item in validate_schema(ledger, schema):
         location, _, detail = item.partition(": ")
         findings.append(_f("ledger/schema", item, fix=schema_remedy(location, detail)))
-    findings.extend(_reference_findings(ledger))
+    findings.extend(_reference_findings(ledger, cache_dir))
     if cache_dir:
         findings.extend(_offline_probe_findings(ledger, cache_dir))
     return findings
@@ -3597,6 +3648,7 @@ def expand_claim_input(item, ledger, *, cache_meta):
     claim = dict(item)
     claim.pop("report_paragraph", None)
     claim["source_ids"] = source_ids
+    claim["person_ids"] = derive_person_ids(claim, ledger.get("people"))
     claim["include_in_report"] = True
     claim["report_excerpts"] = []
     claim["triangulation"] = {
@@ -3639,6 +3691,52 @@ def _claim_input_schema_findings(claim):
 _CJK_CHARACTER = re.compile("[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
 
 
+def _cached_documents(claim, cache_dir):
+    """Normalized cache text for every source this claim cites."""
+    if not cache_dir:
+        return []
+    try:
+        from source_fidelity import normalize_text, read_cache, strip_markup
+    except ImportError:
+        return []
+    source_ids = list(claim.get("source_ids") or [])
+    source_ids.extend(
+        entry.get("source_id")
+        for entry in claim.get("source_evidence") or []
+        if isinstance(entry, dict) and entry.get("source_id")
+    )
+    documents = []
+    for source_id in dict.fromkeys(source_ids):
+        cached = read_cache(cache_dir, source_id)
+        if cached is None:
+            continue
+        text = cached[0]
+        documents.append(
+            strip_markup(text) if "<" in str(text or "") else normalize_text(text)
+        )
+    return documents
+
+
+def source_year_text(claim, ledger, cache_dir=None):
+    """R14 haystack: cached text plus title/published of this claim's sources."""
+    sources_by_id = {
+        source.get("source_id"): source
+        for source in (ledger or {}).get("sources") or []
+        if isinstance(source, dict)
+    }
+    cited = list(claim.get("source_ids") or [])
+    cited.extend(
+        entry.get("source_id")
+        for entry in claim.get("source_evidence") or []
+        if isinstance(entry, dict)
+    )
+    parts = _cached_documents(claim, cache_dir)
+    for source_id in dict.fromkeys(cited):
+        source = sources_by_id.get(source_id) or {}
+        parts.extend([_text(source.get("title")), _text(source.get("published"))])
+    return " ".join(part for part in parts if part)
+
+
 def _extract_length_findings(claim, *, cache_dir=None):
     """Ruling R13: length is advice, never a fabrication check.
 
@@ -3679,10 +3777,23 @@ def claim_findings(claim, ledger, *, cache_dir=None):
     findings = []
     findings.extend(_claim_input_schema_findings(claim))
     findings.extend(_extract_length_findings(claim, cache_dir=cache_dir))
+    auto_linked = [
+        person_id
+        for person_id in derive_person_ids(claim, ledger.get("people"))
+        if person_id not in (claim.get("person_ids") or [])
+    ]
+    if auto_linked:
+        findings.append(
+            _auto_link_finding(claim.get("claim_id", "<unknown>"), auto_linked)
+        )
     working = dict(claim)
     if working.get("source_ids") is None and working.get("source_evidence"):
         working = expand_claim_input(working, ledger, cache_meta={})
-    findings.extend(_evidence_coverage_findings(working))
+    findings.extend(
+        _evidence_coverage_findings(
+            working, source_text=source_year_text(working, ledger, cache_dir)
+        )
+    )
     findings.extend(_derived_findings(working))
     claims = [item for item in (ledger.get("claims") or []) if isinstance(item, dict)]
     shadow = dict(ledger)
@@ -3691,7 +3802,7 @@ def claim_findings(claim, ledger, *, cache_dir=None):
     claim_id = working.get("claim_id")
     findings.extend(
         item
-        for item in _reference_findings(shadow)
+        for item in _reference_findings(shadow, cache_dir)
         if claim_id and claim_id in item.ids
     )
     if cache_dir:

@@ -1128,7 +1128,7 @@ class LivingPersonSafetyTests(unittest.TestCase):
             errors,
         )
 
-    def test_registered_person_name_always_requires_the_person_link(self):
+    def test_registered_person_name_is_auto_linked_with_a_warn(self):
         data = living_harm_ledger()
         claim = data["claims"][-1]
         claim["claim"] = "Alex Doe embezzled public funds."
@@ -1137,7 +1137,7 @@ class LivingPersonSafetyTests(unittest.TestCase):
         claim["human_harm_review"] = None
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
-            any("does not link that person_id" in error for error in errors),
+            any("person_ids auto-linked" in error for error in errors),
             errors,
         )
 
@@ -1426,8 +1426,10 @@ class LivingPersonSafetyTests(unittest.TestCase):
         data["claims"][-1]["person_ids"] = []
         data["claims"][-1]["human_harm_review"] = None
         errors = validate_ledger.validate_references(data)
+        # R15: the link is derived from the name, and the harm rules then run
+        # on the linked claim.
         self.assertTrue(
-            any("does not link that person_id" in error for error in errors),
+            any("protected-person harm claim requires" in error for error in errors),
             errors,
         )
 
@@ -3767,7 +3769,7 @@ class ClaimRemedyTests(unittest.TestCase):
             if needle in item.message
         ]
 
-    def test_unlinked_person_remedy_names_person_ids(self):
+    def test_unlinked_person_remedy_is_the_mechanical_link(self):
         data = living_harm_ledger()
         claim = data["claims"][-1]
         claim["claim"] = "Alex Doe embezzled public funds."
@@ -3775,11 +3777,7 @@ class ClaimRemedyTests(unittest.TestCase):
         claim.pop("person_claim_role", None)
         claim["human_harm_review"] = None
         self.assertEqual(
-            [
-                "set field person_ids in claims/*.json, "
-                "then alx claim add claims/*.json"
-            ],
-            self._fixes(data, "does not link that person_id"),
+            ["alx check --fix"], self._fixes(data, "person_ids auto-linked")
         )
 
     def test_duplicate_evidence_remedy_names_source_evidence(self):

@@ -642,12 +642,16 @@ def _fit(message, ids, fix, remove):
     if remove:
         tail += f" Remove: `{remove}`."
     budget = MAX_FINDING_CHARS - len("  ") - len(prefix) - len(tail) - 1
-    body = message.rstrip(".")
-    if len(body) > budget:
-        # Minor 2: a budget at or below zero still cuts the message; the ids and
-        # the remedy are never truncated, so only they may overrun the cap.
-        body = body[: max(budget - 1, 0)].rstrip() + "\u2026"
-    return body
+    # A message may carry continuation lines (the portfolio vocabulary); the cap
+    # is per printed line, not per message.
+    body = []
+    for line in message.rstrip(".").split("\n"):
+        if len(line) > budget:
+            # Minor 2: a budget at or below zero still cuts the message; the ids
+            # and the remedy are never truncated, so only they may overrun.
+            line = line[: max(budget - 1, 0)].rstrip() + "\u2026"
+        body.append(line)
+    return "\n".join(body)
 
 
 def honest_fix(family, text):
@@ -800,14 +804,40 @@ def _minutes(state):
     return elapsed, remaining
 
 
-def _emit(ws, state, command, summary, lines):
+#: Field test 4: at this many elapsed minutes with nothing accepted the run is
+#: past rescue by more research; the footer says so once per command.
+BEHIND_SCHEDULE_MINUTES = 12
+_BEHIND_SCHEDULE_PRINTED = False
+
+
+def _behind_schedule_line(state, elapsed):
+    """The escalation line, or None while the run is still on schedule."""
+    global _BEHIND_SCHEDULE_PRINTED
+    if _BEHIND_SCHEDULE_PRINTED or elapsed <= BEHIND_SCHEDULE_MINUTES:
+        return None
+    if state.get("counters", {}).get("claims"):
+        return None
+    _BEHIND_SCHEDULE_PRINTED = True
+    return (
+        f"BEHIND SCHEDULE: no claim accepted after {elapsed} min — add the "
+        "claims that validate now (alx claim add --dry-run shows which), drop "
+        "the rest, and start drafting report.md; remaining ≤ 15 min "
+        "→ alx issue --deliver"
+    )
+
+
+def _emit(ws, state, command, summary, lines, *, worklog=True):
     """Print the command output, append the worklog line, print the footer."""
     for line in lines:
         print(line)
     elapsed, remaining = _minutes(state)
     stamp = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
-    with ws.worklog.open("a", encoding="utf-8") as handle:
-        handle.write(f"{stamp} {command} {summary}\n")
+    if worklog:
+        with ws.worklog.open("a", encoding="utf-8") as handle:
+            handle.write(f"{stamp} {command} {summary}\n")
+    escalation = _behind_schedule_line(state, elapsed)
+    if escalation:
+        print(escalation)
     if remaining <= DEGRADE_MINUTES:
         print(DEGRADE_INSTRUCTION)
     print(f"elapsed {max(elapsed, 0)} min, remaining {max(remaining, 0)} min")
@@ -833,8 +863,9 @@ def _note_checker_timeout(messages):
 
 def _open(args):
     """Return (workspace, state, ledger) for an initialized directory."""
-    global _CHECKER_TIMED_OUT
+    global _CHECKER_TIMED_OUT, _BEHIND_SCHEDULE_PRINTED
     _CHECKER_TIMED_OUT = False
+    _BEHIND_SCHEDULE_PRINTED = False
     ws = Workspace(args.dir)
     if not ws.state_path.exists():
         raise SystemExit(
@@ -1145,6 +1176,9 @@ def _skeleton_ledger(args, subject, question, reader, report_day):
 
 def cmd_init(args):
     ws = Workspace(args.directory)
+    # Field test 6: the archetype default is a silent inference; say so.
+    origin = "given" if getattr(args, "archetype", None) else "inferred"
+    args.archetype = getattr(args, "archetype", None) or "hybrid"
     if ws.ledger_path.exists() and not args.force:
         print(
             f"{ws.ledger_path} exists; `alx init` refuses to overwrite it. "
@@ -1199,6 +1233,15 @@ def cmd_init(args):
         f"{args.lang} {args.archetype} workspace",
         [
             f"Workspace ready: {ws.dir}",
+            f"archetype: {args.archetype} ({origin}) — change with "
+            "`alx init … --archetype <name>"
+            + (
+                " --subject-status <living|deceased|…>`"
+                if args.archetype == "person"
+                else "`"
+            ),
+            f"language: {args.lang} — change with "
+            f"`alx init … --lang <{'|'.join(LANGUAGES)}>`",
             "Next: `alx fetch <url> ...` for 8-15 reachable sources.",
         ],
     )
@@ -1414,24 +1457,48 @@ def cmd_source_set(args):
 # --------------------------------------------------------------------------
 
 
+def _find_sources(ledger, value):
+    """`all`, one id, or a comma list, in ledger order for `all`."""
+    if str(value).strip() == "all":
+        return [
+            source.get("source_id")
+            for source in ledger.get("sources", [])
+            if isinstance(source, dict) and source.get("source_id")
+        ]
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
 def cmd_find(args):
-    ws, state, _ledger = _open(args)
-    entry = cached(ws, args.source_id)
-    if entry is None:
-        print(f"{args.source_id} has no cache; run `alx fetch`.", file=sys.stderr)
-        return 1
-    text = entry[0]
+    ws, state, ledger = _open(args)
+    source_ids = _find_sources(ledger, args.sources)
+    caches = {}
     lines = []
-    for index, match in enumerate(
-        re.finditer(re.escape(args.keyword), text, re.IGNORECASE), start=1
-    ):
-        if index > args.max:
-            break
-        window = sentence_window(text, match.start(), len(args.keyword), args.context)
-        lines.append(f"{index}. {window}")
-    if not lines:
-        lines.append(f"{args.source_id} does not contain {args.keyword}.")
-    _emit(ws, state, "find", f"{args.source_id} {args.keyword}", lines)
+    for source_id in source_ids:
+        entry = cached(ws, source_id)
+        if entry is None:
+            lines.append(f"{source_id} has no cache; run alx fetch")
+            continue
+        caches[source_id] = entry[0]
+    for keyword in args.keywords:
+        hits = 0
+        for source_id, text in caches.items():
+            for index, match in enumerate(
+                re.finditer(re.escape(keyword), text, re.IGNORECASE), start=1
+            ):
+                if index > args.max:
+                    break
+                window = sentence_window(
+                    text, match.start(), len(keyword), args.context
+                )
+                hits += 1
+                lines.append(f"{source_id} #{index} · {window}")
+                lines.append(
+                    "    extract_or_location: "
+                    + json.dumps(window, ensure_ascii=False)
+                )
+        if not hits:
+            lines.append(f"no source contains {keyword}")
+    _emit(ws, state, "find", f"{args.sources} {' '.join(args.keywords)}", lines)
     return 0
 
 
@@ -1574,9 +1641,10 @@ def cmd_claim_add(args):
             if isinstance(item, dict) and item.get("claim_id"):
                 sources[item["claim_id"]] = path
         items.extend(batch)
+    dry_run = getattr(args, "dry_run", False)
     lines = []
     accepted = 0
-    failed = False
+    failures = []
     seen = set()
     for item in items:
         claim_id = item.get("claim_id") or "<no claim_id>"
@@ -1602,7 +1670,7 @@ def cmd_claim_add(args):
             )
         if hard:
             lines.extend(_warn_lines(claim_id, warns))
-            failed = True
+            failures.append(f"{claim_id}({len(hard)})")
             continue
         claim = expand_claim_input(ws, item, ledger)
         claims = ledger.setdefault("claims", [])
@@ -1620,7 +1688,8 @@ def cmd_claim_add(args):
             record_binding_hashes(
                 state, ws.report_text(), {claim["claim_id"]: item["report_paragraph"]}
             )
-        record_probe_contexts(ws, claim)
+        if not dry_run:
+            record_probe_contexts(ws, claim)
         # K5: the remedy for this claim has to name the file it came from.
         if claim["claim_id"] in sources:
             state.setdefault("claim_files", {})[claim["claim_id"]] = sources[
@@ -1633,11 +1702,28 @@ def cmd_claim_add(args):
             f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
         )
         lines.extend(_warn_lines(claim_id, warns))
-    ws.save_ledger(ledger)
-    state["counters"]["claims"] = len(ledger["claims"])
-    ws.save_state(state)
-    _emit(ws, state, "claim add", f"{accepted} accepted", lines)
-    return 1 if failed else 0
+    if not dry_run:
+        ws.save_ledger(ledger)
+        state["counters"]["claims"] = len(ledger["claims"])
+        ws.save_state(state)
+    tail = f"{len(failures)} failed"
+    if failures:
+        tail += ": " + " ".join(failures)
+    lines.insert(0, f"{len(items)} submitted, {accepted} accepted, {tail}")
+    # Field test 3: the whole diagnosis survives a `| tail -15` of the output.
+    transcript = ws.alx / "last-claim-add.txt"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines.append("full output: .alx/last-claim-add.txt")
+    _emit(
+        ws,
+        state,
+        "claim add",
+        f"{accepted} accepted",
+        lines,
+        worklog=not dry_run,
+    )
+    return 1 if failures else 0
 
 
 def _claim_paragraph(state, claim):
@@ -3682,7 +3768,8 @@ def build_parser():
     init.add_argument("directory")
     init.add_argument("--lang", choices=LANGUAGES, required=True)
     init.add_argument("--subject", required=True, help="file holding the subject")
-    init.add_argument("--archetype", choices=ARCHETYPES, default="hybrid")
+    # Default None so `cmd_init` can say whether the archetype was inferred.
+    init.add_argument("--archetype", choices=ARCHETYPES, default=None)
     init.add_argument("--subject-status", choices=LIVING_STATUSES)
     init.add_argument("--reader", help="file holding the intended reader")
     init.add_argument("--budget-minutes", type=int, default=60)
@@ -3724,10 +3811,10 @@ def build_parser():
     )
 
     find = subparsers.add_parser("find", help="verbatim windows from the cache")
-    find.add_argument("source_id")
-    find.add_argument("keyword")
+    find.add_argument("sources", help="one id, a comma list, or `all`")
+    find.add_argument("keywords", nargs="+")
     find.add_argument("--context", type=int, default=160)
-    find.add_argument("--max", type=int, default=5)
+    find.add_argument("--max", type=int, default=3)
     find.set_defaults(handler=cmd_find)
 
     show = subparsers.add_parser("show", help="a cache window")
@@ -3739,6 +3826,7 @@ def build_parser():
     claim = subparsers.add_parser("claim", help="claim lifecycle")
     claim_sub = claim.add_subparsers(dest="claim_command", required=True)
     claim_add = claim_sub.add_parser("add")
+    claim_add.add_argument("--dry-run", dest="dry_run", action="store_true")
     claim_add.add_argument("files", nargs="+")
     claim_add.set_defaults(handler=cmd_claim_add, file_args=(("FILE", "files"),))
     claim_drop = claim_sub.add_parser("drop")

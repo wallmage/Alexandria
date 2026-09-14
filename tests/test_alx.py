@@ -62,6 +62,19 @@ CLAIM_TWO = {
     ],
 }
 
+CLAIM_BROKEN = {
+    "claim_id": "C3",
+    "claim": "The archive released 9,999 documents in March 2026.",
+    "kind": "fact",
+    "importance": "supporting",
+    "source_evidence": [
+        {
+            "source_id": "S1",
+            "extract_or_location": "The archive released 9,999 documents.",
+        }
+    ],
+}
+
 COVERAGE_PATCH = {
     "coverage": [
         {
@@ -490,11 +503,46 @@ class FindShowTests(AlxTestCase):
         self.fetch("https://example.org/study")
         code, out = self.run_in("find", "S1", "1,204")
         self.assertEqual(0, code, out)
-        self.assertIn("1. ", out)
+        self.assertIn("S1 #1 · ", out)
         self.assertIn("1,204 documents", out)
         self.assertNotIn("…", out)
         for line in out.splitlines():
-            self.assertLessEqual(len(line), 310, line)
+            if line.startswith("S1 #"):
+                self.assertLessEqual(len(line), 310, line)
+
+    def test_find_takes_many_sources_and_many_keywords(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        code, out = self.run_in("find", "S1,S2", "1,204", "retention")
+        self.assertEqual(0, code, out)
+        self.assertIn("S1 #1 · ", out)
+        self.assertIn("S2 #1 · ", out)
+        # `retention` is only in S1, so it still reports one hit, not a miss.
+        self.assertNotIn("no source contains retention", out)
+        code, all_out = self.run_in("find", "all", "1,204")
+        self.assertEqual(0, code, all_out)
+        self.assertIn("S1 #1 · ", all_out)
+        self.assertIn("S2 #1 · ", all_out)
+
+    def test_find_reports_a_missing_cache_and_a_missing_keyword(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        code, out = self.run_in("find", "S1,S9", "nowhere-in-any-source")
+        self.assertEqual(0, code, out)
+        self.assertIn("S9 has no cache; run alx fetch", out)
+        self.assertIn("no source contains nowhere-in-any-source", out)
+
+    def test_find_paste_line_round_trips_to_the_window(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        code, out = self.run_in("find", "S1", "1,204")
+        self.assertEqual(0, code, out)
+        lines = out.splitlines()
+        hit = next(line for line in lines if line.startswith("S1 #1 · "))
+        paste = lines[lines.index(hit) + 1]
+        prefix = "    extract_or_location: "
+        self.assertTrue(paste.startswith(prefix), paste)
+        self.assertEqual(hit.split(" · ", 1)[1], json.loads(paste[len(prefix) :]))
 
     def test_show_prints_cache_window(self):
         self.init()
@@ -3679,3 +3727,169 @@ class CheckerBudgetTests(AlxTestCase):
         self.assertEqual(
             1, sum(1 for note in notes if "Rewild checker timed out" in note), notes
         )
+
+
+class ClaimAddDryRunTests(AlxTestCase):
+    """Field-test P0/P1: a rehearsal, a summary, and one readable transcript."""
+
+    def prepared(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        return self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO, CLAIM_BROKEN])
+
+    def test_dry_run_prints_the_verdicts_and_writes_nothing(self):
+        batch = self.prepared()
+        ledger_bytes = (self.dir / "ledger.json").read_bytes()
+        state_before = self.state()
+        worklog = (self.dir / "worklog.md").read_text(encoding="utf-8")
+        code, out = self.run_in("claim", "add", "--dry-run", batch)
+        self.assertEqual(1, code, out)
+        self.assertIn("C1 added", out)
+        self.assertIn("C3 FAIL", out)
+        self.assertEqual(ledger_bytes, (self.dir / "ledger.json").read_bytes())
+        self.assertEqual(state_before, self.state())
+        self.assertEqual(0, self.state()["counters"]["claims"])
+        self.assertEqual(
+            worklog, (self.dir / "worklog.md").read_text(encoding="utf-8")
+        )
+        self.assertEqual([], self.ledger()["claims"])
+
+    def test_dry_run_and_real_run_agree_and_the_real_run_writes(self):
+        batch = self.prepared()
+        _code, dry = self.run_in("claim", "add", "--dry-run", batch)
+        code, live = self.run_in("claim", "add", batch)
+        self.assertEqual(1, code, live)
+        self.assertEqual(
+            [line for line in dry.splitlines() if line.startswith("C")],
+            [line for line in live.splitlines() if line.startswith("C")],
+        )
+        self.assertEqual({"C1", "C2"}, {c["claim_id"] for c in self.ledger()["claims"]})
+
+    def test_summary_line_leads_the_output_and_the_transcript_is_written(self):
+        batch = self.prepared()
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(1, code, out)
+        lines = out.splitlines()
+        self.assertEqual("3 submitted, 2 accepted, 1 failed: C3(2)", lines[0])
+        self.assertIn("full output: .alx/last-claim-add.txt", out)
+        transcript = (self.dir / ".alx" / "last-claim-add.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertTrue(transcript.startswith("3 submitted, 2 accepted, 1 failed: C3("))
+        self.assertIn("C3 FAIL", transcript)
+
+    def test_summary_line_says_zero_failed_without_a_list(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertEqual("2 submitted, 2 accepted, 0 failed", out.splitlines()[0])
+
+    def test_a_top_level_array_file_is_one_claim_per_element(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertEqual({"C1", "C2"}, {c["claim_id"] for c in self.ledger()["claims"]})
+        self.assertEqual(
+            {"C1": str(batch), "C2": str(batch)}, self.state()["claim_files"]
+        )
+
+
+class BehindScheduleTests(AlxTestCase):
+    LINE = "BEHIND SCHEDULE: no claim accepted after"
+
+    def set_elapsed(self, minutes):
+        state = self.state()
+        state["start_time"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        ).isoformat()
+        (self.dir / ".alx" / "state.json").write_text(
+            json.dumps(state), encoding="utf-8"
+        )
+
+    def test_the_footer_escalates_at_13_minutes_with_nothing_accepted(self):
+        self.init()
+        self.set_elapsed(13)
+        code, out = self.run_in("status")
+        self.assertEqual(0, code, out)
+        self.assertIn(f"{self.LINE} 13 min", out)
+        self.assertIn("alx claim add --dry-run", out)
+        self.assertIn("alx issue --deliver", out)
+        self.assertEqual(1, out.count(self.LINE))
+
+    def test_the_footer_is_quiet_early_and_once_a_claim_is_accepted(self):
+        self.init()
+        self.set_elapsed(5)
+        _code, out = self.run_in("status")
+        self.assertNotIn(self.LINE, out)
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.write_json("claims.json", [CLAIM_ONE])
+        self.run_in("claim", "add", batch)
+        self.set_elapsed(13)
+        _code, out = self.run_in("status")
+        self.assertNotIn(self.LINE, out)
+
+
+class InitEchoTests(AlxTestCase):
+    def test_init_echoes_an_inferred_archetype_and_the_language(self):
+        subject = self.root / "subject.txt"
+        subject.write_text("Ledger Study\n", encoding="utf-8")
+        code, out = self.run_alx(
+            "init", self.dir, "--lang", "en", "--subject", subject
+        )
+        self.assertEqual(0, code, out)
+        self.assertIn(
+            "archetype: hybrid (inferred) — change with "
+            "`alx init … --archetype <name>`",
+            out,
+        )
+        self.assertIn("language: en — change with", out)
+        self.assertEqual("hybrid", self.state()["archetype"])
+
+    def test_init_echoes_a_given_archetype_and_the_person_status_flag(self):
+        code, out = self.init()
+        self.assertEqual(0, code, out)
+        self.assertIn("archetype: artifact (given)", out)
+        self.assertNotIn("--subject-status", out)
+        subject = self.root / "person.txt"
+        subject.write_text("Someone Notable\n", encoding="utf-8")
+        code, out = self.run_alx(
+            "init",
+            self.root / "person-ws",
+            "--lang",
+            "en",
+            "--subject",
+            subject,
+            "--archetype",
+            "person",
+            "--subject-status",
+            "unknown",
+        )
+        self.assertEqual(0, code, out)
+        self.assertIn(
+            "archetype: person (given) — change with `alx init … "
+            "--archetype <name> --subject-status <living|deceased|…>`",
+            out,
+        )
+
+
+class PortfolioVocabularyTests(AlxTestCase):
+    def test_the_portfolio_finding_lists_every_allowed_value(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        for source in ledger["sources"]:
+            source["provenance"] = "unverified"
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        _code, out = self.run_in("check")
+        self.assertIn("portfolio has no independent source", out)
+        for flag, values in (
+            ("--provenance", alx.PROVENANCES),
+            ("--type", alx.EVIDENCE_TYPES),
+            ("--role", alx.SOURCE_ROLES),
+        ):
+            self.assertIn(f"{flag}: {', '.join(values)}", out)

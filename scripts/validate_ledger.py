@@ -2234,7 +2234,15 @@ def _reference_findings(data, cache_dir=None):
                 "ledger/portfolio",
                 "Evidence portfolio has no independent source; unverified "
                 "counts as interested. Record affected coverage as a gap "
-                "rather than supported.",
+                "rather than supported.\n"
+                "  --provenance: primary_independent, primary_interested, "
+                "secondary_independent, secondary_dependent, unverified\n"
+                "  --type: accountable_record, peer_reviewed, preprint, "
+                "official_documentation, dataset_or_test, reported_interview, "
+                "news_report, opinion_or_forecast, marketing, anecdote\n"
+                "  --role: subject_official, counterparty_official, "
+                "independent_analysis, empirical_data, affected_stakeholder, "
+                "expert_interpretation, historical_record",
                 fix="alx source set S1",
             )
         )

@@ -72,7 +72,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/portfolio` — F
 - **rule:** the source portfolio is not independent enough for the claim set (all sources interested, or one family only).
-- **fix:** `alx source set S<n> --provenance P`, or fetch an independent source.
+- **fix:** `alx source set S<n> --provenance P`, or fetch an independent source. The message lists the allowed values, one line each:
+  - `--provenance`: `primary_independent, primary_interested, secondary_independent, secondary_dependent, unverified`
+  - `--type`: `accountable_record, peer_reviewed, preprint, official_documentation, dataset_or_test, reported_interview, news_report, opinion_or_forecast, marketing, anecdote`
+  - `--role`: `subject_official, counterparty_official, independent_analysis, empirical_data, affected_stakeholder, expert_interpretation, historical_record`
 - **remove:** `alx fetch --id S<n> --refresh`
 - **example:** 9 of 9 claims on one publisher.
 

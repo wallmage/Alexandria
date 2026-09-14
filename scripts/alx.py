@@ -7,6 +7,7 @@ appends one worklog line and prints the elapsed/remaining footer last.
 """
 
 import argparse
+import glob
 import hashlib
 import io
 import json
@@ -382,7 +383,7 @@ def _drop_or_refresh(item):
 
 #: family -> (fix, remove) builders. Every printed remedy passes through here so
 #: the parse test over this one registry covers everything `alx` can print (R6).
-def _remedies(item, *, paragraphs=0):
+def _remedies(item, *, paragraphs=0, claim_files=None):
     family = item.family
     claim_id = _pick_id(item, "C")
     source_id = _pick_id(item, "S")
@@ -433,11 +434,12 @@ def _remedies(item, *, paragraphs=0):
     if family == "fidelity/context-changed":
         # J4: the refresh alone keeps the old probe contexts; `claim add`
         # re-confirms the extract and re-binds them, which clears the finding.
+        # K5: name the file that holds this claim, so the printed command runs.
         return (
             remedy(
                 "refresh-rebind",
                 source_id=source_id or "S1",
-                file="claims/*.json",
+                file=(claim_files or {}).get(claim_id) or "claims/*.json",
             ),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
@@ -645,7 +647,7 @@ def honest_fix(family, text):
     return True
 
 
-def adopt(findings, *, online=False, paragraphs=0):
+def adopt(findings, *, online=False, paragraphs=0, claim_files=None):
     """Print the producer's remedies when it has them, `alx`'s own when not."""
     adopted = []
     seen = set()
@@ -674,7 +676,9 @@ def adopt(findings, *, online=False, paragraphs=0):
         rejected = bool(fix) and not honest_fix(item.family, fix)
         fix = "" if rejected else fix
         if rejected or (not fix and not remove) or item.family in REMEDY_OVERRIDES:
-            fix, remove = _remedies(item, paragraphs=paragraphs)
+            fix, remove = _remedies(
+                item, paragraphs=paragraphs, claim_files=claim_files
+            )
             if klass == "A":
                 remove = ""
         if remove and remove == fix:
@@ -796,8 +800,28 @@ def _emit(ws, state, command, summary, lines):
     print(f"elapsed {max(elapsed, 0)} min, remaining {max(remaining, 0)} min")
 
 
+#: D7: a stalled rewild checker costs its 120 s once per command, not once per
+#: invocation. `issue --deliver` runs the checker up to four times (check,
+#: post-remedy check, gate, refused-gate findings); after the first timeout the
+#: rest of the command skips the subprocess and reuses that one Class A note.
+_CHECKER_TIMED_OUT = False
+
+
+def _checker_timeout():
+    return 0 if _CHECKER_TIMED_OUT else REWILD_CHECKER_TIMEOUT_SECONDS
+
+
+def _note_checker_timeout(messages):
+    global _CHECKER_TIMED_OUT
+    if any("timed out" in str(message) for message in messages):
+        _CHECKER_TIMED_OUT = True
+    return messages
+
+
 def _open(args):
     """Return (workspace, state, ledger) for an initialized directory."""
+    global _CHECKER_TIMED_OUT
+    _CHECKER_TIMED_OUT = False
     ws = Workspace(args.dir)
     if not ws.state_path.exists():
         raise SystemExit(
@@ -889,16 +913,19 @@ def body_paragraphs(text):
         splitter(text) if splitter is not None
         else _fallback_split_body_paragraphs(text)
     )
+    # K3: match whole blank-line blocks in order, never `find()` on the prose.
+    # A standfirst that clones paragraph 1 is a different block (`> …`), and two
+    # body paragraphs that differ only by their citation URL are two blocks.
+    blocks = _blocks(text)
     located = []
     cursor = 0
     for number, block in numbered:
-        start = text.find(block, cursor)
-        if start < 0:
-            start = text.find(block)
-        if start < 0:
-            continue
-        cursor = start + len(block)
-        located.append((number, start, cursor, block))
+        for index in range(cursor, len(blocks)):
+            start, end, raw = blocks[index]
+            if raw.strip() == block.strip():
+                located.append((number, start, end, block))
+                cursor = index + 1
+                break
     return located
 
 
@@ -1354,6 +1381,10 @@ def cmd_source_set(args):
         source["family_justification"] = Path(args.family_justification).read_text(
             encoding="utf-8"
         ).strip()
+    if args.accountability_note:
+        source["accountability_note"] = Path(args.accountability_note).read_text(
+            encoding="utf-8"
+        ).strip()
     ws.save_ledger(ledger)
     _emit(
         ws,
@@ -1493,12 +1524,35 @@ def expand_claim_input(ws, item, ledger):
     return validate_ledger.expand_claim_input(item, ledger, cache_meta=cache_meta)
 
 
+def expand_file_globs(values):
+    """K5: `alx` prints `claims/*.json`, so `alx` expands it.
+
+    A remedy is copied verbatim, sometimes into a runner that does no shell
+    globbing; an unexpanded pattern must name its files, not raise.
+    """
+    expanded = []
+    for value in values:
+        if not value:
+            continue
+        text = str(value)
+        matches = sorted(glob.glob(text)) if glob.has_magic(text) else []
+        # A pattern that matches nothing stays itself, so it still reports as
+        # the missing file it is.
+        expanded.extend(matches or [text])
+    return expanded
+
+
 def cmd_claim_add(args):
     ws, state, ledger = _open(args)
     items = []
-    for path in args.files:
+    sources = {}
+    for path in expand_file_globs(args.files):
         payload = _read_json(path)
-        items.extend(payload if isinstance(payload, list) else [payload])
+        batch = payload if isinstance(payload, list) else [payload]
+        for item in batch:
+            if isinstance(item, dict) and item.get("claim_id"):
+                sources[item["claim_id"]] = path
+        items.extend(batch)
     lines = []
     accepted = 0
     failed = False
@@ -1541,6 +1595,11 @@ def cmd_claim_add(args):
                 state, ws.report_text(), {claim["claim_id"]: item["report_paragraph"]}
             )
         record_probe_contexts(ws, claim)
+        # K5: the remedy for this claim has to name the file it came from.
+        if claim["claim_id"] in sources:
+            state.setdefault("claim_files", {})[claim["claim_id"]] = sources[
+                claim["claim_id"]
+            ]
         seen.add(claim["claim_id"])
         accepted += 1
         verb = "replaced" if replaced else "added"
@@ -1559,18 +1618,21 @@ def _claim_paragraph(state, claim):
 
 
 def record_binding_hashes(state, text, mapping):
-    """J2: remember which paragraph a claim was bound to, not just its number.
+    """K3: remember WHICH paragraph a claim was bound to: index plus exact text.
 
-    Numbers shift as soon as one paragraph is deleted; the hash of the bound
-    paragraph does not, so a later `claim drop --apply` deletes the paragraph
-    the binding meant and `binding/leftover-prose` recognises what survived.
+    Masked prose is not an identity — two body paragraphs can carry the same
+    sentence under different citations — so the body index identifies the span
+    and the hash of its exact text verifies it.
     """
     blocks = {number: block for number, _s, _e, block in body_paragraphs(text)}
     hashes = state.setdefault("binding_hashes", {})
     for claim_id, number in mapping.items():
         block = blocks.get(number)
         if block:
-            hashes[claim_id] = _sha256_text(masked_prose(block))
+            hashes[claim_id] = {
+                "paragraph": number,
+                "sha256": _sha256_text(block),
+            }
     return hashes
 
 
@@ -1613,16 +1675,24 @@ def _drop_plan(ws, state, ledger, claim_id):
 
 
 def _paragraph_to_delete(state, text, claim_id, paragraph):
-    """J2: the paragraph recorded at bind time wins over its stale number."""
+    """K3: the bound body index names the span; the recorded hash verifies it.
+
+    `body_paragraphs` numbers the body only, so the index can never reach the
+    standfirst, and it stays unique where the prose does not.
+    """
     blocks = body_paragraphs(text)
     recorded = state.get("binding_hashes", {}).get(claim_id)
-    if recorded:
-        for entry in blocks:
-            if _sha256_text(masked_prose(entry[3])) == recorded:
-                return entry
-    if paragraph is None:
-        return None
-    return next((entry for entry in blocks if entry[0] == paragraph), None)
+    recorded = recorded if isinstance(recorded, dict) else {}
+    number = recorded.get("paragraph", paragraph)
+    entry = next((item for item in blocks if item[0] == number), None)
+    digest = recorded.get("sha256")
+    if entry is None or not digest or _sha256_text(entry[3]) == digest:
+        return entry
+    # The hash moved: the paragraph was edited, or an untracked edit renumbered
+    # the body. An exact-text match is still an identity; the index is not.
+    return next(
+        (item for item in blocks if _sha256_text(item[3]) == digest), entry
+    )
 
 
 def _renumber_bindings(state, deleted):
@@ -1631,6 +1701,9 @@ def _renumber_bindings(state, deleted):
     for other, number in list(bindings.items()):
         if isinstance(number, int) and number > deleted:
             bindings[other] = number - 1
+    for recorded in state.get("binding_hashes", {}).values():
+        if isinstance(recorded, dict) and recorded.get("paragraph", 0) > deleted:
+            recorded["paragraph"] -= 1
 
 
 def apply_drop(ws, state, ledger, claim_id, reason):
@@ -1651,10 +1724,17 @@ def apply_drop(ws, state, ledger, claim_id, reason):
     target = _paragraph_to_delete(state, text, claim_id, paragraph)
     if target is not None:
         number, start, end, block = target
-        state.setdefault("mechanical_deletions", []).append(
-            _sha256_text(masked_prose(block))
-        )
+        # K3: the exact span is the deletion's identity; its masked prose is
+        # what the review-freshness rule compares and what leftover prose
+        # recognises, so the copies that legitimately survive it are counted.
+        state.setdefault("mechanical_deletions", []).append(_sha256_text(block))
         text = re.sub(r"\n{3,}", "\n\n", text[:start] + text[end:])
+        prose = _sha256_text(masked_prose(block))
+        state.setdefault("mechanical_deletion_prose", {})[prose] = sum(
+            1
+            for _n, _s, _e, survivor in body_paragraphs(text)
+            if _sha256_text(masked_prose(survivor)) == prose
+        )
         ws.report.write_text(text, encoding="utf-8")
         _renumber_bindings(state, number)
         lines.append(f"Deleted paragraph {number} of report.md.")
@@ -1832,7 +1912,7 @@ def _snapshot_text(ws, state):
     if not deleted:
         return text
     for _number, start, end, block in reversed(body_paragraphs(text)):
-        if _sha256_text(masked_prose(block)) in deleted:
+        if _sha256_text(block) in deleted:
             text = text[:start] + text[end:]
     return re.sub(r"\n{3,}", "\n\n", text)
 
@@ -2170,8 +2250,16 @@ def _binding_findings(ws, state, ledger, *, fix=False):
             )
         )
     deleted = set(state.get("mechanical_deletions", []))
+    survivors = state.get("mechanical_deletion_prose", {})
+    seen = {}
     for number, _start, _end, block in body_paragraphs(text):
-        if _sha256_text(masked_prose(block)) in deleted:
+        prose = _sha256_text(masked_prose(block))
+        seen[prose] = seen.get(prose, 0) + 1
+        # K3: the deleted span itself, or one copy more of its prose than the
+        # drop left behind. The twin that survived the drop is not leftover.
+        if _sha256_text(block) in deleted or seen[prose] > survivors.get(
+            prose, seen[prose]
+        ):
             findings.append(
                 finding(
                     "binding/leftover-prose",
@@ -2224,15 +2312,17 @@ def _rewild_findings(ws, state):
                 "so section (e) did not run.",
             )
         ]
-    return list(
+    findings = list(
         run_check(
             ws.report,
             snapshot,
             lang=state.get("lang", "en"),
             review_note_path=None,
-            timeout=REWILD_CHECKER_TIMEOUT_SECONDS,
+            timeout=_checker_timeout(),
         )
     )
+    _note_checker_timeout(item.message for item in findings)
+    return findings
 
 
 #: J3: each note's schema, whose string minimums are the CJK floor; the full
@@ -2436,7 +2526,7 @@ def freshness_findings(ws, state, ledger, kind):
     previous = _paragraph_set(
         (reviewed / "report.md").read_text(encoding="utf-8"), state
     )
-    allowed = set(state.get("mechanical_deletions", []))
+    allowed = set(state.get("mechanical_deletion_prose", []))
     changed = [block for block in current if block not in previous]
     removed = [
         block
@@ -2640,7 +2730,11 @@ def run_check(ws, state, ledger, *, fix=False, mapping_out=None):
     findings.extend(_fidelity_findings(ws, ledger))
     findings.extend(_rewild_findings(ws, state))
     findings.extend(_review_findings(ws, state, ledger))
-    return adopt(findings, paragraphs=len(body_paragraphs(ws.report_text())))
+    return adopt(
+        findings,
+        paragraphs=len(body_paragraphs(ws.report_text())),
+        claim_files=state.get("claim_files", {}),
+    )
 
 
 def _record_last_check(state, findings):
@@ -3085,16 +3179,20 @@ def _online_findings(result):
 
 def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
     """Step 2: deadline-bound live fidelity, then re-probe refreshed sources."""
-    # J1: only a receipt this pass wrote may be hashed into `issue.json`.
-    (ws.receipts / "source-fidelity.json").unlink(missing_ok=True)
+    receipt_path = ws.receipts / "source-fidelity.json"
     _elapsed, remaining = _minutes(state)
     if remaining < RESERVE_MINUTES:
+        # K1: the skip writes nothing, so it may not destroy the receipt an
+        # earlier pass wrote; that receipt is what the content gate reads.
+        kept = "; the receipt from an earlier pass stands" if receipt_path.exists() else ""
         delivery_notes.append(
             f"online source fidelity skipped: {remaining} min left, reserve is "
-            f"{RESERVE_MINUTES} min"
+            f"{RESERVE_MINUTES} min{kept}"
         )
         return [], True
-    receipt_path = ws.receipts / "source-fidelity.json"
+    # J1: only a receipt this pass wrote may be hashed into `issue.json`, and
+    # this pass is now about to write one.
+    receipt_path.unlink(missing_ok=True)
     cap = min(ONLINE_CAP_MINUTES, max(remaining - RESERVE_MINUTES, 1))
     timeout = min(FETCH_TIMEOUT_SECONDS, cap * 60)
     try:
@@ -3158,6 +3256,9 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
 def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
     """Spec §6.9.4: validate_report `--fast --final-once`; never a second fetch."""
     if not {"rewild", "content"} <= set(receipts):
+        return
+    if not (ws.receipts / "source-fidelity.json").exists():
+        # K4: `--fast` requires that receipt; its absence is already a note.
         return
     argv = [
         str(ws.report),
@@ -3223,21 +3324,23 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         review_note_path=ws.reviews / "rewild.json",
         receipt_path=rewild_receipt,
         force=True,
-        timeout=REWILD_CHECKER_TIMEOUT_SECONDS,
+        timeout=_checker_timeout(),
         snapshot_sha256=file_sha256(original) if original is not None else None,
     )
+    _note_checker_timeout(errors)
     if errors:
         blocking.extend(_refused_receipt(_rewild_findings(ws, state)))
         delivery_notes.append(f"rewild receipt not issued: {errors[0]}")
     else:
         receipts["rewild"] = rewild_receipt
     content_receipt = ws.receipts / "content.json"
+    fidelity_receipt = ws.receipts / "source-fidelity.json"
     errors = content_gate.run_content_gate(
         ws.report,
         ws.ledger_path,
         ws.reviews / "content.json",
         content_receipt,
-        source_fidelity_receipt_path=ws.receipts / "source-fidelity.json",
+        source_fidelity_receipt_path=fidelity_receipt,
         force=True,
     )
     if errors:
@@ -3245,6 +3348,12 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         delivery_notes.append(f"content receipt not issued: {errors[0]}")
     else:
         receipts["content"] = content_receipt
+        if not fidelity_receipt.exists():
+            # K4: no receipt at all is a recorded gap, not a refused gate.
+            delivery_notes.append(
+                "content receipt issued without a source-fidelity receipt: "
+                "live fidelity never ran"
+            )
     _verify_receipts_in_process(ws, state, receipts, delivery_notes)
     lines.append(f"receipts written: {', '.join(sorted(receipts)) or 'none'}")
     return receipts, blocking
@@ -3385,6 +3494,15 @@ def _class_a_finding(message):
 # --------------------------------------------------------------------------
 
 
+def _record_render_note(ws, note):
+    """D4b: a degraded render is recorded where every other Class A note is."""
+    path = ws.receipts / "delivery-notes.json"
+    payload = _read_json(path) if path.exists() else {}
+    notes = list(payload.get("notes", [])) if isinstance(payload, dict) else []
+    notes.append(note)
+    _write_json(path, {"written_at": _now().isoformat(), "notes": notes})
+
+
 def cmd_render(args):
     ws, state, ledger = _open(args)
     receipt_path = ws.receipts / "issue.json"
@@ -3445,8 +3563,21 @@ def cmd_render(args):
         kwargs["issue_receipt"] = str(receipt_path)
         md_to_pdf.render_pdf(str(ws.report), str(output), **kwargs)
         pages = ws.dir / f"pages-{template}"
-        render_pdf_pages.render_pages(str(output), str(pages))
         lines.append(f"{template}: {output}")
+        try:
+            render_pdf_pages.render_pages(str(output), str(pages))
+        except Exception as exc:  # D4b: every rasterizer backend failed
+            # Spec §6.10/§6.11: a rasterizer failure is Class A. The PDF is
+            # already written, so the contact sheet is the only loss and the
+            # next template still renders.
+            note = f"{template} contact sheet not rendered: {exc}"
+            _record_render_note(ws, note)
+            lines.append(
+                render_grouped(
+                    [finding("tooling/render", f"{note}.", fix=remedy("render"))]
+                )
+            )
+            continue
         lines.append(f"{template} contact sheet: {pages}")
     _emit(ws, state, "render", f"{len(templates)} PDFs", lines)
     return 0
@@ -3552,11 +3683,13 @@ def build_parser():
     source_set.add_argument("--published")
     source_set.add_argument("--undated-reason", dest="undated_reason")
     source_set.add_argument("--family-justification", dest="family_justification")
+    source_set.add_argument("--accountability-note", dest="accountability_note")
     source_set.set_defaults(
         handler=cmd_source_set,
         file_args=(
             ("--undated-reason", "undated_reason"),
             ("--family-justification", "family_justification"),
+            ("--accountability-note", "accountability_note"),
         ),
     )
 
@@ -3640,7 +3773,9 @@ def missing_file_arguments(args):
     missing = []
     for flag, dest in getattr(args, "file_args", ()):
         value = getattr(args, dest, None)
-        for path in value if isinstance(value, list) else [value]:
+        # K5: a FILE argument may arrive as an unexpanded glob (spec D14
+        # prints one); it is a path when it names at least one file.
+        for path in expand_file_globs(value if isinstance(value, list) else [value]):
             if path and not Path(path).is_file():
                 missing.append(flag)
     return missing

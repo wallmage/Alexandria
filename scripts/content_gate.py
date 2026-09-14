@@ -702,6 +702,10 @@ def run_content_gate(
     source_fidelity_receipt_path = Path(
         source_fidelity_receipt_path
     ).resolve()
+    # Spec 6.11: inside the delivery reserve `alx` skips live fidelity, so
+    # there may be no receipt at all. That is a recorded gap in this receipt,
+    # not an unreadable input.
+    fidelity_skipped = not source_fidelity_receipt_path.exists()
     collisions = artifact_collision_errors(
         {
             "final report": report_path,
@@ -722,15 +726,16 @@ def run_content_gate(
             f"Content receipt already exists: {receipt_path}. "
             "Use --force to replace it."
         ]
-    source_receipt, source_errors = _read_json(
-        source_fidelity_receipt_path,
-        "Source-fidelity receipt",
-    )
-    errors.extend(source_errors)
-    if source_receipt is not None:
-        errors.extend(
-            validate_source_fidelity_receipt(ledger_path, source_receipt)
+    if not fidelity_skipped:
+        source_receipt, source_errors = _read_json(
+            source_fidelity_receipt_path,
+            "Source-fidelity receipt",
         )
+        errors.extend(source_errors)
+        if source_receipt is not None:
+            errors.extend(
+                validate_source_fidelity_receipt(ledger_path, source_receipt)
+            )
     try:
         report_text = report_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -863,9 +868,10 @@ def run_content_gate(
         "evidence_ledger_schema_path": str(EVIDENCE_LEDGER_SCHEMA.resolve()),
         "evidence_ledger_schema_sha256": file_sha256(EVIDENCE_LEDGER_SCHEMA),
         "source_fidelity_receipt_path": str(source_fidelity_receipt_path),
-        "source_fidelity_receipt_sha256": file_sha256(
-            source_fidelity_receipt_path
+        "source_fidelity_receipt_sha256": (
+            None if fidelity_skipped else file_sha256(source_fidelity_receipt_path)
         ),
+        "source_fidelity_receipt_skipped": fidelity_skipped,
         "minimum_score": min(item["score"] for item in scores.values()),
         "approved_visual_assets": approved_visual_assets,
     }
@@ -911,6 +917,12 @@ def validate_content_receipt(
     if not source_fidelity_receipt_path:
         errors.append("Source-fidelity receipt is required.")
         source_fidelity_receipt_path = None
+    elif receipt.get("source_fidelity_receipt_skipped") and not Path(
+        source_fidelity_receipt_path
+    ).exists():
+        # Spec 6.11: the gate recorded that live fidelity was skipped inside
+        # the delivery reserve; the missing receipt is that record, not a change.
+        source_fidelity_receipt_path = Path(source_fidelity_receipt_path).resolve()
     else:
         source_fidelity_receipt_path = Path(
             source_fidelity_receipt_path

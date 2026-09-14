@@ -2230,8 +2230,11 @@ class FixRoundTests(AlxTestCase):
         _code, out = self.run_in("check")
         self.assertIn("[fidelity/context-changed]", out)
         line = self.line_with(out, "context changed")
+        # K5: the remedy names the file C1 came from, not an unexpanded glob.
         self.assertIn(
-            "Fix: alx fetch --id S1 --refresh, then alx claim add claims/*.json", line
+            "Fix: alx fetch --id S1 --refresh, then alx claim add "
+            f"{self.state()['claim_files']['C1']}",
+            line,
         )
         self.assertIn("Remove: `alx claim drop C1 --apply`", line)
 
@@ -3290,4 +3293,337 @@ class ReviewNoteFloorTests(AlxTestCase):
         )
         self.assertTrue(
             all("content-review schema" in item for item in missing), missing
+        )
+
+
+class DropIdentityTests(AlxTestCase):
+    """K3: a drop deletes the paragraph the binding meant, not its twin."""
+
+    def twin_report(self):
+        """Paragraphs 1 and 2 read alike and differ only by their citation."""
+        ledger = self.ledger()
+        first = ledger["sources"][0]["url"]
+        second = ledger["sources"][1]["url"]
+        sentence = (
+            "The archive released 1,204 documents in March 2026, a release "
+            "[recorded in the study]({url}) that the registry confirmed."
+        )
+        text = (
+            "# Ledger Study\n\n"
+            "> Whether the archive release matches the registry tally.\n"
+            f"> {alx.report_contract.localized_date('en', None)}\n\n"
+            "## Findings\n\n"
+            f"{sentence.format(url=first)}\n\n"
+            f"{sentence.format(url=second)}\n\n"
+            "The reading room keeps 「原始日記」 under restricted access, "
+            "so the counts above are the only public record.\n\n"
+            "## Sources\n\n"
+            f"- [Ledger Study]({first})\n"
+            f"- [Registry Note]({second})\n"
+        )
+        (self.dir / "report.md").write_text(text, encoding="utf-8")
+        return first, second
+
+    def test_the_twin_paragraph_of_the_dropped_claim_survives(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        first, second = self.twin_report()
+        for claim_id, number in (("C1", 1), ("C2", 2)):
+            code, out = self.run_in("claim", "bind", claim_id, "--paragraph", number)
+            self.assertEqual(0, code, out)
+        code, out = self.run_in("snapshot")
+        self.assertEqual(0, code, out)
+        code, out = self.run_in("claim", "drop", "C2", "--apply")
+        self.assertEqual(0, code, out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertIn(f"[recorded in the study]({first})", report)
+        self.assertNotIn(f"[recorded in the study]({second})", report)
+        _code, out = self.run_in("check")
+        self.assertNotIn("binding/leftover-prose", out)
+        code, out = self.run_in("snapshot", "--restore")
+        self.assertEqual(0, code, out)
+        restored = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertIn(f"[recorded in the study]({first})", restored)
+        self.assertNotIn(f"[recorded in the study]({second})", restored)
+
+    def test_a_standfirst_that_clones_paragraph_one_is_never_deleted(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        first, _second = self.twin_report()
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        clone = (
+            "The archive released 1,204 documents in March 2026, a release "
+            f"[recorded in the study]({first}) that the registry confirmed."
+        )
+        report = report.replace(
+            "> Whether the archive release matches the registry tally.",
+            f"> {clone}",
+            1,
+        )
+        (self.dir / "report.md").write_text(report, encoding="utf-8")
+        code, out = self.run_in("claim", "bind", "C1", "--paragraph", 1)
+        self.assertEqual(0, code, out)
+        code, out = self.run_in("claim", "drop", "C1", "--apply")
+        self.assertEqual(0, code, out)
+        dropped = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertIn(f"> {clone}", dropped)
+        self.assertEqual(1, dropped.count(clone))
+
+
+class ClaimFileRemedyTests(AlxTestCase):
+    """K5: the printed context-changed remedy runs verbatim."""
+
+    def fix_round(self):
+        helper = FixRoundTests("test_context_changed_is_reported_with_the_two_step_remedy")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state", "assertEqual", "assertIn",
+        ):
+            setattr(helper, name, getattr(self, name))
+        return helper
+
+    def test_the_printed_remedy_clears_the_finding_when_run_verbatim(self):
+        helper = self.fix_round()
+        helper.stale_context()
+        _code, out = self.run_in("check")
+        line = next(item for item in out.splitlines() if "context changed" in item)
+        printed = line.split("Fix: ")[1].split(". Remove:")[0]
+        first, second = printed.split(", then ")
+        with mock_production_transport(responses(CHANGED_PAGE)):
+            code, out = self.run_in(*shlex.split(first)[1:])
+        self.assertEqual(0, code, out)
+        code, out = self.run_in(*shlex.split(second)[1:])
+        self.assertEqual(0, code, out)
+        _code, out = self.run_in("check")
+        self.assertNotIn("fidelity/context-changed", out)
+
+    def test_claim_add_expands_an_unexpanded_glob(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.root / "claims"
+        batch.mkdir()
+        (batch / "one.json").write_text(json.dumps([CLAIM_ONE]), encoding="utf-8")
+        (batch / "two.json").write_text(json.dumps([CLAIM_TWO]), encoding="utf-8")
+        code, out = self.run_in("claim", "add", f"{batch}/*.json")
+        self.assertEqual(0, code, out)
+        self.assertEqual(
+            ["C1", "C2"],
+            [claim["claim_id"] for claim in self.ledger()["claims"]],
+        )
+
+
+class AccountabilityNoteTests(AlxTestCase):
+    """K2: the note floor prints a command that can set the note."""
+
+    def short_note(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        ledger["sources"][0]["accountability_note"] = "a named research desk"
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def test_the_floor_remedy_names_the_flag_and_the_real_id(self):
+        self.short_note()
+        _code, out = self.run_in("check")
+        line = next(item for item in out.splitlines() if "accountability_note" in item)
+        self.assertIn(
+            "Fix: alx source set S1 --accountability-note accountability-note.txt",
+            line,
+        )
+
+    def test_source_set_writes_the_note_and_clears_the_finding(self):
+        self.short_note()
+        path = self.root / "accountability-note.txt"
+        path.write_text(
+            "The study is signed by its named research desk, which corrects "
+            "its own record in public.\n",
+            encoding="utf-8",
+        )
+        code, out = self.run_in("source", "set", "S1", "--accountability-note", path)
+        self.assertEqual(0, code, out)
+        self.assertIn(
+            "named research desk",
+            self.ledger()["sources"][0]["accountability_note"],
+        )
+        _code, out = self.run_in("check")
+        self.assertNotIn("accountability_note must say", out)
+
+
+class ReserveReceiptTests(AlxTestCase):
+    """K1/K4: what the §6.11 reserve skip may destroy, and what it owes."""
+
+    def issue_helper(self):
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state", "set_remaining",
+        ):
+            setattr(helper, name, getattr(self, name))
+        return helper
+
+    def test_the_reserve_skip_keeps_a_valid_fidelity_receipt(self):
+        from contextlib import ExitStack
+
+        helper = self.issue_helper()
+        helper.prepared()
+        receipt = self.dir / "receipts" / "source-fidelity.json"
+        with ExitStack() as stack:
+            helper.stub_gates(stack)
+            code, out = self.run_in("issue", "--deliver")
+            self.assertEqual(0, code, out)
+            kept = receipt.read_bytes()
+            self.set_remaining(alx.RESERVE_MINUTES - 2)
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        self.assertEqual(kept, receipt.read_bytes())
+        issued = json.loads(
+            (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("source-fidelity", issued["receipts"])
+        self.assertTrue(
+            any(
+                note.endswith("; the receipt from an earlier pass stands")
+                for note in issued["delivery_notes"]
+            ),
+            issued["delivery_notes"],
+        )
+
+    def test_the_content_gate_runs_without_a_fidelity_receipt(self):
+        from contextlib import ExitStack
+
+        helper = self.issue_helper()
+        helper.prepared()
+        errors = []
+        real_gate = alx.content_gate.run_content_gate
+
+        def real(*args, **kwargs):
+            """K4: the content gate itself, never a stub."""
+            result = real_gate(*args, **kwargs)
+            errors.append(result)
+            return result
+
+        with ExitStack() as stack:
+            helper.stub_gates(stack)
+            stack.enter_context(
+                mock.patch.object(
+                    alx.content_gate, "run_content_gate", side_effect=real
+                )
+            )
+            self.set_remaining(alx.RESERVE_MINUTES - 2)
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        self.assertEqual([[]], errors)
+        self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
+        content = self.dir / "receipts" / "content.json"
+        self.assertTrue(content.exists())
+        self.assertTrue(
+            json.loads(content.read_text(encoding="utf-8"))[
+                "source_fidelity_receipt_skipped"
+            ]
+        )
+        issued = json.loads(
+            (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("content", issued["receipts"])
+        self.assertIn(
+            "content receipt issued without a source-fidelity receipt: "
+            "live fidelity never ran",
+            issued["delivery_notes"],
+        )
+
+
+class RenderDegradeTests(AlxTestCase):
+    """K6 (D4b): every rasterizer backend failed; the delivery still stands."""
+
+    def issued(self, stack):
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        helper.stub_gates(stack)
+        code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+
+    def test_a_failed_rasterizer_keeps_both_pdfs_and_notes_the_loss(self):
+        from contextlib import ExitStack
+
+        from scripts import md_to_pdf, render_pdf_pages
+
+        with ExitStack() as stack:
+            self.issued(stack)
+
+            def fake_render_pdf(input_path, output_path, **kwargs):
+                Path(output_path).write_bytes(b"%PDF-1.7\n")
+                return Path(output_path)
+
+            def dead_rasterizer(pdf_path, output_dir, **kwargs):
+                raise RuntimeError("every rasterizer backend failed")
+
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_pages", side_effect=dead_rasterizer
+                )
+            )
+            code, out = self.run_in("render")
+        self.assertEqual(0, code, out)
+        self.assertEqual(2, len(list(self.dir.glob("report-*.pdf"))))
+        self.assertIn("tooling/render", out)
+        self.assertNotIn("contact sheet: ", out)
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )["notes"]
+        self.assertEqual(
+            2, sum(1 for note in notes if "contact sheet not rendered" in note), notes
+        )
+
+
+class CheckerBudgetTests(AlxTestCase):
+    """K7 (D7): a stalled rewild checker costs its timeout once per command."""
+
+    def test_one_issue_runs_the_stalled_checker_once(self):
+        import subprocess
+        import time
+        from contextlib import ExitStack
+
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        calls = []
+        real_run = subprocess.run
+
+        def stalled(command, **kwargs):
+            if not any("naturalness-check" in str(item) for item in command):
+                return real_run(command, **kwargs)
+            calls.append(kwargs.get("timeout"))
+            time.sleep(0.05)
+            raise subprocess.TimeoutExpired(command, kwargs.get("timeout"))
+
+        with ExitStack() as stack:
+            # rewild=False: the real gate runs, so the checker is reached from
+            # the check, the gate, and the refused gate's findings.
+            helper.stub_gates(stack, rewild=False)
+            stack.enter_context(
+                mock.patch.object(
+                    alx.rewild_gate.subprocess, "run", side_effect=stalled
+                )
+            )
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        self.assertEqual([alx.REWILD_CHECKER_TIMEOUT_SECONDS], calls)
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )["notes"]
+        self.assertEqual(
+            1, sum(1 for note in notes if "Rewild checker timed out" in note), notes
         )

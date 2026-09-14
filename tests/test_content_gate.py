@@ -1186,3 +1186,38 @@ class CjkReviewNoteFloorTests(unittest.TestCase):
         self.assertTrue(
             any("limitation_or_tradeoff" in error for error in en), en
         )
+
+
+class SkippedSourceFidelityReceiptTests(unittest.TestCase):
+    """K4: inside the delivery reserve `alx` never issues that receipt."""
+
+    make_case = ContentGateTests.make_case
+
+    def test_a_missing_receipt_is_recorded_instead_of_unreadable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            source_receipt.unlink()
+
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+
+            self.assertEqual([], errors)
+            recorded = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertTrue(recorded["source_fidelity_receipt_skipped"])
+            self.assertIsNone(recorded["source_fidelity_receipt_sha256"])
+            self.assertEqual(
+                [],
+                validate_content_receipt(
+                    report,
+                    ledger,
+                    recorded,
+                    source_fidelity_receipt_path=source_receipt,
+                ),
+            )

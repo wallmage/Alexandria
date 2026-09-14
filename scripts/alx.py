@@ -1427,7 +1427,10 @@ CLAIM_ADD_FAMILIES = frozenset(
         "ledger/excluded-supports",
         "fidelity/mismatch",
         "fidelity/short-segment",
-        "fidelity/context-changed",
+        # `fidelity/context-changed` is deliberately absent: spec §7.2.6 makes
+        # `claim add` the re-confirm step of the remedy, so it probes without
+        # context comparison (a lost extract is still fidelity/mismatch) and
+        # then rebinds the contexts. `check` and `issue` compare them.
         "fidelity/cache-missing",
     }
 )
@@ -2471,26 +2474,18 @@ def _content_binding_remedies(items, ws, state, ledger):
     return repaired
 
 
-def _content_check(ws, ledger):
+def _content_check(ws):
     """J9: the review half of `content_gate` only.
 
     Its ledger half re-runs `validate_references`, which section (b) already
     reported; printed twice, the second copy carries `alx review start content
-    --iter`, a remedy that repairs no ledger defect. Until
-    `include_ledger_checks` lands, the duplicates are dropped by message.
+    --iter`, a remedy that repairs no ledger defect. `include_ledger_checks=False`
+    drops those re-emissions and keeps the per-claim binding checks (spec §7.4).
     """
     note = ws.reviews / "content.json"
-    try:
-        return content_gate.run_check(
-            ws.report, ws.ledger_path, note, include_ledger_checks=False
-        )
-    except TypeError:
-        duplicated = set(validate_ledger.validate_references(ledger))
-        return [
-            item
-            for item in content_gate.run_check(ws.report, ws.ledger_path, note)
-            if str(getattr(item, "message", item)) not in duplicated
-        ]
+    return content_gate.run_check(
+        ws.report, ws.ledger_path, note, include_ledger_checks=False
+    )
 
 
 def _review_findings(ws, state, ledger):
@@ -2499,7 +2494,7 @@ def _review_findings(ws, state, ledger):
     if (ws.reviews / "content.json").exists():
         findings.extend(
             _content_binding_remedies(
-                _content_check(ws, ledger), ws, state, ledger
+                _content_check(ws), ws, state, ledger
             )
         )
     for kind in REVIEW_KINDS:
@@ -3171,7 +3166,7 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         force=True,
     )
     if errors:
-        blocking.extend(_refused_receipt(_content_check(ws, ledger)))
+        blocking.extend(_refused_receipt(_content_check(ws)))
         delivery_notes.append(f"content receipt not issued: {errors[0]}")
     else:
         receipts["content"] = content_receipt

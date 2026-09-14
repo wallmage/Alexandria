@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -28,7 +29,13 @@ try:
     from .validate_ledger import validate_references, validate_schema
     from .validate_report import (
         SOURCE_HEADINGS,
+        _body_and_sources,
+        _body_paragraphs,
+        _foundation_urls,
         _h2_sections,
+        binding_findings,
+        extract_markdown_urls,
+        normalize_url,
         validate_report_against_ledger,
     )
 except ImportError:
@@ -48,9 +55,33 @@ except ImportError:
     from validate_ledger import validate_references, validate_schema
     from validate_report import (
         SOURCE_HEADINGS,
+        _body_and_sources,
+        _body_paragraphs,
+        _foundation_urls,
         _h2_sections,
+        binding_findings,
+        extract_markdown_urls,
+        normalize_url,
         validate_report_against_ledger,
     )
+
+try:
+    from .gate_severity import Finding
+except (ImportError, AttributeError):
+    try:
+        from gate_severity import Finding
+    except (ImportError, AttributeError):
+        Finding = None
+if Finding is None:
+    @dataclass
+    class Finding:
+        family: str
+        severity: str
+        klass: str
+        ids: list
+        message: str
+        fix: str
+        remove: str = ""
 
 try:
     from .source_fidelity import validate_source_fidelity_receipt
@@ -58,6 +89,15 @@ except ImportError:
     from source_fidelity import validate_source_fidelity_receipt
 
 
+FAMILIES = (
+    "content/score",
+    "content/check",
+    "content/critical-finding",
+    "content/disclosure",
+    "content/claim-support",
+    "content/claim-binding",
+    "content/language",
+)
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
 EVIDENCE_LEDGER_SCHEMA = ROOT / "references" / "evidence-ledger.schema.json"
@@ -395,6 +435,231 @@ def _write_receipt(path, payload, *, force=False):
         raise
 
 
+def _finding(family, message, *, ids=None, severity="hard", fix="", remove=""):
+    klass = "F" if severity == "hard" else "A"
+    return Finding(
+        family=family,
+        severity=severity,
+        klass=klass,
+        ids=list(ids or []),
+        message=message,
+        fix=fix,
+        remove=remove,
+    )
+
+
+def _claim_support_map(review):
+    mapping = {}
+    raw = review.get("claim_support") if isinstance(review, dict) else None
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and item.get("claim_id"):
+                mapping[item["claim_id"]] = item.get("disposition") or ""
+    return mapping
+
+
+def _receipt_is_stale(receipt_path, report_path, ledger_path):
+    try:
+        payload = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+        return False
+    try:
+        report_hash = file_sha256(report_path)
+        ledger_hash = file_sha256(ledger_path)
+    except OSError:
+        return False
+    recorded_report = payload.get("report_sha256")
+    recorded_ledger = payload.get("ledger_sha256")
+    if not recorded_report and not recorded_ledger:
+        return False
+    return recorded_report != report_hash or recorded_ledger != ledger_hash
+
+
+def run_check(report_path, ledger_path, review_note_path=None):
+    """All content-review checks as findings; writes nothing."""
+    findings = []
+    report_path = Path(report_path)
+    ledger_path = Path(ledger_path)
+    try:
+        report_text = report_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        findings.append(
+            _finding("content/check", f"Final report could not be read: {exc}")
+        )
+        report_text = ""
+    ledger, ledger_errors = _read_json(ledger_path, "Evidence ledger")
+    for error in ledger_errors:
+        findings.append(_finding("content/check", error))
+    review = {}
+    if review_note_path is not None:
+        review, review_errors = _read_json(review_note_path, "Content review")
+        for error in review_errors:
+            findings.append(_finding("content/check", error))
+        review = review or {}
+    claim_support = _claim_support_map(review)
+    if isinstance(ledger, dict):
+        for error in validate_references(ledger):
+            findings.append(_finding("content/check", error))
+        for error in validate_report_against_ledger(report_text, ledger):
+            findings.append(_finding("content/check", error))
+        findings.extend(binding_findings(report_text, ledger))
+    if isinstance(review, dict) and review:
+        for error in _schema_errors(
+            review, CONTENT_REVIEW_SCHEMA, "Content review:"
+        ):
+            findings.append(_finding("content/check", error))
+        ledger_language = (
+            ledger.get("brief", {}).get("report_language")
+            if isinstance(ledger, dict) and isinstance(ledger.get("brief"), dict)
+            else None
+        )
+        if review.get("report_lang") != ledger_language:
+            findings.append(
+                _finding(
+                    "content/language",
+                    "Content review language does not match the evidence ledger.",
+                )
+            )
+        scores = review.get("scores", {})
+        if isinstance(scores, dict):
+            for name, result in scores.items():
+                if (
+                    isinstance(result, dict)
+                    and isinstance(result.get("score"), int)
+                    and result["score"] < 4
+                ):
+                    findings.append(
+                        _finding(
+                            "content/score",
+                            f"Content review score {name} is {result['score']}; "
+                            "minimum passing score is 4.",
+                            fix="raise the score by fixing the report, then re-review",
+                        )
+                    )
+        checks = review.get("checks", {})
+        if isinstance(checks, dict):
+            for name, passed in checks.items():
+                if passed is False:
+                    findings.append(
+                        _finding(
+                            "content/check",
+                            f"Content review check {name} did not pass.",
+                        )
+                    )
+        report_normalized = _normalized(report_text)
+        review_findings = review.get("findings", [])
+        if isinstance(review_findings, list):
+            for finding in review_findings:
+                if not isinstance(finding, dict):
+                    continue
+                finding_id = finding.get("finding_id", "<unknown>")
+                severity = finding.get("severity")
+                disposition = finding.get("disposition")
+                if severity == "critical" and disposition != "fixed":
+                    findings.append(
+                        _finding(
+                            "content/critical-finding",
+                            f"Critical finding {finding_id} must be fixed.",
+                            ids=[finding_id],
+                            fix="fix the finding and set disposition to fixed",
+                        )
+                    )
+                if severity == "major" and disposition == "accepted_limitation":
+                    disclosure = _normalized(
+                        finding.get("report_disclosure_excerpt") or ""
+                    )
+                    if len(disclosure) < 40 or disclosure not in report_normalized:
+                        findings.append(
+                            _finding(
+                                "content/disclosure",
+                                f"{finding_id} disclosure cannot be located in the final report.",
+                                ids=[finding_id],
+                                fix="place a ≥40-character disclosure excerpt in the report",
+                            )
+                        )
+        if isinstance(ledger, dict):
+            findings.extend(
+                _per_claim_binding_findings(
+                    report_text, ledger, claim_support
+                )
+            )
+    return findings
+
+
+def _per_claim_binding_findings(report_text, ledger, claim_support):
+    findings = []
+    body, _, _, _ = _body_and_sources(report_text)
+    paragraphs = _body_paragraphs(body)
+    sources_by_id = {
+        source.get("source_id"): source
+        for source in ledger.get("sources", [])
+        if isinstance(source, dict) and source.get("source_id")
+    }
+    for claim in ledger.get("claims", []) if isinstance(ledger.get("claims"), list) else []:
+        if not isinstance(claim, dict) or claim.get("include_in_report") is not True:
+            continue
+        claim_id = claim.get("claim_id", "<unknown>")
+        paragraph = claim.get("report_paragraph")
+        try:
+            paragraph = int(paragraph) if paragraph is not None else None
+        except (TypeError, ValueError):
+            paragraph = None
+        if paragraph is not None and not (1 <= paragraph <= len(paragraphs)):
+            paragraph_label = "out-of-range"
+            paragraph = None
+        else:
+            paragraph_label = None
+        if paragraph is None and paragraph_label is None:
+            foundation_urls = _foundation_urls(claim, sources_by_id)
+            candidates = [
+                index
+                for index, block in enumerate(paragraphs, start=1)
+                if foundation_urls
+                & {normalize_url(url) for url in extract_markdown_urls(block)}
+            ]
+            if len(candidates) == 1:
+                paragraph = candidates[0]
+        support = claim_support.get(claim_id)
+        citation = "missing"
+        if isinstance(paragraph, int) and 1 <= paragraph <= len(paragraphs):
+            foundation_urls = _foundation_urls(claim, sources_by_id)
+            cited = {
+                normalize_url(url)
+                for url in extract_markdown_urls(paragraphs[paragraph - 1])
+            }
+            if not foundation_urls or foundation_urls & cited:
+                citation = "ok"
+        if support is None:
+            findings.append(
+                _finding(
+                    "content/claim-support",
+                    f"Claim {claim_id} is missing a support disposition in the content note.",
+                    ids=[claim_id],
+                    fix="record claim_support disposition in the content review",
+                    remove=f"alx claim drop {claim_id} --apply",
+                )
+            )
+            support = "missing"
+        if paragraph_label is None:
+            paragraph_label = paragraph if paragraph is not None else "unbound"
+        line = (
+            f"{claim_id}: paragraph={paragraph_label} "
+            f"support={support} citation={citation}"
+        )
+        findings.append(
+            _finding(
+                "content/claim-binding",
+                line,
+                ids=[claim_id],
+                severity="warn",
+                fix="run `alx claim bind` and record support disposition",
+            )
+        )
+    return findings
+
+
 def run_content_gate(
     report_path,
     ledger_path,
@@ -430,7 +695,11 @@ def run_content_gate(
     )
     if collisions:
         return collisions
-    if receipt_path.exists() and not force:
+    if (
+        receipt_path.exists()
+        and not force
+        and not _receipt_is_stale(receipt_path, report_path, ledger_path)
+    ):
         return [
             f"Content receipt already exists: {receipt_path}. "
             "Use --force to replace it."
@@ -581,7 +850,11 @@ def run_content_gate(
         "approved_visual_assets": approved_visual_assets,
     }
     try:
-        _write_receipt(receipt_path, receipt, force=force)
+        _write_receipt(
+            receipt_path,
+            receipt,
+            force=force or _receipt_is_stale(receipt_path, report_path, ledger_path),
+        )
     except FileExistsError:
         return [
             f"Content receipt already exists: {receipt_path}. "
@@ -741,6 +1014,20 @@ def validate_content_receipt(
     return errors
 
 
+def _as_cli_findings(findings):
+    try:
+        from .gate_severity import warning as mark_warning
+    except ImportError:
+        from gate_severity import warning as mark_warning
+    texts = []
+    for item in findings:
+        text = item.message
+        if getattr(item, "severity", "hard") != "hard":
+            text = mark_warning(text)
+        texts.append(text)
+    return texts
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Run Alexandria's final content-quality gate"
@@ -754,12 +1041,10 @@ def main(argv=None):
     )
     parser.add_argument(
         "--receipt",
-        required=True,
         help="content-gate receipt JSON to write",
     )
     parser.add_argument(
         "--source-fidelity-receipt",
-        required=True,
         help="passing source-fidelity receipt bound to the evidence ledger",
     )
     parser.add_argument(
@@ -767,8 +1052,20 @@ def main(argv=None):
         action="store_true",
         help="replace an existing content-gate receipt",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="print all checks and write nothing",
+    )
     args = parser.parse_args(argv)
-
+    if args.check:
+        findings = run_check(args.report, args.ledger, args.review_note)
+        return emit_findings(
+            _as_cli_findings(findings),
+            ok_message="[OK] Content quality check finished (dry run)",
+        )
+    if not args.receipt or not args.source_fidelity_receipt:
+        parser.error("--receipt and --source-fidelity-receipt are required")
     errors = run_content_gate(
         args.report,
         args.ledger,

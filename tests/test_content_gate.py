@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.content_gate import run_content_gate, validate_content_receipt
+from scripts.content_gate import main as content_gate_main
+from scripts.content_gate import run_check, run_content_gate, validate_content_receipt
 from scripts.source_fidelity import issue_source_fidelity_receipt
 from tests.source_fidelity_transport import mock_production_transport
 
@@ -222,6 +223,7 @@ class ContentGateTests(unittest.TestCase):
             self.assertEqual(original, report.read_bytes())
 
     def test_existing_unrelated_content_receipt_needs_force(self):
+        # Note: spec §7.5 — unrelated existing output still requires --force.
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, receipt, source_receipt = self.make_case(
                 directory
@@ -923,6 +925,130 @@ class ContentGateTests(unittest.TestCase):
                 source_fidelity_receipt_path=source_receipt,
             )
             self.assertTrue(any("section_reviews" in error for error in errors), errors)
+
+    def test_run_check_collects_scores_critical_disclosure_and_support(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, _source_receipt = self.make_case(
+                directory
+            )
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["scores"]["writing_clarity"]["score"] = 2
+            note["findings"] = [
+                {
+                    "finding_id": "F-crit",
+                    "severity": "critical",
+                    "category": "evidence",
+                    "location": "Outlook",
+                    "finding": "A critical gap remains unaddressed in the outlook.",
+                    "disposition": "open",
+                    "rationale": "The reviewer left this critical finding open.",
+                    "report_disclosure_excerpt": "",
+                },
+                {
+                    "finding_id": "F-disc",
+                    "severity": "major",
+                    "category": "evidence",
+                    "location": "Outlook",
+                    "finding": "A limitation needs an in-report disclosure excerpt.",
+                    "disposition": "accepted_limitation",
+                    "rationale": "The limitation is accepted but must be disclosed.",
+                    "report_disclosure_excerpt": "too short",
+                },
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+            findings = run_check(report, ledger, review)
+            messages = [item.message for item in findings]
+            families = [item.family for item in findings]
+            self.assertTrue(any("writing_clarity" in message for message in messages), messages)
+            self.assertTrue(any("F-crit" in message for message in messages), messages)
+            self.assertTrue(any("disclosure" in message for message in messages), messages)
+            self.assertIn("content/claim-support", families)
+            self.assertFalse(receipt.exists())
+
+    def test_run_check_per_claim_single_line_three_binding_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, _receipt, _source_receipt = self.make_case(
+                directory
+            )
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["claim_support"] = [
+                {
+                    "claim_id": "C1",
+                    "paragraph": 1,
+                    "disposition": "supported",
+                    "note": "The mapped paragraph carries the claim.",
+                }
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+            ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
+            ledger_data["claims"][0]["report_paragraph"] = 1
+            ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
+            findings = run_check(report, ledger, review)
+            lines = [
+                item.message
+                for item in findings
+                if item.message.startswith("C1:")
+            ]
+            self.assertEqual(1, len(lines), findings)
+            self.assertIn("paragraph=", lines[0])
+            self.assertIn("support=", lines[0])
+            self.assertIn("citation=", lines[0])
+
+    def test_check_flag_is_dry_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, _source_receipt = self.make_case(
+                directory
+            )
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["claim_support"] = [
+                {
+                    "claim_id": "C1",
+                    "paragraph": 1,
+                    "disposition": "supported",
+                    "note": "The mapped paragraph carries the claim.",
+                }
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+            code = content_gate_main(
+                [
+                    str(report),
+                    "--ledger",
+                    str(ledger),
+                    "--review-note",
+                    str(review),
+                    "--check",
+                ]
+            )
+            self.assertFalse(receipt.exists())
+            self.assertIn(code, (0, 1))
+
+    def test_stale_content_receipt_overwritten_without_force(self):
+        # Note: spec §7.5 stale receipts overwrite without --force.
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            receipt.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "status": "passed",
+                        "report_sha256": "0" * 64,
+                        "ledger_sha256": "1" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertEqual([], [error for error in errors if "already exists" in error])
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(file_sha256(report), payload.get("report_sha256"))
 
 
 if __name__ == "__main__":

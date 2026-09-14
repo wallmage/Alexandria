@@ -1669,6 +1669,171 @@ Body.
 
             online.assert_called_once_with(ledger, {"status": "passed"})
 
+    def test_render_date_error_names_immediate_blockquote_placement(self):
+        # Note: spec §7.4 — date message names placement.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            report = temp / "report.md"
+            ledger = temp / "ledger.json"
+            report.write_text("# Report\n\n> July 29, 2026\n\nBody.\n", encoding="utf-8")
+            ledger.write_text(json.dumps({"report_date": "2026-07-29"}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "immediate blockquote"):
+                self.converter.validate_render_report_date(
+                    report,
+                    ledger,
+                    "en",
+                    {"report_date": "29 July 2026"},
+                )
+
+    def test_issue_receipt_skips_gate_replay_and_network(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            report = temp / "report.md"
+            ledger = temp / "ledger.json"
+            output = temp / "out.pdf"
+            issue = temp / "issue.json"
+            report.write_text("# Report\n\n> 29 July 2026\n\nBody.\n", encoding="utf-8")
+            ledger.write_text(json.dumps({"report_date": "2026-07-29"}), encoding="utf-8")
+            issue.write_text(
+                json.dumps(
+                    {
+                        "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest(),
+                        "ledger_sha256": hashlib.sha256(ledger.read_bytes()).hexdigest(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    self.converter, "validate_rewild_for_render"
+                ) as rewild,
+                mock.patch.object(
+                    self.converter, "validate_content_for_render"
+                ) as content,
+                mock.patch.object(
+                    self.converter,
+                    "validate_source_fidelity_receipt_online",
+                ) as online,
+                mock.patch.object(
+                    self.converter,
+                    "prepare_pdf_render",
+                    return_value={"bound_html": "<html></html>", "assets": []},
+                ),
+                mock.patch.object(self.converter, "write_prepared_pdf"),
+                mock.patch.object(
+                    self.converter,
+                    "publish_temp_file",
+                    side_effect=lambda src, dest, force=False: Path(dest).write_bytes(
+                        b"%PDF"
+                    ),
+                ),
+            ):
+                self.converter.render_pdf(
+                    report,
+                    output,
+                    issue_receipt=issue,
+                    force=True,
+                    ledger=ledger,
+                    rewild_receipt=temp / "rewild.json",
+                    content_receipt=temp / "content.json",
+                    source_fidelity_receipt=temp / "source.json",
+                )
+            rewild.assert_not_called()
+            content.assert_not_called()
+            online.assert_not_called()
+
+    def test_issue_receipt_requires_ledger_when_hash_recorded(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            report = temp / "report.md"
+            output = temp / "out.pdf"
+            issue = temp / "issue.json"
+            report.write_text("# Report\n\n> 29 July 2026\n\nBody.\n", encoding="utf-8")
+            issue.write_text(
+                json.dumps(
+                    {
+                        "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest(),
+                        "ledger_sha256": "1" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "ledger"):
+                self.converter.render_pdf(
+                    report,
+                    output,
+                    issue_receipt=issue,
+                    force=True,
+                )
+
+    def test_issue_receipt_renders_without_mocking_prepare(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            report = temp / "report.md"
+            ledger = temp / "ledger.json"
+            output = temp / "out.pdf"
+            issue = temp / "issue.json"
+            report.write_text(
+                "# Report\n\n> 29 July 2026\n\n## Finding\n\nEvidence.\n",
+                encoding="utf-8",
+            )
+            ledger.write_text(
+                json.dumps({"report_date": "2026-07-29"}),
+                encoding="utf-8",
+            )
+            issue.write_text(
+                json.dumps(
+                    {
+                        "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest(),
+                        "ledger_sha256": hashlib.sha256(ledger.read_bytes()).hexdigest(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    self.converter, "validate_rewild_for_render"
+                ) as rewild,
+                mock.patch.object(
+                    self.converter, "validate_content_for_render"
+                ) as content,
+            ):
+                path = self.converter.render_pdf(
+                    report,
+                    output,
+                    issue_receipt=issue,
+                    ledger=ledger,
+                    force=True,
+                    lang="en",
+                    template="executive",
+                )
+            rewild.assert_not_called()
+            content.assert_not_called()
+            self.assertTrue(path.is_file())
+            self.assertGreater(path.stat().st_size, 100)
+
+    def test_issue_receipt_rejects_hash_mismatch(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            report = temp / "report.md"
+            ledger = temp / "ledger.json"
+            output = temp / "out.pdf"
+            issue = temp / "issue.json"
+            report.write_text("# Report\n", encoding="utf-8")
+            ledger.write_text("{}", encoding="utf-8")
+            issue.write_text(
+                json.dumps({"report_sha256": "0" * 64, "ledger_sha256": "1" * 64}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "issue receipt"):
+                self.converter.render_pdf(
+                    report,
+                    output,
+                    issue_receipt=issue,
+                    force=True,
+                    ledger=ledger,
+                )
+
     def test_unapproved_markdown_body_image_cannot_render(self):
         from PIL import Image
 

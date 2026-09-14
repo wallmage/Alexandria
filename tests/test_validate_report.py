@@ -616,5 +616,415 @@ This analytical conclusion is mapped but does not cite its foundation.
         self.assertTrue(any("nearby citation" in error for error in errors))
         self.assertTrue(any("foundation" in error and "Sources" in error for error in errors))
 
+    def test_binding_findings_accept_normalized_alias_urls(self):
+        report = """# Title
+
+> 14 September 2026
+
+Body cites an alias [here](https://EXAMPLE.com/a/?utm_source=x#frag).
+
+## Sources
+
+- [Primary](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [
+                {
+                    "source_id": "S1",
+                    "url": "https://example.com/a/",
+                    "aliases": ["https://EXAMPLE.com/a"],
+                }
+            ],
+            "claims": [],
+        }
+        findings = validate_report.binding_findings(report, ledger)
+        self.assertEqual([], [f.message for f in findings])
+
+    def test_binding_findings_name_nearest_ledger_url_for_unknown_link(self):
+        report = """# Title
+
+> 14 September 2026
+
+Unknown [link](https://evil.example/nope).
+
+## Sources
+
+- [Primary](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [{"source_id": "S1", "url": "https://example.com/a"}],
+            "claims": [],
+        }
+        messages = [f.message for f in validate_report.binding_findings(report, ledger)]
+        self.assertTrue(any("https://example.com/a" in message for message in messages), messages)
+
+    def test_binding_findings_auto_map_only_when_exactly_one_candidate(self):
+        report = """# Title
+
+> 14 September 2026
+
+First mention [one](https://example.com/a).
+
+Second mention also [one](https://example.com/a).
+
+## Sources
+
+- [Primary](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [{"source_id": "S1", "url": "https://example.com/a"}],
+            "claims": [
+                {
+                    "claim_id": "C5",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                }
+            ],
+        }
+        messages = [f.message for f in validate_report.binding_findings(report, ledger)]
+        self.assertTrue(any("ambiguous" in message for message in messages), messages)
+        self.assertTrue(any("alx claim bind C5 --paragraph" in message for message in messages), messages)
+
+        ledger["claims"][0]["report_paragraph"] = 1
+        messages = [f.message for f in validate_report.binding_findings(report, ledger)]
+        self.assertFalse(any("ambiguous" in message for message in messages), messages)
+
+    def test_binding_findings_require_sources_last_and_equal_cited_set(self):
+        report = """# Title
+
+> 14 September 2026
+
+Cites [a](https://example.com/a) and [b](https://example.com/b).
+
+## Sources
+
+- [Primary](https://example.com/a)
+
+## After
+
+Leftover.
+"""
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"},
+                {"source_id": "S2", "url": "https://example.com/b"},
+            ],
+            "claims": [],
+        }
+        messages = [f.message for f in validate_report.binding_findings(report, ledger)]
+        self.assertTrue(any("last" in message.lower() or "final" in message.lower() for message in messages), messages)
+
+    def test_binding_findings_require_cited_set_when_sources_is_last(self):
+        report = """# Title
+
+> 14 September 2026
+
+Cites [a](https://example.com/a) and [b](https://example.com/b).
+
+## Sources
+
+- [Primary](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [
+                {"source_id": "S1", "url": "https://example.com/a"},
+                {"source_id": "S2", "url": "https://example.com/b"},
+            ],
+            "claims": [],
+        }
+        messages = [f.message for f in validate_report.binding_findings(report, ledger)]
+        self.assertTrue(
+            any("cited-source" in message or "equal the cited" in message for message in messages),
+            messages,
+        )
+
+    def test_binding_findings_ignore_in_document_anchors(self):
+        report = """# Title
+
+> 14 September 2026
+
+See [below](#outlook) and [mail](mailto:x@example.com).
+
+## Outlook
+
+Body cites [a](https://example.com/a).
+
+## Sources
+
+- [Primary](https://example.com/a)
+"""
+        ledger = {
+            "report_date": "2026-09-14",
+            "sources": [{"source_id": "S1", "url": "https://example.com/a"}],
+            "claims": [],
+        }
+        families = [f.family for f in validate_report.binding_findings(report, ledger)]
+        self.assertNotIn("binding/link-not-in-ledger", families)
+
+    def test_integrity_findings_require_date_line_in_immediate_blockquote(self):
+        report = """# Title
+
+> A standfirst without a date.
+
+Body.
+
+## Sources
+
+- [Primary](https://example.com/a)
+"""
+        ledger = {"report_date": "2026-09-14", "brief": {"report_language": "en"}}
+        messages = [
+            f.message
+            for f in validate_report.integrity_findings(
+                report, ledger, lang="en"
+            )
+        ]
+        self.assertTrue(any("immediate blockquote" in message for message in messages), messages)
+        self.assertTrue(any("14 September 2026" in message for message in messages), messages)
+
+    def test_integrity_findings_count_length_with_thresholds(self):
+        ledger = {"report_date": "2026-09-14", "brief": {"report_language": "en"}}
+        report = """# Title
+
+> 14 September 2026
+
+Short.
+
+## Sources
+
+- [Primary](https://example.com/a)
+"""
+        messages = [
+            f.message
+            for f in validate_report.integrity_findings(
+                report, ledger, lang="en"
+            )
+        ]
+        self.assertTrue(any("7500" in message for message in messages), messages)
+        self.assertTrue(any("words" in message for message in messages), messages)
+
+    def test_integrity_findings_flag_control_chars(self):
+        report = "# Title\n\n> 14 September 2026\n\nBad\x01char.\n\n## Sources\n\n- [A](https://example.com/a)\n"
+        ledger = {"report_date": "2026-09-14"}
+        families = [
+            f.family
+            for f in validate_report.integrity_findings(report, ledger, lang="en")
+        ]
+        self.assertIn("integrity/control-chars", families)
+
+    def test_lang_is_alias_for_expected_lang(self):
+        parser = validate_report.build_parser()
+        args = parser.parse_args(["report.md", "--lang", "zh-CN"])
+        self.assertEqual("zh-CN", args.expected_lang)
+
+    def test_argument_errors_print_full_invocation(self):
+        stderr = io.StringIO()
+        with (
+            redirect_stderr(stderr),
+            self.assertRaises(SystemExit),
+        ):
+            validate_report.main(["report.md", "--not-a-real-flag"])
+        text = stderr.getvalue()
+        self.assertIn("report.md", text)
+        self.assertIn("--not-a-real-flag", text)
+
+    def _bound_receipts(self, work, report, ledger):
+        report_hash = hashlib.sha256(report.read_bytes()).hexdigest()
+        ledger_hash = hashlib.sha256(ledger.read_bytes()).hexdigest()
+        bound = {"report_sha256": report_hash, "ledger_sha256": ledger_hash}
+        rewild = work / "rewild.json"
+        content = work / "content.json"
+        fidelity = work / "fidelity.json"
+        for path in (rewild, content, fidelity):
+            path.write_text(json.dumps(bound), encoding="utf-8")
+        return rewild, content, fidelity
+
+    def test_fast_skips_receipt_replay_and_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            report.write_text(GOOD_REPORT, encoding="utf-8")
+            ledger = work / "ledger.json"
+            ledger.write_text(
+                json.dumps(
+                    {
+                        "sources": [
+                            {"source_id": "S1", "url": "https://example.com/a"},
+                            {"source_id": "S2", "url": "https://example.org/b"},
+                        ],
+                        "claims": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rewild, content, fidelity = self._bound_receipts(work, report, ledger)
+            with (
+                mock.patch.object(
+                    validate_report, "validate_rewild_receipt"
+                ) as rewild_fn,
+                mock.patch.object(
+                    validate_report,
+                    "validate_source_fidelity_receipt_online",
+                ) as online,
+            ):
+                code = validate_report.main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--rewild-receipt",
+                        str(rewild),
+                        "--content-receipt",
+                        str(content),
+                        "--source-fidelity-receipt",
+                        str(fidelity),
+                        "--fast",
+                    ]
+                )
+        self.assertEqual(0, code)
+        rewild_fn.assert_not_called()
+        online.assert_not_called()
+
+    def test_fast_rejects_stale_receipt_hashes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            report.write_text(GOOD_REPORT, encoding="utf-8")
+            ledger = work / "ledger.json"
+            ledger.write_text(
+                json.dumps(
+                    {
+                        "sources": [
+                            {"source_id": "S1", "url": "https://example.com/a"},
+                            {"source_id": "S2", "url": "https://example.org/b"},
+                        ],
+                        "claims": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rewild, content, fidelity = self._bound_receipts(work, report, ledger)
+            rewild.write_text(
+                json.dumps({"report_sha256": "0" * 64, "ledger_sha256": "1" * 64}),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                code = validate_report.main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--rewild-receipt",
+                        str(rewild),
+                        "--content-receipt",
+                        str(content),
+                        "--source-fidelity-receipt",
+                        str(fidelity),
+                        "--fast",
+                    ]
+                )
+        self.assertEqual(1, code)
+        self.assertIn("report_sha256", stderr.getvalue())
+
+    def test_integrity_findings_unknown_lang_does_not_crash(self):
+        findings = validate_report.integrity_findings(
+            "# Title\n\n> 14 September 2026\n\nBody.\n\n## Sources\n\n- [A](https://example.com/a)\n",
+            {"report_date": "2026-09-14"},
+            lang="xx",
+        )
+        self.assertTrue(all(hasattr(item, "family") for item in findings))
+
+    def test_integrity_findings_lists_all_lost_quotes(self):
+        snapshot = 'He said "alpha word here" and 「第二段引文内容」.'
+        report = "# Title\n\n> 14 September 2026\n\nPlain.\n\n## Sources\n\n- [A](https://example.com/a)\n"
+        messages = [
+            item.message
+            for item in validate_report.integrity_findings(
+                report,
+                {"report_date": "2026-09-14"},
+                snapshot_text=snapshot,
+                lang="en",
+            )
+            if item.family == "integrity/quotation-lost"
+        ]
+        joined = " ".join(messages)
+        self.assertIn("alpha word here", joined)
+        self.assertIn("第二段引文内容", joined)
+
+    def test_final_once_reuses_supplied_fidelity_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            report.write_text(GOOD_REPORT, encoding="utf-8")
+            rewild = work / "rewild.json"
+            content = work / "content.json"
+            fidelity = work / "fidelity.json"
+            ledger = work / "ledger.json"
+            result = work / "fidelity-result.json"
+            rewild.write_text("{}", encoding="utf-8")
+            content.write_text("{}", encoding="utf-8")
+            fidelity.write_text("{}", encoding="utf-8")
+            ledger.write_text(
+                json.dumps(
+                    {
+                        "sources": [
+                            {"source_id": "S1", "url": "https://example.com/a"},
+                            {"source_id": "S2", "url": "https://example.org/b"},
+                        ],
+                        "claims": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result.write_text(
+                json.dumps({"status": "passed", "mismatches": []}),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    validate_report, "validate_rewild_receipt", return_value=[]
+                ),
+                mock.patch.object(
+                    validate_report,
+                    "validate_source_fidelity_receipt_online",
+                ) as online,
+                mock.patch.dict(
+                    "sys.modules",
+                    {
+                        "content_gate": mock.Mock(
+                            validate_content_receipt=mock.Mock(return_value=[])
+                        )
+                    },
+                ),
+            ):
+                validate_report.main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--rewild-receipt",
+                        str(rewild),
+                        "--content-receipt",
+                        str(content),
+                        "--source-fidelity-receipt",
+                        str(fidelity),
+                        "--final-once",
+                        str(result),
+                    ]
+                )
+        online.assert_not_called()
+
+    def test_force_flag_is_accepted(self):
+        parser = validate_report.build_parser()
+        args = parser.parse_args(["report.md", "--force"])
+        self.assertTrue(args.force)
+
+
 if __name__ == "__main__":
     unittest.main()

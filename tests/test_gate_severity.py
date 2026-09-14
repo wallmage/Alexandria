@@ -20,14 +20,72 @@ if str(ROOT) not in sys.path:
 from scripts import content_gate, rewild_gate, validate_ledger, validate_report  # noqa: E402
 from scripts.gate_severity import (  # noqa: E402
     WARNING_PREFIX,
+    Finding,
+    as_text,
     emit_findings,
+    group,
     hard_errors,
     is_warning,
+    render_grouped,
     warning,
     warning_findings,
 )
 
 LEDGER_FIXTURE = ROOT / "tests" / "fixtures" / "evidence-ledger.json"
+
+
+class FindingRecordTests(unittest.TestCase):
+    def _finding(self, **overrides):
+        item = Finding(
+            family="ledger/quantity",
+            severity="hard",
+            klass="F",
+            ids=["C8"],
+            message="claim asserts n:1918; S16 extracts offer d:1918-01 only",
+            fix="alx find S16 1918",
+            remove="alx claim drop C8 --apply",
+        )
+        return Finding(**{**item.__dict__, **overrides})
+
+    def test_as_text_uses_fail_and_warning_prefixes(self):
+        hard = self._finding()
+        warn = self._finding(severity="warn", klass="A", family="ledger/coverage")
+        self.assertEqual(f"[FAIL] {hard.message}", as_text(hard))
+        self.assertEqual(f"{WARNING_PREFIX}{warn.message}", as_text(warn))
+
+    def test_group_and_render_grouped_cap_per_family(self):
+        findings = [
+            self._finding(ids=[f"C{i}"], message=f"qty {i}") for i in range(6)
+        ]
+        findings.append(
+            self._finding(
+                family="ledger/coverage",
+                severity="warn",
+                klass="A",
+                ids=["C1"],
+                message="coverage linkage",
+                fix="alx check --fix",
+                remove="",
+            )
+        )
+        grouped = group(findings)
+        self.assertEqual(["ledger/quantity", "ledger/coverage"], list(grouped))
+        self.assertEqual(6, len(grouped["ledger/quantity"]))
+        rendered = render_grouped(findings, per_family=5)
+        self.assertIn("=== HARD 6 (blocks issue) ===", rendered)
+        self.assertIn("[ledger/quantity] 6", rendered)
+        self.assertIn("+1 more", rendered)
+        self.assertIn("=== WARN 1 ===", rendered)
+        self.assertIn("=== STATUS:", rendered)
+        self.assertNotIn("qty 5", rendered.split("+1 more")[0])
+
+    def test_hard_errors_accept_finding_records(self):
+        findings = [
+            self._finding(),
+            self._finding(severity="warn", klass="A", family="ledger/derived"),
+        ]
+        self.assertEqual(1, len(hard_errors(findings)))
+        self.assertEqual(1, len(warning_findings(findings)))
 
 
 class SharedSeverityHelperTests(unittest.TestCase):
@@ -99,7 +157,7 @@ class GateEntryPointSeverityTests(unittest.TestCase):
             with redirect_stderr(err), redirect_stdout(io.StringIO()):
                 code = validate_ledger.main([str(ledger)])
         self.assertEqual(1, code)
-        self.assertIn("[FAIL]", err.getvalue())
+        self.assertIn("=== HARD", err.getvalue())
 
     def test_evidence_and_citation_findings_are_never_warnings(self):
         ledger = json.loads(LEDGER_FIXTURE.read_text(encoding="utf-8"))

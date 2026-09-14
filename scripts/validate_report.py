@@ -8,8 +8,12 @@ import re
 import sys
 import tempfile
 from collections import Counter
+from dataclasses import dataclass
+from datetime import date
+from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -19,14 +23,32 @@ try:
     from .artifact_safety import validated_artifact_path
     from .gate_severity import emit_findings, hard_errors, warning
     from .report_blocks import mask_fenced_code as _mask_fenced_code
-    from .report_contract import detect_language
+    from .report_contract import detect_language, localized_date, report_length_policy
     from .source_fidelity import validate_source_fidelity_receipt_online
 except ImportError:
     from artifact_safety import validated_artifact_path
     from gate_severity import emit_findings, hard_errors, warning
     from report_blocks import mask_fenced_code as _mask_fenced_code
-    from report_contract import detect_language
+    from report_contract import detect_language, localized_date, report_length_policy
     from source_fidelity import validate_source_fidelity_receipt_online
+
+try:
+    from .gate_severity import Finding
+except (ImportError, AttributeError):
+    try:
+        from gate_severity import Finding
+    except (ImportError, AttributeError):
+        Finding = None
+if Finding is None:
+    @dataclass
+    class Finding:
+        family: str
+        severity: str
+        klass: str
+        ids: list
+        message: str
+        fix: str
+        remove: str = ""
 
 SOURCE_HEADINGS = {
     "sources",
@@ -37,6 +59,20 @@ SOURCE_HEADINGS = {
     "參考資料",
 }
 LANG_CHOICES = ("en", "zh-CN", "zh-HK")
+FAMILIES = (
+    "integrity/control-chars",
+    "integrity/replacement-char",
+    "integrity/structure",
+    "integrity/date-line",
+    "integrity/length",
+    "integrity/quotation-lost",
+    "binding/link-not-in-ledger",
+    "binding/claim-paragraph",
+    "binding/sources-section",
+)
+_QUOTE_SPAN_RE = re.compile(
+    r"「[^」]{4,}」|『[^』]{4,}』|[“][^”]{4,}[”]|[‘][^’]{4,}[’]|\"[^\"]{4,}\""
+)
 ROOT = Path(__file__).resolve().parents[1]
 S2T_CHARACTER_MAP = (
     ROOT / "references" / "rewild" / "opencc" / "STCharacters.txt"
@@ -317,6 +353,326 @@ def _report_prose(text, sections):
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", text)
     text = re.sub(r"[*_~>|]", " ", text)
     return text
+
+
+def _finding(family, message, *, ids=None, severity="hard", fix="", remove=""):
+    klass = "F" if severity == "hard" else "A"
+    return Finding(
+        family=family,
+        severity=severity,
+        klass=klass,
+        ids=list(ids or []),
+        message=message,
+        fix=fix,
+        remove=remove,
+    )
+
+
+def normalize_url(url):
+    parts = urlsplit(str(url))
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_")
+    ]
+    path = parts.path.rstrip("/")
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, urlencode(query), "")
+    )
+
+
+def _http_url(url):
+    scheme = urlsplit(str(url)).scheme.lower()
+    return scheme in {"http", "https"}
+
+
+def _foundation_urls(claim, sources_by_id):
+    urls = set()
+    if not isinstance(claim, dict):
+        return urls
+    for source_id in claim.get("source_ids") or []:
+        source = sources_by_id.get(source_id, {})
+        if not isinstance(source, dict):
+            continue
+        for raw in [source.get("url"), *(source.get("aliases") or [])]:
+            if raw:
+                urls.add(normalize_url(raw))
+    return urls
+
+
+def _ledger_url_set(ledger):
+    urls = set()
+    for source in ledger.get("sources", []) if isinstance(ledger, dict) else []:
+        if not isinstance(source, dict):
+            continue
+        for raw in [source.get("url"), *(source.get("aliases") or [])]:
+            if raw:
+                urls.add(normalize_url(raw))
+    return urls
+
+
+def _ledger_url_display(ledger):
+    displayed = []
+    for source in ledger.get("sources", []) if isinstance(ledger, dict) else []:
+        if isinstance(source, dict) and source.get("url"):
+            displayed.append(source["url"])
+    return displayed
+
+
+def _nearest_ledger_url(url, candidates):
+    if not candidates:
+        return ""
+    return max(
+        candidates,
+        key=lambda candidate: SequenceMatcher(None, url, candidate).ratio(),
+    )
+
+
+def _body_and_sources(text):
+    sections = _h2_sections(text)
+    source_indexes = [
+        index
+        for index, (heading, _) in enumerate(sections)
+        if heading.casefold() in SOURCE_HEADINGS
+    ]
+    if not source_indexes:
+        return text, "", sections, None
+    source_index = source_indexes[-1]
+    source_start = sections[source_index][1]
+    return text[:source_start], text[source_start:], sections, source_index
+
+
+def _body_paragraphs(body):
+    return [
+        paragraph
+        for paragraph in re.split(r"\n\s*\n", body)
+        if paragraph.strip()
+    ]
+
+
+def _immediate_blockquote_lines(text):
+    lines = []
+    found_h1 = False
+    collecting = False
+    for line in _mask_fenced_code(text).splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# ") and not found_h1:
+            found_h1 = True
+            continue
+        if found_h1 and stripped.startswith(">"):
+            collecting = True
+            lines.append(stripped.lstrip(">").strip())
+            continue
+        if collecting and stripped:
+            break
+        if found_h1 and stripped and not collecting:
+            break
+    return found_h1, lines
+
+
+def _quoted_spans(text):
+    return _QUOTE_SPAN_RE.findall(text or "")
+
+
+def binding_findings(text, ledger):
+    """Link membership, claim→paragraph mapping, Sources section (spec §6.7c)."""
+    findings = []
+    if not isinstance(ledger, dict):
+        return [
+            _finding(
+                "binding/link-not-in-ledger",
+                "Evidence ledger root must be an object.",
+            )
+        ]
+    allowed = _ledger_url_set(ledger)
+    displayed = _ledger_url_display(ledger)
+    body, source_text, sections, source_index = _body_and_sources(text)
+    for url in sorted(set(extract_markdown_urls(text))):
+        if not _http_url(url):
+            continue
+        if normalize_url(url) in allowed:
+            continue
+        nearest = _nearest_ledger_url(url, displayed)
+        message = f"Report URL is not present in the ledger: {url}"
+        if nearest:
+            message += f"; nearest ledger URL: {nearest}"
+        findings.append(
+            _finding(
+                "binding/link-not-in-ledger",
+                message,
+                fix="cite a ledger URL or alias",
+            )
+        )
+
+    paragraphs = _body_paragraphs(body)
+    sources_by_id = {
+        source.get("source_id"): source
+        for source in ledger.get("sources", [])
+        if isinstance(source, dict) and source.get("source_id")
+    }
+    for claim in ledger.get("claims", []) if isinstance(ledger.get("claims"), list) else []:
+        if not isinstance(claim, dict) or claim.get("include_in_report") is not True:
+            continue
+        claim_id = claim.get("claim_id", "<unknown>")
+        bound = claim.get("report_paragraph")
+        if bound is not None:
+            try:
+                index = int(bound)
+            except (TypeError, ValueError):
+                index = None
+            if index is None or index < 1 or index > len(paragraphs):
+                findings.append(
+                    _finding(
+                        "binding/claim-paragraph",
+                        f"Claim {claim_id} report_paragraph {bound} is out of range.",
+                        ids=[claim_id],
+                        fix=f"run `alx claim bind {claim_id} --paragraph N`",
+                        remove=f"alx claim drop {claim_id} --apply",
+                    )
+                )
+            continue
+        foundation_urls = _foundation_urls(claim, sources_by_id)
+        candidates = []
+        for index, paragraph in enumerate(paragraphs, start=1):
+            paragraph_urls = {normalize_url(url) for url in extract_markdown_urls(paragraph)}
+            if foundation_urls & paragraph_urls:
+                candidates.append(index)
+        if len(candidates) != 1:
+            listed = ", ".join(str(item) for item in candidates) or "none"
+            findings.append(
+                _finding(
+                    "binding/claim-paragraph",
+                    f"ambiguous: run `alx claim bind {claim_id} --paragraph N`; candidates: {listed}",
+                    ids=[claim_id],
+                    fix=f"run `alx claim bind {claim_id} --paragraph N`",
+                    remove=f"alx claim drop {claim_id} --apply",
+                )
+            )
+
+    if source_index is None:
+        findings.append(
+            _finding(
+                "binding/sources-section",
+                "Sources H2 must be last and equal the cited-source list.",
+                fix="run `alx check --fix`",
+            )
+        )
+    else:
+        if source_index != len(sections) - 1:
+            findings.append(
+                _finding(
+                    "binding/sources-section",
+                    "Sources must be the last H2 section.",
+                    fix="run `alx check --fix`",
+                )
+            )
+        cited = {normalize_url(url) for url in extract_markdown_urls(body)}
+        listed = {normalize_url(url) for url in extract_markdown_urls(source_text)}
+        if cited != listed:
+            findings.append(
+                _finding(
+                    "binding/sources-section",
+                    "Sources section must equal the cited-source list.",
+                    fix="run `alx check --fix`",
+                )
+            )
+    return findings
+
+
+def integrity_findings(text, ledger, *, snapshot_text=None, lang):
+    """Integrity checks from spec §6.7(a)."""
+    findings = []
+    if any(ord(char) < 32 and char not in "\t\n\r" for char in text):
+        findings.append(
+            _finding(
+                "integrity/control-chars",
+                "Report contains C0 control characters.",
+                fix="remove control characters",
+            )
+        )
+    if "\ufffd" in text:
+        findings.append(
+            _finding(
+                "integrity/replacement-char",
+                "Report contains U+FFFD replacement characters.",
+                fix="re-decode the report as UTF-8",
+            )
+        )
+    has_h1, blockquote_lines = _immediate_blockquote_lines(text)
+    if not has_h1:
+        findings.append(
+            _finding(
+                "integrity/structure",
+                "Report needs one H1 title.",
+                fix="add an H1 title",
+            )
+        )
+    if not blockquote_lines:
+        findings.append(
+            _finding(
+                "integrity/structure",
+                "Report needs a standfirst blockquote immediately under the H1.",
+                fix="add the standfirst blockquote under the H1",
+            )
+        )
+    expected_date = None
+    ledger_value = ledger.get("report_date") if isinstance(ledger, dict) else None
+    try:
+        ledger_day = (
+            date.fromisoformat(ledger_value)
+            if isinstance(ledger_value, str)
+            else None
+        )
+        if ledger_day is not None and lang:
+            expected_date = localized_date(lang, ledger_day)
+    except ValueError:
+        expected_date = None
+    if expected_date and expected_date not in blockquote_lines:
+        findings.append(
+            _finding(
+                "integrity/date-line",
+                "Date line must use the strict locale format and sit in the "
+                f"immediate blockquote under the H1: {expected_date}.",
+                fix="put the locale date on the immediate blockquote under the H1",
+            )
+        )
+    if lang:
+        try:
+            minimum, maximum, unit = report_length_policy(lang)
+        except ValueError:
+            minimum = None
+        if minimum is not None:
+            sections = _h2_sections(text)
+            prose = _report_prose(text, sections)
+            if unit == "words":
+                actual = len(re.findall(r"\b[\w'-]+\b", prose, re.UNICODE))
+                label = "words"
+            else:
+                actual = len(re.findall(r"[A-Za-z0-9\u3400-\u9fff]", prose))
+                label = "characters"
+            if actual < minimum or actual > maximum:
+                findings.append(
+                    _finding(
+                        "integrity/length",
+                        f"Report has {actual} {label}; threshold is {minimum}–{maximum} {label}.",
+                        fix="expand or cut the report body to the length floor/ceiling",
+                        severity="warn" if actual < minimum else "hard",
+                    )
+                )
+    if snapshot_text:
+        missing = [
+            span for span in _quoted_spans(snapshot_text) if span not in text
+        ]
+        for span in missing[:5]:
+            findings.append(
+                _finding(
+                    "integrity/quotation-lost",
+                    f"Quoted span missing from the report: {span}",
+                    fix="alx snapshot --restore",
+                    remove="alx snapshot --restore",
+                )
+            )
+    return findings
 
 
 def validate_markdown(
@@ -785,8 +1141,22 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
     return errors
 
 
-def build_parser():
-    parser = argparse.ArgumentParser(description="Validate an Alexandria report")
+class _InvocationParser(argparse.ArgumentParser):
+    def __init__(self, *args, invocation=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._invocation = invocation
+
+    def error(self, message):
+        invocation = self._invocation or " ".join(sys.argv)
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{invocation}\n{self.prog}: error: {message}\n")
+
+
+def build_parser(invocation=None):
+    parser = _InvocationParser(
+        description="Validate an Alexandria report",
+        invocation=invocation,
+    )
     parser.add_argument("markdown", help="Markdown report to validate")
     parser.add_argument("--ledger", help="Evidence ledger JSON to cross-check")
     parser.add_argument(
@@ -806,17 +1176,121 @@ def build_parser():
     parser.add_argument("--max-words", type=int, default=0)
     parser.add_argument("--min-chars", type=int, default=0)
     parser.add_argument("--max-chars", type=int, default=0)
-    parser.add_argument("--expected-lang", choices=LANG_CHOICES)
+    parser.add_argument(
+        "--expected-lang",
+        "--lang",
+        dest="expected_lang",
+        choices=LANG_CHOICES,
+    )
     parser.add_argument("--min-sources", type=int, default=1)
     parser.add_argument("--min-sections", type=int, default=1)
     parser.add_argument("--min-pages", type=int, default=1)
     parser.add_argument("--min-text-chars", type=int, default=1)
     parser.add_argument("--min-links", type=int, default=0)
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="structure, hashes, and receipt presence only",
+    )
+    parser.add_argument(
+        "--final-once",
+        dest="final_once",
+        help="reuse a supplied fidelity result JSON instead of a live re-fetch",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="accepted for CLI convention; this command writes no output file",
+    )
     return parser
 
 
+def _receipt_presence_errors(args):
+    errors = []
+    for flag, value, label in (
+        ("--rewild-receipt", args.rewild_receipt, "Rewild gate receipt"),
+        ("--content-receipt", args.content_receipt, "Content quality gate receipt"),
+        (
+            "--source-fidelity-receipt",
+            args.source_fidelity_receipt,
+            "source-fidelity receipt",
+        ),
+    ):
+        if not value:
+            errors.append(f"A {label} is required ({flag}).")
+        elif not Path(value).is_file():
+            errors.append(f"{label} is missing: {value}")
+    return errors
+
+
+def _receipt_hash_errors(args, markdown_path):
+    errors = []
+    try:
+        report_hash = hashlib.sha256(Path(markdown_path).read_bytes()).hexdigest()
+    except OSError as exc:
+        return [f"Report could not be hashed: {exc}"]
+    ledger_hash = None
+    if args.ledger:
+        try:
+            ledger_hash = hashlib.sha256(Path(args.ledger).read_bytes()).hexdigest()
+        except OSError as exc:
+            errors.append(f"Evidence ledger could not be hashed: {exc}")
+    for _flag, value, label in (
+        ("--rewild-receipt", args.rewild_receipt, "Rewild gate receipt"),
+        ("--content-receipt", args.content_receipt, "Content quality gate receipt"),
+        (
+            "--source-fidelity-receipt",
+            args.source_fidelity_receipt,
+            "source-fidelity receipt",
+        ),
+    ):
+        if not value or not Path(value).is_file():
+            continue
+        try:
+            payload = json.loads(Path(value).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{label} could not be read for hash check: {exc}")
+            continue
+        if not isinstance(payload, dict):
+            errors.append(f"{label} is not a JSON object.")
+            continue
+        recorded = payload.get("report_sha256")
+        if not recorded:
+            errors.append(f"{label} does not record report_sha256.")
+        elif recorded != report_hash:
+            errors.append(
+                f"{label} report_sha256 does not match the current report."
+            )
+        recorded_ledger = payload.get("ledger_sha256")
+        if ledger_hash:
+            if not recorded_ledger:
+                errors.append(f"{label} does not record ledger_sha256.")
+            elif recorded_ledger != ledger_hash:
+                errors.append(
+                    f"{label} ledger_sha256 does not match the current ledger."
+                )
+    return errors
+
+
+def _apply_fidelity_result(path):
+    try:
+        result = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"--final-once fidelity result could not be read: {exc}"]
+    if not isinstance(result, dict):
+        return ["--final-once fidelity result must be a JSON object."]
+    errors = []
+    for item in result.get("errors") or []:
+        errors.append(str(item))
+    for item in result.get("mismatches") or []:
+        errors.append(f"Fidelity mismatch: {item}")
+    return errors
+
+
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    invocation = " ".join(["validate_report.py", *argv])
+    args = build_parser(invocation=invocation).parse_args(argv)
     markdown_path = Path(args.markdown)
     try:
         text = markdown_path.read_text(encoding="utf-8")
@@ -841,6 +1315,23 @@ def main(argv=None):
             errors.append(f"Evidence ledger could not be read: {exc}")
         else:
             errors.extend(validate_report_against_ledger(text, ledger))
+    if args.fast:
+        errors.extend(_receipt_presence_errors(args))
+        errors.extend(_receipt_hash_errors(args, markdown_path))
+        if args.pdf:
+            errors.extend(
+                validate_pdf(
+                    Path(args.pdf),
+                    min_pages=max(args.min_pages, 0),
+                    min_text_chars=max(args.min_text_chars, 0),
+                    min_links=max(args.min_links, 0),
+                    expected_lang=args.expected_lang,
+                )
+            )
+        return emit_findings(
+            errors,
+            ok_message=f"[OK] Report validated: {markdown_path}",
+        )
     if not args.rewild_receipt:
         errors.append(
             "A Rewild gate receipt is required. Run scripts/rewild_gate.py first."
@@ -922,6 +1413,8 @@ def main(argv=None):
                         errors.append(
                             "Source-fidelity receipt changed after content review."
                         )
+                    elif args.final_once:
+                        errors.extend(_apply_fidelity_result(args.final_once))
                     else:
                         errors.extend(
                             validate_source_fidelity_receipt_online(

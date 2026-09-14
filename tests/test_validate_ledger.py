@@ -1075,7 +1075,7 @@ class KeyClaimFoundationTests(unittest.TestCase):
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
             any(
-                "C1: key claim rests only on interested sources" in error
+                "C1: key claim rests only on interested" in error
                 for error in errors
             ),
             errors,
@@ -1582,7 +1582,7 @@ class LedgerReferenceTests(unittest.TestCase):
         joined = " ".join(errors)
         self.assertIn("duplicate source_evidence for S1", joined)
         self.assertIn("source_evidence references S9", joined)
-        self.assertIn("source_evidence is missing S2", joined)
+        self.assertIn("extra source_ids", joined)
 
     def test_v3_ledger_requires_an_independent_source_portfolio(self):
         data = valid_quality_ledger()
@@ -2116,7 +2116,9 @@ class ChineseQuantityScanTests(unittest.TestCase):
                 ).read_text(encoding="utf-8")
             )
             with self.subTest(ledger=name):
-                self.assertEqual([], validate_ledger.validate_references(ledger))
+                errors = validate_ledger.validate_references(ledger)
+                hard = [item for item in errors if not str(item).startswith("WARNING:")]
+                self.assertEqual([], hard, errors)
 
 
 class ChineseWordNumberScanTests(unittest.TestCase):
@@ -2793,7 +2795,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                 ).read_text(encoding="utf-8")
             )
             with self.subTest(ledger=name):
-                self.assertEqual([], validate_ledger.validate_references(ledger))
+                errors = validate_ledger.validate_references(ledger)
+                hard = [item for item in errors if not str(item).startswith("WARNING:")]
+                self.assertEqual([], hard, errors)
 
 
 class DirectionCarrierIgnoresNumeralNoiseTests(unittest.TestCase):
@@ -2878,6 +2882,557 @@ class DirectionCarrierIgnoresNumeralNoiseTests(unittest.TestCase):
                 "增長百分之三十五。", match
             ),
         )
+
+
+class ResilienceLedgerApiTests(unittest.TestCase):
+    """Spec §7.1 / §6.4 / §9 — findings, severities, quantities, claim-input."""
+
+    def test_families_constant_is_exported(self):
+        emitted = {item.family for item in self._family_fixture_findings()}
+        self.assertEqual(validate_ledger.FAMILIES, emitted)
+        self.assertTrue(emitted <= validate_ledger.FAMILIES)
+
+    def _family_fixture_findings(self):
+        findings = []
+        data = valid_quality_ledger()
+        data["claims"][0]["claim"] = "Revenue increased by 12%."
+        data["claims"][0]["extract_or_location"] = "Revenue decreased by 12%."
+        data["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
+        data["claims"][0]["source_evidence"][1]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
+        findings.extend(validate_ledger.collect_findings(data))
+        https = valid_quality_ledger()
+        https["sources"][0]["url"] = "http://records.example.org/result"
+        findings.extend(validate_ledger.collect_findings(https))
+        missing = valid_quality_ledger()
+        missing["claims"][0].pop("source_ids")
+        findings.extend(validate_ledger.collect_findings(missing))
+        extras = valid_quality_ledger()
+        extras["claims"][0]["source_ids"] = ["S1", "S2", "S3"]
+        extras["sources"].append(
+            {
+                "source_id": "S3",
+                "url": "https://other.example.net/x",
+                "publisher": "Other",
+                "source_family": "other.example.net",
+                "provenance": "secondary_independent",
+                "roles": ["independent_analysis"],
+                "accountability_basis": "none",
+                "published": "2026-07-21",
+                "accessed": "2026-07-28",
+            }
+        )
+        findings.extend(validate_ledger.collect_findings(extras))
+        unverified = valid_quality_ledger()
+        unverified["sources"][1]["provenance"] = "unverified"
+        findings.extend(validate_ledger.collect_findings(unverified))
+        year = {
+            "claim_id": "C80",
+            "kind": "fact",
+            "claim": "事件发生在1918年。",
+            "extract_or_location": "档案记于1918年1月。",
+            "source_evidence": [
+                {"source_id": "S16", "extract_or_location": "档案记于1918年1月。"}
+            ],
+        }
+        findings.extend(
+            item
+            for item in validate_ledger.collect_findings(ledger_with_fact(**year))
+            if item.family == "ledger/date-granularity"
+        )
+        findings.extend(
+            validate_ledger.claim_findings(
+                {
+                    "claim_id": "C5",
+                    "claim": "Revenue increased by 12%.",
+                    "kind": "analysis",
+                    "importance": "supporting",
+                    "source_evidence": [
+                        {"source_id": "S2", "extract_or_location": "short"},
+                    ],
+                    "person_ids": ["P9"],
+                },
+                valid_quality_ledger(),
+            )
+        )
+        unknown = valid_quality_ledger()
+        unknown["people"] = [
+            {
+                "person_id": "P1",
+                "name": "Alex Doe",
+                "aliases": ["Doe"],
+                "living_status": "unknown",
+                "public_role": "public",
+                "relationship": "primary_subject",
+            }
+        ]
+        unknown["claims"][0]["person_ids"] = ["P1"]
+        unknown["claims"][0]["person_claim_role"] = "neutral"
+        unknown["claims"][0]["person_claim_assessment"] = {
+            "classification": "neutral",
+            "rationale": "x" * 40,
+        }
+        findings.extend(validate_ledger.collect_findings(unknown))
+        dropped = fact_claim(claim_id="C9")
+        dropped["reason"] = "drop"
+        dropped["dropped_at"] = "2026-09-14T00:00:00Z"
+        excluded = valid_quality_ledger()
+        excluded["excluded_claims"] = [dropped]
+        excluded["claims"][0]["supports"] = ["C9"]
+        findings.extend(validate_ledger.collect_findings(excluded))
+        host = valid_quality_ledger()
+        host["sources"][1]["url"] = "https://records.example.org/other"
+        host["sources"][1]["source_family"] = "example.org"
+        findings.extend(validate_ledger.collect_findings(host))
+        schema = validate_ledger.collect_findings({})
+        findings.extend(schema)
+        coverage = valid_quality_ledger()
+        coverage["coverage"][0]["claim_ids"] = ["C2"]
+        coverage["claims"].append(fact_claim(status="inference"))
+        findings.extend(validate_ledger.collect_findings(coverage))
+        derived = ledger_with_fact(
+            claim="The vendor recorded a 12.5% failure rate.",
+            derived_assertions=[{"expression": "failure rate", "derivation": "x" * 40}],
+        )
+        findings.extend(validate_ledger.collect_findings(derived))
+        status = {
+            "claim_id": "C70",
+            "kind": "fact",
+            "claim": "The defect was patched.",
+            "extract_or_location": "The page describes the product.",
+            "source_evidence": [
+                {"source_id": "S2", "extract_or_location": "The page describes the product."}
+            ],
+        }
+        findings.extend(validate_ledger.collect_findings(ledger_with_fact(**status)))
+        fresh = valid_quality_ledger()
+        fresh["claims"][0]["time_sensitive"] = True
+        fresh["claims"][0]["as_of"] = "2025-01-01"
+        findings.extend(validate_ledger.collect_findings(fresh))
+        undated = valid_quality_ledger()
+        undated["claims"][0]["time_sensitive"] = True
+        undated["claims"][0]["as_of"] = "2026-07-28"
+        undated["sources"][0]["published"] = None
+        undated["sources"][0]["undated_reason"] = "no date shown on the page"
+        findings.extend(validate_ledger.collect_findings(undated))
+        syn = valid_quality_ledger()
+        syn["synthesis"]["central_judgment_claim_ids"] = ["C1", "C9"]
+        findings.extend(validate_ledger.collect_findings(syn))
+        dup = valid_quality_ledger()
+        dup["sources"].append(dict(dup["sources"][0], source_id="S1", url="https://dup.example.org/x"))
+        findings.extend(validate_ledger.collect_findings(dup))
+        harm = living_harm_ledger()
+        harm["claims"][-1]["person_claim_role"] = "neutral"
+        findings.extend(validate_ledger.collect_findings(harm))
+        return findings
+
+    def test_threshold_messages_keep_their_own_family(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["url"] = "http://records.example.org/result"
+        data["claims"][0].pop("source_ids")
+        families = {item.family for item in validate_ledger.collect_findings(data)}
+        self.assertIn("ledger/https", families)
+        self.assertIn("ledger/source-ids", families)
+        self.assertNotIn(
+            "ledger/quantity",
+            {
+                item.family
+                for item in validate_ledger.collect_findings(data)
+                if "https" in item.message or "source_ids" in item.message
+            },
+        )
+
+    def test_bare_year_versus_year_month_is_a_granularity_warning(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C80",
+                "kind": "fact",
+                "claim": "事件发生在1918年。",
+                "extract_or_location": "档案记于1918年1月。",
+            }
+        )
+        self.assertTrue(errors, errors)
+        self.assertTrue(all(item.startswith("WARNING:") for item in errors), errors)
+        self.assertTrue(any("1918" in item for item in errors), errors)
+        findings = validate_ledger.collect_findings(
+            ledger_with_fact(
+                claim_id="C80",
+                claim="事件发生在1918年。",
+                extract_or_location="档案记于1918年1月。",
+                source_evidence=[
+                    {"source_id": "S2", "extract_or_location": "档案记于1918年1月。"}
+                ],
+            )
+        )
+        grains = [item for item in findings if item.family == "ledger/date-granularity"]
+        self.assertTrue(grains, findings)
+        self.assertEqual("warn", grains[0].severity)
+
+    def test_quantity_remedy_never_names_extracts_as_a_source(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "The vendor recorded 28 incidents.",
+                "extract_or_location": "Report dated 2026-07-28.",
+            }
+        )
+        joined = " ".join(errors)
+        self.assertNotIn("alx find extracts", joined)
+        self.assertTrue(
+            "alx find S" in joined or "set field extract_or_location" in joined,
+            joined,
+        )
+
+    def test_date_fragment_day_is_covered_by_full_date(self):
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "事件发生在12日。",
+                    "extract_or_location": "记录写于1936年12月12日。",
+                    "source_evidence": [
+                        {
+                            "source_id": "S16",
+                            "extract_or_location": "记录写于1936年12月12日。",
+                        }
+                    ],
+                }
+            ),
+        )
+
+    def test_count_is_not_covered_by_date_parts(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "调集了12个师。",
+                "extract_or_location": "会议开于12月12日。",
+                "source_evidence": [
+                    {
+                        "source_id": "S16",
+                        "extract_or_location": "会议开于12月12日。",
+                    }
+                ],
+            }
+        )
+        self.assertTrue(any("quantity" in error for error in errors), errors)
+        self.assertTrue(any("n:12" in error for error in errors), errors)
+
+    def test_bare_year_is_not_covered_by_year_month_and_names_both_forms(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C8",
+                "kind": "fact",
+                "claim": "伤亡发生在1918。",
+                "extract_or_location": "档案记于1918年1月。",
+                "source_evidence": [
+                    {
+                        "source_id": "S16",
+                        "extract_or_location": "档案记于1918年1月。",
+                    }
+                ],
+            }
+        )
+        joined = " ".join(errors)
+        self.assertIn("n:1918", joined)
+        self.assertIn("d:1918-01", joined)
+        self.assertIn("S16", joined)
+
+    def test_bare_under_without_numeric_or_legal_carrier_is_not_a_direction(self):
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "The review went under the wire.",
+                    "extract_or_location": "The review finished on time.",
+                }
+            ),
+        )
+
+    def test_bare_settled_without_legal_carrier_is_not_a_status(self):
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C900",
+                    "kind": "fact",
+                    "claim": "The dust settled after the announcement.",
+                    "extract_or_location": "The announcement closed the day.",
+                }
+            ),
+        )
+
+    def test_increased_versus_decreased_stays_hard(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "Revenue increased by 12%.",
+                "extract_or_location": "Revenue decreased by 12%.",
+            }
+        )
+        self.assertTrue(any("direction" in error.lower() for error in errors), errors)
+        self.assertFalse(any(error.startswith("WARNING:") for error in errors), errors)
+
+    def test_unverified_provenance_is_interested_in_portfolio_and_key_claim(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["provenance"] = "unverified"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("portfolio has no independent source" in error.lower() for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("unverified" in error.lower() or "interested" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_missing_source_ids_are_derived_as_a_warning(self):
+        data = valid_quality_ledger()
+        data["claims"][0].pop("source_ids")
+        errors = validate_ledger.validate_references(data)
+        warns = [error for error in errors if error.startswith("WARNING:")]
+        self.assertTrue(any("source_ids" in error for error in warns), errors)
+
+    def test_extras_on_source_ids_are_one_error_per_claim(self):
+        data = valid_quality_ledger()
+        data["sources"].append(
+            {
+                "source_id": "S3",
+                "url": "https://other.example.net/x",
+                "publisher": "Other",
+                "source_family": "other.example.net",
+                "provenance": "secondary_independent",
+                "roles": ["independent_analysis"],
+                "accountability_basis": "none",
+                "published": "2026-07-21",
+                "accessed": "2026-07-28",
+            }
+        )
+        data["claims"][0]["source_ids"] = ["S1", "S2", "S3"]
+        errors = [
+            error
+            for error in validate_ledger.validate_references(data)
+            if "C1" in error and "extra" in error.lower()
+        ]
+        self.assertEqual(1, len(errors), errors)
+
+    def test_http_source_url_is_hard_but_http_alias_is_allowed(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["url"] = "http://records.example.org/result"
+        data["sources"][0]["aliases"] = ["http://records.example.org/old"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("https" in error.lower() and "S1" in error for error in errors), errors)
+        data["sources"][0]["url"] = "https://records.example.org/result"
+        errors = validate_ledger.validate_references(data)
+        self.assertFalse(
+            any("https" in error.lower() and "alias" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_cjk_derivation_minimum_is_20_with_threshold_in_message(self):
+        claim = {
+            "claim_id": "C900",
+            "kind": "fact",
+            "claim": "营收增长12%。",
+            "extract_or_location": "页面描述了产品。",
+            "derived_assertions": [
+                {"expression": "12%", "derivation": "推算说明偏短"},
+            ],
+        }
+        errors = validate_ledger.derived_assertion_errors(claim)
+        joined = " ".join(errors)
+        self.assertIn("20", joined)
+        self.assertRegex(joined, r"actual[: ]+\d+")
+
+    def test_undated_reason_failure_prints_accepted_phrasings(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = "2026-07-28"
+        data["sources"][0]["published"] = None
+        data["sources"][0]["undated_reason"] = "no date shown on the page"
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("undated_reason", joined)
+        self.assertTrue(
+            "continuously" in joined.lower() or "持续更新" in joined,
+            joined,
+        )
+
+    def test_host_conflicts_include_provenance_per_id(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["url"] = "https://records.example.org/other"
+        data["sources"][1]["source_family"] = "example.org"
+        data["sources"][1]["provenance"] = "primary_independent"
+        data["sources"][0]["family_justification"] = ""
+        data["sources"][1]["family_justification"] = ""
+        errors = validate_ledger.validate_references(data)
+        host_errors = [error for error in errors if "host" in error.lower()]
+        self.assertTrue(host_errors, errors)
+        joined = " ".join(host_errors)
+        self.assertIn("S1", joined)
+        self.assertIn("S2", joined)
+        self.assertIn("primary_interested", joined)
+        self.assertIn("primary_independent", joined)
+
+    def test_excluded_claims_are_not_validated_and_supports_to_them_are_hard(self):
+        data = valid_quality_ledger()
+        dropped = fact_claim(claim_id="C9", claim="Dropped 999 units.")
+        dropped["extract_or_location"] = "no figure here"
+        dropped["source_evidence"][0]["extract_or_location"] = "no figure here"
+        dropped["reason"] = "Class F drop"
+        dropped["dropped_at"] = "2026-09-14T00:00:00Z"
+        data["excluded_claims"] = [dropped]
+        data["claims"][0]["supports"] = ["C9"]
+        errors = validate_ledger.validate_references(data)
+        self.assertFalse(any("C9:" in error and "quantity" in error for error in errors), errors)
+        self.assertTrue(
+            any("excluded" in error.lower() and "C9" in error for error in errors),
+            errors,
+        )
+
+    def test_excuses_nothing_and_coverage_linkage_are_warnings(self):
+        data = ledger_with_fact(
+            claim="The vendor recorded a 12.5% failure rate.",
+            derived_assertions=[
+                {
+                    "expression": "failure rate",
+                    "derivation": "x" * 40,
+                }
+            ],
+        )
+        data["coverage"][0]["status"] = "supported"
+        data["coverage"][0]["claim_ids"] = ["C2"]
+        data["claims"][1]["status"] = "inference"
+        errors = validate_ledger.validate_references(data)
+        excuses = [error for error in errors if "excuses nothing" in error]
+        linkage = [
+            error
+            for error in errors
+            if "supported but references no supported claim" in error
+        ]
+        self.assertTrue(excuses, errors)
+        self.assertTrue(all(error.startswith("WARNING:") for error in excuses), excuses)
+        self.assertTrue(linkage, errors)
+        self.assertTrue(all(error.startswith("WARNING:") for error in linkage), linkage)
+
+    def test_collect_findings_and_grouped_main(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stderr, redirect_stdout
+        from pathlib import Path
+
+        data = valid_quality_ledger()
+        data["claims"][0]["claim"] = "Revenue increased by 12%."
+        data["claims"][0]["extract_or_location"] = "Revenue decreased by 12%."
+        data["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
+        data["claims"][0]["source_evidence"][1]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
+        findings = validate_ledger.collect_findings(data)
+        self.assertTrue(findings)
+        self.assertTrue(all(hasattr(item, "family") for item in findings))
+        self.assertTrue(any(item.family in validate_ledger.FAMILIES for item in findings))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                code = validate_ledger.main([str(path)])
+        self.assertEqual(1, code)
+        self.assertIn("=== HARD", err.getvalue())
+
+    def test_expand_claim_input_and_claim_findings_do_not_short_circuit(self):
+        data = valid_quality_ledger()
+        item = {
+            "claim_id": "C5",
+            "claim": "Revenue increased by 12%.",
+            "kind": "analysis",
+            "importance": "supporting",
+            "source_evidence": [
+                {"source_id": "S2", "extract_or_location": "short"},
+            ],
+            "person_ids": ["P9"],
+        }
+        expanded = validate_ledger.expand_claim_input(
+            item, data, cache_meta={"S2": {"fetched_at": "2026-07-28"}}
+        )
+        self.assertEqual(["S2"], expanded["source_ids"])
+        self.assertTrue(expanded["include_in_report"])
+        self.assertEqual([], expanded["report_excerpts"])
+        self.assertEqual("2026-07-28", expanded["verified_at"])
+        self.assertNotIn("status", expanded)
+        self.assertNotIn("confidence", expanded)
+        self.assertFalse((expanded.get("triangulation") or {}).get("rationale"))
+        findings = validate_ledger.claim_findings(item, data)
+        families = {item.family for item in findings}
+        self.assertGreaterEqual(len(findings), 2)
+        self.assertIn("ledger/claim-input", families)
+        self.assertIn("ledger/extract-length", families)
+        self.assertIn("ledger/person", families)
+
+    def test_person_unknown_status_refuses_linked_claim(self):
+        data = valid_quality_ledger()
+        data["people"] = [
+            {
+                "person_id": "P1",
+                "name": "Alex Doe",
+                "aliases": ["Doe"],
+                "living_status": "unknown",
+                "public_role": "public",
+                "relationship": "primary_subject",
+            }
+        ]
+        data["claims"][0]["person_ids"] = ["P1"]
+        data["claims"][0]["person_claim_role"] = "neutral"
+        data["claims"][0]["person_claim_assessment"] = {
+            "classification": "neutral",
+            "rationale": "x" * 40,
+        }
+        findings = validate_ledger.claim_findings(data["claims"][0], data)
+        self.assertTrue(
+            any("unknown" in item.message.lower() for item in findings),
+            findings,
+        )
+
+    def test_schema_accepts_aliases_excluded_claims_and_tooling(self):
+        schema = json.loads(
+            (ROOT / "references" / "evidence-ledger.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        ledger = json.loads(
+            (ROOT / "tests" / "fixtures" / "evidence-ledger.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        ledger["sources"][0]["aliases"] = ["https://example.com/old"]
+        ledger["excluded_claims"] = [
+            {
+                "claim_id": "C99",
+                "reason": "dropped",
+                "dropped_at": "2026-09-14T00:00:00Z",
+            }
+        ]
+        ledger["tooling"] = {"alx_version": "0", "state_path": ".alx/state.json"}
+        self.assertEqual([], validate_ledger.validate_schema(ledger, schema))
+        input_schema = json.loads(
+            (ROOT / "references" / "claim-input.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn("claim_id", input_schema["required"])
+        self.assertIn("source_evidence", input_schema["required"])
 
 
 if __name__ == "__main__":

@@ -1142,11 +1142,17 @@ class LivingPersonSafetyTests(unittest.TestCase):
         )
 
     def test_person_link_requires_an_explicit_claim_role(self):
+        # R20 restatement: the message now names the person and the vocabulary
+        # instead of asking for "an explicit person_claim_role classification".
         data = living_harm_ledger()
         data["claims"][-1].pop("person_claim_role")
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
-            any("person_claim_role classification" in error for error in errors),
+            any(
+                "needs person_claim_role one of neutral|harmful|"
+                "sensitive_private_fact|response|resolution; got None" in error
+                for error in errors
+            ),
             errors,
         )
 
@@ -1584,7 +1590,10 @@ class EstimateTests(unittest.TestCase):
 
 
 class LedgerReferenceTests(unittest.TestCase):
-    def test_direct_sources_need_one_unique_evidence_record_each(self):
+    def test_two_evidence_records_for_one_source_are_allowed(self):
+        # R22 restatement of test_direct_sources_need_one_unique_evidence_record
+        # _each: two passages from one page are legitimate evidence; the
+        # unlinked-source and extra-source_ids rules are unchanged.
         data = valid_quality_ledger()
         data["claims"][0]["source_evidence"] = [
             {
@@ -1593,7 +1602,7 @@ class LedgerReferenceTests(unittest.TestCase):
             },
             {
                 "source_id": "S1",
-                "extract_or_location": "A duplicate record for one source.",
+                "extract_or_location": "A second passage from one source.",
             },
             {
                 "source_id": "S9",
@@ -1602,7 +1611,7 @@ class LedgerReferenceTests(unittest.TestCase):
         ]
         errors = validate_ledger.validate_references(data)
         joined = " ".join(errors)
-        self.assertIn("duplicate source_evidence for S1", joined)
+        self.assertNotIn("duplicate source_evidence", joined)
         self.assertIn("source_evidence references S9", joined)
         self.assertIn("extra source_ids", joined)
 
@@ -3633,17 +3642,24 @@ class CjkRationaleMinimumTests(unittest.TestCase):
         self.assertEqual(15, len(self.ZH_15))
         self.assertTrue(self._schema_errors(self.ZH_15))
         errors = self._person_errors(self.ZH_15)
+        # R20 restatement: the threshold and the actual are now printed as
+        # the assessment's own shape ("rationale": >=N chars) plus the got-value.
         self.assertTrue(
-            any("threshold 20, actual 15" in error for error in errors), errors
+            any('"rationale": >=20 chars}; got' in error for error in errors),
+            errors,
         )
+        self.assertTrue(any("15 chars" in error for error in errors), errors)
 
     def test_english_rationale_of_30_characters_fails_the_validator(self):
         self.assertEqual(30, len(self.EN_30))
         self.assertEqual([], self._schema_errors(self.EN_30))
         errors = self._person_errors(self.EN_30)
+        # R20 restatement: same wording change as the CJK case above.
         self.assertTrue(
-            any("threshold 40, actual 30" in error for error in errors), errors
+            any('"rationale": >=40 chars}; got' in error for error in errors),
+            errors,
         )
+        self.assertTrue(any("30 chars" in error for error in errors), errors)
 
 
 class SchemaRemedyTests(unittest.TestCase):
@@ -3780,19 +3796,15 @@ class ClaimRemedyTests(unittest.TestCase):
             ["alx check --fix"], self._fixes(data, "person_ids auto-linked")
         )
 
-    def test_duplicate_evidence_remedy_names_source_evidence(self):
+    def test_two_extracts_from_one_source_raise_no_reference_finding(self):
+        # R22 restatement of test_duplicate_evidence_remedy_names_source_
+        # evidence: the finding it asked for a remedy for no longer exists.
         data = valid_quality_ledger()
         data["claims"][0]["source_evidence"] = [
             {"source_id": "S1", "extract_or_location": "The registry records it."},
-            {"source_id": "S1", "extract_or_location": "A duplicate record."},
+            {"source_id": "S1", "extract_or_location": "A second passage."},
         ]
-        self.assertEqual(
-            [
-                "set field source_evidence in claims/*.json, "
-                "then alx claim add claims/*.json"
-            ],
-            self._fixes(data, "duplicate source_evidence for S1"),
-        )
+        self.assertEqual([], self._fixes(data, "source_evidence for S1"))
 
     def test_month_day_extract_remedy_asks_for_the_year(self):
         extract = "登記簿は12月10日に決定を記録した。"

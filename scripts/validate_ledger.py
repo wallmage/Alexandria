@@ -106,6 +106,9 @@ _LATIN_PROSE_MIN = 40
 #: Days a time-sensitive record may lag the report date before it is stale.
 FRESHNESS_WINDOW_DAYS = 30
 
+#: R24: days as_of may run ahead of verified_at (UTC fetch vs local date).
+AS_OF_DRIFT_DAYS = 1
+
 #: Registrable-domain suffixes that occupy two labels.
 MULTI_LABEL_SUFFIXES = frozenset(
     {
@@ -216,6 +219,15 @@ PROTECTED_LIVING_STATUSES = {
     "recently_deceased",
     "unknown",
 }
+#: R20: the only accepted person_claim_role values; both person messages print
+#: this list verbatim, because nothing else tells the producer the vocabulary.
+PERSON_CLAIM_ROLES = (
+    "neutral",
+    "harmful",
+    "sensitive_private_fact",
+    "response",
+    "resolution",
+)
 HUMAN_HARM_PATTERN = re.compile(
     r"(?i)\b(?:alleg(?:e[ds]?|ation)|accus(?:e[ds]?|ation)|"
     r"investigat(?:ed|ion)|charged(?!\s+(?:the\s+)?(?:battery|device|phone|"
@@ -990,10 +1002,35 @@ def _quantity_granularity_only(claim_forms, evidence_forms):
     return True
 
 
+#: R21: a 4-digit number is read as a year only inside this range.
+_YEAR_RANGE = range(1000, 3000)
+
+
+def _year_number_coverage(claim_forms, evidence_forms):
+    """R21: an extract cut before 年 still states the year as a plain number.
+
+    "…蒋介石1917" offers `n:1917`, which is the very figure the claim's
+    `1917年` asserts; only the character that made it a date is missing.
+    """
+    for claim_form in claim_forms:
+        parts = _parse_date_form(claim_form)
+        if not parts:
+            continue
+        year, month, day = parts
+        if month or day or not (year and year.isdigit()):
+            continue
+        if int(year) in _YEAR_RANGE and f"n:{int(year)}" in evidence_forms:
+            return True
+    return False
+
+
 def _year_documented_coverage(claim_forms, evidence_forms, source_text):
     """R14: a month-day (or day) fragment covers the claim's full date when the
     parts the extract omits are stated elsewhere in the same source (cached
-    text, title or published date). Without that text the rule is unchanged."""
+    text, title or published date). Without that text the rule is unchanged.
+
+    R14b: the same holds for a year-month claim (`1945年8月`) against a
+    month-day fragment of that month (`8月2日`)."""
     if not source_text:
         return False
     for claim_form in claim_forms:
@@ -1001,9 +1038,16 @@ def _year_documented_coverage(claim_forms, evidence_forms, source_text):
         if not parts:
             continue
         year, month, day = parts
-        if not (year and month and day):
+        if not (year and month):
             continue
         if not re.search(rf"(?<!\d){year}(?!\d)", source_text):
+            continue
+        if not day:
+            if any(
+                form.startswith(f"d:*-{int(month):02d}-")
+                for form in evidence_forms
+            ):
+                return True
             continue
         if f"d:*-{int(month):02d}-{int(day):02d}" in evidence_forms:
             return True
@@ -1014,9 +1058,24 @@ def _year_documented_coverage(claim_forms, evidence_forms, source_text):
     return False
 
 
+def _person_label(people):
+    """R20: a person message names who it is about, not just 'a protected person'."""
+    return "; ".join(
+        f"{person.get('person_id')} {_text(person.get('name'))} "
+        f"(living_status {person.get('living_status')})"
+        for person in people
+    )
+
+
 def _claim_field_fix(field):
     """A claim field re-enters the ledger only through `claim add`."""
     return f"set field {field} in claims/*.json, then alx claim add claims/*.json"
+
+
+#: R23: the synthesis field is merged, not re-added with a claim.
+ADVERSARIAL_TESTS_FIX = (
+    "set field synthesis.adversarial_tests, then alx ledger merge synthesis"
+)
 
 
 def _date_fragment_offer(claim_forms, evidence_rows):
@@ -1467,7 +1526,10 @@ def _is_negated(text, index):
             r"cannot|hardly|fails? to|denies|denied)\b[^.;]*$",
             window,
         )
-        or re.search(r"[不未沒没非][^。；]*$", window)
+        # R17: scraped Chinese pages often punctuate with ASCII "." and ";".
+        # Without them in the stop set a negation leaked across sentences and
+        # denied an assertion two sentences later.
+        or re.search(r"[不未沒没非][^。；.;]*$", window)
     )
 
 
@@ -1545,15 +1607,8 @@ def _assertion_match_is_affirmative(text, match):
     )
 
 
-def _assertion_carrier_tokens(text, match):
-    """Extract the subject/carrier around an assertion occurrence."""
-    def normalize_word(word):
-        if len(word) > 4 and word.endswith("ies"):
-            return word[:-3] + "y"
-        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
-            return word[:-1]
-        return word
-
+def _assertion_sentence(text, match):
+    """The sentence holding an assertion, with the assertion word removed."""
     start = max(
         text.rfind(".", 0, match.start()),
         text.rfind(";", 0, match.start()),
@@ -1566,7 +1621,55 @@ def _assertion_carrier_tokens(text, match):
         if (index := text.find(token, match.end())) >= 0
     ]
     end = min(ends) if ends else len(text)
-    sentence = text[start:match.start()] + " " + text[match.end():end]
+    return text[start:match.start()] + " " + text[match.end():end]
+
+
+#: R17: the shortest CJK run that identifies a carrier on its own.
+_CJK_CARRIER_PHRASE_CHARS = 4
+
+
+def _assertion_carrier_cjk(text, match):
+    """The carrier's CJK characters, in order, numerals and noise removed."""
+    return "".join(
+        char
+        for char in re.findall(r"[㐀-鿿]", _assertion_sentence(text, match))
+        if char not in _CJK_CARRIER_NOISE_CHARS
+    )
+
+
+def _shares_cjk_phrase(claim_cjk, evidence_cjk):
+    """R17: CJK carriers agree on a phrase, not on 75% of their bigrams.
+
+    The bigram ratio below is calibrated for Latin sentences, which yield a
+    handful of content words. A Chinese clause yields one bigram per character,
+    so two sentences naming the same subject in different surrounding prose
+    ("公告中必须增加中国主席" against "要求公告列名增加中国主席且置于英国首相之前")
+    overlap far below 0.75 while plainly carrying the same assertion. A shared
+    run of four characters is the phrase-level evidence that ratio was after.
+    """
+    size = _CJK_CARRIER_PHRASE_CHARS
+    if len(claim_cjk) < size or len(evidence_cjk) < size:
+        return False
+    grams = {
+        claim_cjk[index : index + size]
+        for index in range(len(claim_cjk) - size + 1)
+    }
+    return any(
+        evidence_cjk[index : index + size] in grams
+        for index in range(len(evidence_cjk) - size + 1)
+    )
+
+
+def _assertion_carrier_tokens(text, match):
+    """Extract the subject/carrier around an assertion occurrence."""
+    def normalize_word(word):
+        if len(word) > 4 and word.endswith("ies"):
+            return word[:-3] + "y"
+        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            return word[:-1]
+        return word
+
+    sentence = _assertion_sentence(text, match)
     words = {
         normalize_word(word)
         for word in re.findall(r"[a-z][a-z0-9'-]*", sentence.casefold())
@@ -1576,11 +1679,7 @@ def _assertion_carrier_tokens(text, match):
     }
     if words:
         return words
-    cjk = "".join(
-        char
-        for char in re.findall(r"[\u3400-\u9fff]", sentence)
-        if char not in _CJK_CARRIER_NOISE_CHARS
-    )
+    cjk = _assertion_carrier_cjk(text, match)
     return {
         cjk[index : index + 2]
         for index in range(max(0, len(cjk) - 1))
@@ -1612,6 +1711,9 @@ def _evidence_carries_assertion(
         _assertion_carrier_tokens(claim_text, match)
         for match in claim_matches
     ]
+    claim_phrases = [
+        _assertion_carrier_cjk(claim_text, match) for match in claim_matches
+    ]
     for evidence_match in re.finditer(
         evidence_pattern, evidence_text, re.IGNORECASE
     ):
@@ -1622,6 +1724,7 @@ def _evidence_carries_assertion(
         evidence_carrier = _assertion_carrier_tokens(
             evidence_text, evidence_match
         )
+        evidence_phrase = _assertion_carrier_cjk(evidence_text, evidence_match)
         if any(
             (
                 not claim_carrier
@@ -1631,12 +1734,13 @@ def _evidence_carries_assertion(
                     / min(len(claim_carrier), len(evidence_carrier))
                     >= 0.75
                 )
+                or _shares_cjk_phrase(claim_phrase, evidence_phrase)
                 or anaphoric_quantity_binding(
                     claim_match, evidence_match
                 )
             )
-            for claim_match, claim_carrier in zip(
-                claim_matches, claim_carriers, strict=True
+            for claim_match, claim_carrier, claim_phrase in zip(
+                claim_matches, claim_carriers, claim_phrases, strict=True
             )
         ):
             return True
@@ -1738,6 +1842,8 @@ def _evidence_coverage_findings(
         if _quantity_is_covered(claim_forms, evidence_forms):
             continue
         if _year_documented_coverage(claim_forms, evidence_forms, source_text):
+            continue
+        if _year_number_coverage(claim_forms, evidence_forms):
             continue
         evidence_rows = claim.get("source_evidence")
         offered = []
@@ -1966,10 +2072,20 @@ def _verification_errors(
         return errors
     if report_day and verified_day > report_day:
         errors.append(f"{claim_id}: verified_at is after the report date.")
-    if claim_day and verified_day < claim_day:
+    # R24: verified_at is the UTC fetch date and as_of is often the local one,
+    # so a single day of drift is a timezone, not a claim about the future.
+    if claim_day and (claim_day - verified_day).days > AS_OF_DRIFT_DAYS:
         errors.append(
-            f"{claim_id}: verified_at precedes as_of; a claim cannot be "
-            "verified before the state it describes."
+            _f(
+                "ledger/reference",
+                f"{claim_id}: as_of {claim_day.isoformat()} is "
+                f"{(claim_day - verified_day).days} days after verified_at "
+                f"{verified_day.isoformat()} (threshold {AS_OF_DRIFT_DAYS} "
+                "day); a claim cannot be verified before the state it describes.",
+                ids=[claim_id],
+                fix="set field as_of",
+                remove=_drop(claim_id),
+            )
         )
     accessed_days = [
         _as_date(sources_by_id[source_id].get("accessed"))
@@ -2485,15 +2601,8 @@ def _reference_findings(data, cache_dir=None):
         for source_id in source_links:
             if source_id not in source_set:
                 errors.append(f"{claim_id} references unknown source {source_id}.")
-        for source_id in _duplicates(evidence_ids):
-            errors.append(
-                _f(
-                    "ledger/reference",
-                    f"{claim_id}: duplicate source_evidence for {source_id}.",
-                    fix=_claim_field_fix("source_evidence"),
-                    remove=_drop(claim_id),
-                )
-            )
+        # R22: two passages from one page are legitimate evidence; source_ids
+        # derivation dedupes, and every entry is probed on its own.
         for source_id in evidence_ids:
             if source_id not in source_links:
                 errors.append(
@@ -2549,18 +2658,14 @@ def _reference_findings(data, cache_dir=None):
         ]
         person_claim_role = claim.get("person_claim_role")
         person_claim_assessment = claim.get("person_claim_assessment")
-        if protected_people and person_claim_role not in {
-            "neutral",
-            "harmful",
-            "sensitive_private_fact",
-            "response",
-            "resolution",
-        }:
+        protected_label = _person_label(protected_people)
+        if protected_people and person_claim_role not in set(PERSON_CLAIM_ROLES):
             errors.append(
                 _f(
                     "ledger/person",
-                    f"{claim_id}: claim linked to a protected person needs an "
-                    "explicit person_claim_role classification.",
+                    f"{claim_id}: {protected_label} needs person_claim_role "
+                    f"one of {'|'.join(PERSON_CLAIM_ROLES)}; got "
+                    f"{person_claim_role!r}.",
                     ids=[claim_id],
                     fix="set field person_claim_role",
                     remove=_drop(claim_id),
@@ -2592,13 +2697,18 @@ def _reference_findings(data, cache_dir=None):
             != person_claim_role
             or len(rationale) < _prose_minimum(rationale)
         ):
+            got = (
+                person_claim_assessment.get("classification")
+                if isinstance(person_claim_assessment, dict)
+                else None
+            )
             errors.append(
                 _f(
                     "ledger/person",
-                    f"{claim_id}: protected-person claim needs a substantive "
-                    "person_claim_assessment matching person_claim_role "
-                    f"(rationale threshold {_prose_minimum(rationale)}, actual "
-                    f"{len(rationale)}).",
+                    f"{claim_id}: {protected_label}: person_claim_assessment "
+                    '= {"classification": <person_claim_role>, '
+                    f'"rationale": >={_prose_minimum(rationale)} chars}}; got '
+                    f"{got!r}, {len(rationale)} chars.",
                     ids=[claim_id],
                     fix="set field person_claim_assessment",
                     remove=_drop(claim_id),
@@ -3488,9 +3598,18 @@ def _reference_findings(data, cache_dir=None):
                     )
         for claim_id in counterevidence:
             if claim_id in claim_set and claim_id not in adversarial_claims:
+                # R23: an untested counterevidence claim is a thin synthesis,
+                # not a fabricated one; it is advice, and it has its own fix.
                 errors.append(
-                    f"Counterevidence {claim_id} is not tested by an "
-                    "adversarial hypothesis."
+                    _f(
+                        "ledger/reference",
+                        f"Counterevidence {claim_id} is not tested by an "
+                        "adversarial hypothesis (threshold: 1 adversarial_tests "
+                        "entry naming it; actual: 0).",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix=ADVERSARIAL_TESTS_FIX,
+                    )
                 )
 
         for implication in synthesis.get("implications", []):
@@ -3579,7 +3698,14 @@ def _offline_probe_findings(ledger, cache_dir):
     for claim in ledger.get("claims") or []:
         if not isinstance(claim, dict):
             continue
-        for source_id in claim.get("source_ids") or []:
+        # R22: two passages from one page are two evidence entries, and each is
+        # probed on its own; source_ids is the fallback for a legacy claim.
+        entries = [
+            (entry.get("source_id"), entry.get("extract_or_location"))
+            for entry in claim.get("source_evidence") or []
+            if isinstance(entry, dict) and entry.get("source_id")
+        ] or [(source_id, None) for source_id in claim.get("source_ids") or []]
+        for source_id, extract in entries:
             cached = read_cache(cache_dir, source_id)
             if cached is None:
                 continue
@@ -3589,7 +3715,8 @@ def _offline_probe_findings(ledger, cache_dir):
             # of waiting for a successful live receipt.
             findings.extend(
                 probe_findings(
-                    claim, sources.get(source_id, {}), text, cache_meta=meta
+                    claim, sources.get(source_id, {}), text, cache_meta=meta,
+                    extract=extract,
                 )
             )
     return findings

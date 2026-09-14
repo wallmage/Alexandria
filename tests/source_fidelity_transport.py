@@ -8,6 +8,47 @@ from scripts import source_fidelity as production_source_fidelity
 
 PUBLIC_TEST_ADDRESS = "93.184.216.34"
 
+GBK_META_PAGE = (
+    "<html><head><meta charset=\"gbk\"><title>GBK标题页</title>"
+    '<meta name="date" content="2026-03-01">'
+    "</head><body>简体中文正文足够长用于探测</body></html>"
+).encode("gbk")
+BOM_PAGE = (
+    b"\xef\xbb\xbf"
+    + (
+        "<html><head><title>BOM Title</title>"
+        '<meta property="article:published_time" content="2026-04-02">'
+        "</head><body>BOM encoded visible text</body></html>"
+    ).encode("utf-8")
+)
+CHANGED_CONTEXT_PAGE = (
+    "<html><head><title>Pricing</title></head><body>"
+    "<p>Free: “Claude Code: Included”, with 50% of weekly limits.</p>"
+    "<p>更正: the prior pricing result is invalid and retracted.</p>"
+    "</body></html>"
+).encode("utf-8")
+
+
+def fixture_responses():
+    """Deterministic pages for charset, HTTP errors, and context change."""
+    return {
+        "gbk.example.org": (
+            200,
+            {"content-type": "text/html"},
+            GBK_META_PAGE,
+        ),
+        "bom.example.org": (
+            200,
+            {"content-type": "text/html"},
+            BOM_PAGE,
+        ),
+        "blocked.example.org": (
+            403,
+            {"content-type": "text/html"},
+            b"<p>forbidden</p>",
+        ),
+    }
+
 
 @contextmanager
 def mock_production_transport(

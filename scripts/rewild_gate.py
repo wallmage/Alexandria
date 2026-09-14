@@ -1456,6 +1456,10 @@ def _checker_path(report_lang):
 def _run_rewild_checker(report_text, source_text, report_lang, timeout=CHECKER_TIMEOUT_S):
     """Run the bundled checker on masked prose; return (result, errors)."""
     _, checker_lang = PROFILES[report_lang]
+    if not timeout:
+        # D7: a caller that already paid for a stalled checker in this command
+        # passes timeout=0 rather than spending the budget on it again.
+        return None, ["Rewild checker timed out earlier in this command."]
     report_prose = _style_prose(report_text)
     source_prose = _style_prose(source_text)
     if not report_prose.strip() or not source_prose.strip():

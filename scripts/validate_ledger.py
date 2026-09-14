@@ -2311,7 +2311,10 @@ def _reference_findings(data):
                     "source accountable (threshold "
                     f"{threshold}, actual {len(note)}).",
                     ids=[source_id],
-                    fix=f"alx source set {source_id}",
+                    fix=(
+                        f"alx source set {source_id} "
+                        "--accountability-note accountability-note.txt"
+                    ),
                 )
             )
 

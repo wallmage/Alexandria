@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,42 @@ class FindingRecordTests(unittest.TestCase):
         self.assertIn("=== WARN 1 ===", rendered)
         self.assertIn("=== STATUS:", rendered)
         self.assertNotIn("qty 5", rendered.split("+1 more")[0])
+
+    def test_a_finding_without_a_fix_keeps_its_sentence_final_period(self):
+        item = self._finding(fix="", remove="alx snapshot --restore")
+        rendered = render_grouped([item])
+        self.assertIn(f"{item.message}. Remove: `alx snapshot --restore`.", rendered)
+        self.assertIn(f"{item.message}.", render_grouped([self._finding(fix="", remove="")]))
+
+    def test_findings_from_a_second_gate_severity_import_are_not_dropped(self):
+        """`gate_severity` loads twice (bare and `scripts.`), so isinstance lies."""
+
+        @dataclass
+        class ForeignFinding:
+            family: str
+            severity: str
+            klass: str
+            ids: list
+            message: str
+            fix: str
+            remove: str = ""
+
+        foreign = ForeignFinding(
+            family="fidelity/semantic",
+            severity="hard",
+            klass="F",
+            ids=[],
+            message="direction drifted",
+            fix="",
+            remove="alx snapshot --restore",
+        )
+        self.assertNotIsInstance(foreign, Finding)
+        self.assertEqual(["fidelity/semantic"], list(group([foreign])))
+        self.assertEqual(1, len(hard_errors([foreign])))
+        rendered = render_grouped([foreign])
+        self.assertIn("=== HARD 1 (blocks issue) ===", rendered)
+        self.assertIn("direction drifted.", rendered)
+        self.assertEqual("[FAIL] direction drifted", as_text(foreign))
 
     def test_hard_errors_accept_finding_records(self):
         findings = [

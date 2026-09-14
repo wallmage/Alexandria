@@ -1,15 +1,15 @@
 # Rewild gate operation
 
 Operational detail for Step 6 of `SKILL.md`. Read this when running the gate,
-not while drafting.
+not while drafting. Lifecycle: `alx snapshot` then humanize; `alx review start rewild`
+→ fill note → `alx review finish rewild`. Quotation-lost / control-chars →
+`alx snapshot --restore`.
 
 ## Snapshot discipline
 
-`REPORT_PRE_REWILD_MD` is the draft as it stood before the **first** Rewild
-pass. Write it once and never overwrite it. Later iterations — a content-review
-fix, a fidelity correction, a re-run after new evidence — write a fresh
-per-iteration snapshot instead, for example `<report>.pre-rewild.iter2.md`, and
-pass that to `--source` for the iteration's own fidelity diff.
+`alx snapshot` writes `report.pre-rewild.md` once. Never overwrite it. Later
+iterations use `alx snapshot --iter` (`report.pre-rewild.iter<k>.md`).
+`alx snapshot --restore` overwrites `report.md` with the latest snapshot.
 
 This matters because the delivered `*.pre-rewild.md` is the only public evidence
 that humanization happened at all. If each iteration refreshes it, the shipped
@@ -83,4 +83,6 @@ rather than absorbed by the heuristic channel.
 ## Receipt invalidation
 
 Any change to report text after the receipt is written invalidates it. Review the
-changed report against the original snapshot, then issue a new receipt.
+changed report against the original snapshot, then `alx review start rewild --iter`
+and a new receipt. Mechanical deltas (Sources regen, excerpts, whitespace) do
+not require `--iter`.

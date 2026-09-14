@@ -31,9 +31,23 @@ class Finding:
     remove: str = ""
 
 
+def is_finding(item):
+    """Duck-type test for a finding record.
+
+    ``gate_severity`` is imported both as a top-level module and as
+    ``scripts.gate_severity``, so two distinct ``Finding`` classes exist at
+    runtime and ``isinstance`` would silently drop every finding produced by a
+    module that imported the other copy.
+    """
+    return all(
+        hasattr(item, name)
+        for name in ("family", "severity", "klass", "ids", "message", "fix")
+    )
+
+
 def as_text(f):
     """Legacy string form: ``[FAIL] ...`` or ``WARNING: ...``."""
-    if not isinstance(f, Finding):
+    if not is_finding(f):
         return str(f)
     if f.severity == "warn":
         return f"{WARNING_PREFIX}{f.message}"
@@ -43,31 +57,38 @@ def as_text(f):
 def group(findings):
     grouped = OrderedDict()
     for finding in findings:
-        if not isinstance(finding, Finding):
+        if not is_finding(finding):
             continue
         grouped.setdefault(finding.family, []).append(finding)
     return grouped
 
 
-def render_grouped(findings, *, per_family=5):
-    records = [item for item in findings if isinstance(item, Finding)]
+CLASS_LABELS = {"F": " (F)", "A": " (A, waivable by --deliver)"}
+
+
+def render_grouped(findings, *, per_family=5, with_class=False):
+    records = [item for item in findings if is_finding(item)]
     hard = [item for item in records if item.severity == "hard"]
     warn = [item for item in records if item.severity == "warn"]
     lines = [f"=== HARD {len(hard)} (blocks issue) ==="]
 
+    def label(members):
+        if not with_class:
+            return ""
+        classes = {item.klass for item in members}
+        return CLASS_LABELS["F" if "F" in classes else "A"]
+
     def emit(items):
         for family, members in group(items).items():
-            lines.append(f"[{family}] {len(members)}")
+            lines.append(f"[{family}] {len(members)}{label(members)}")
             shown = members[:per_family]
             for item in shown:
                 prefix = f"{', '.join(item.ids)}: " if item.ids else ""
-                tail = item.message.rstrip(".")
+                tail = item.message.rstrip(".") + "."
                 if item.fix:
-                    tail += f". Fix: {item.fix}."
-                if item.remove:
+                    tail += f" Fix: {item.fix}."
+                if getattr(item, "remove", ""):
                     tail += f" Remove: `{item.remove}`."
-                if not tail.endswith("."):
-                    tail += "."
                 lines.append(f"  {prefix}{tail}")
             extra = len(members) - per_family
             if extra > 0:
@@ -76,7 +97,11 @@ def render_grouped(findings, *, per_family=5):
     emit(hard)
     lines.append(f"=== WARN {len(warn)} ===")
     emit(warn)
-    lines.append(f"=== STATUS: {len(hard)} hard, {len(warn)} warn ===")
+    split = ""
+    if with_class:
+        class_f = len([item for item in hard if item.klass == "F"])
+        split = f" ({class_f} Class F, {len(hard) - class_f} Class A)"
+    lines.append(f"=== STATUS: {len(hard)} hard{split}, {len(warn)} warn ===")
     return "\n".join(lines)
 
 
@@ -88,7 +113,7 @@ def warning(message):
 
 def is_warning(finding):
     """Return whether one finding belongs to the non-blocking tier."""
-    if isinstance(finding, Finding):
+    if is_finding(finding):
         return finding.severity == "warn"
     return str(finding).startswith(WARNING_PREFIX)
 
@@ -108,11 +133,10 @@ def emit_findings(findings, *, ok_message, transform=None):
     transform = transform or (lambda text, stream: text)
     errors = hard_errors(findings)
     for error in errors:
-        text = as_text(error) if isinstance(error, Finding) else f"[FAIL] {error}"
+        text = as_text(error) if is_finding(error) else f"[FAIL] {error}"
         print(transform(text, sys.stderr), file=sys.stderr)
     for finding in warning_findings(findings):
-        text = as_text(finding) if isinstance(finding, Finding) else str(finding)
-        print(transform(text, sys.stderr), file=sys.stderr)
+        print(transform(as_text(finding), sys.stderr), file=sys.stderr)
     if errors:
         return 1
     print(transform(ok_message, sys.stdout))

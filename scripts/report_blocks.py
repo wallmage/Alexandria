@@ -376,3 +376,28 @@ def visible_report_prose(text):
             pieces.append("\n" if block.kind == "heading" else "\n\n")
         pieces.append(block.text)
     return "".join(pieces)
+
+
+#: The machine-written Verification note (spec §6.9); `alx` is its only
+#: writer, and `alx.VERIFICATION_NOTE_PREFIX` imports these exact strings. The
+#: gates mask the paragraph it opens so no tier scores prose the agent did not
+#: write.
+VERIFICATION_NOTE_PREFIXES = {
+    "en": "Verification note:",
+    "zh-CN": "核查说明：",
+    "zh-HK": "核實說明：",
+}
+
+
+def mask_verification_note(text):
+    """Blank Verification-note paragraphs while preserving offsets."""
+    prefixes = tuple(VERIFICATION_NOTE_PREFIXES.values())
+    masked = list(text)
+    for block in report_blocks(text):
+        if not text[block.start : block.end].lstrip().startswith(prefixes):
+            continue
+        masked[block.start : block.end] = (
+            character if character in "\r\n" else " "
+            for character in text[block.start : block.end]
+        )
+    return "".join(masked)

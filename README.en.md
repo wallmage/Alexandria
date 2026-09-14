@@ -10,6 +10,8 @@ Before drafting, the team organizes the evidence and works through the reasoning
 
 [简体中文](README.md) · [English](README.en.md) · [繁體中文（香港）](README.zh-HK.md)
 
+Alexandria can research anything: there are no fixed subject limits. Delivery uses `alx` (init, fetch, claim add, check, snapshot, review, issue, render) on a 60-minute budget. When remaining time is 15 minutes or less, run `alx issue --deliver` then `alx render`. You receive a professionally produced PDF with citations beside the claims.
+
 ## A framework for any subject
 
 Ming fiscal policy, a chipmaker, and a philosophical idea demand different lines of inquiry. Alexandria has six research frameworks. It selects the one that fits the subject and combines relevant dimensions when a question crosses fields.

@@ -1509,6 +1509,45 @@ class CheckModeTests(unittest.TestCase):
                 if finding.klass == "A":
                     self.assertEqual("", finding.remove)
 
+    def test_checker_timeout_is_a_keyword_defaulting_to_the_module_budget(self):
+        """Spec §6.11: `alx` shortens the checker subprocess to 120 s."""
+        from scripts import rewild_gate
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source = self.build(work, self.EVERY_TIER_BODY)
+            with mock.patch.object(
+                rewild_gate.subprocess, "run", wraps=subprocess.run
+            ) as runner:
+                rewild_gate.run_check(report, source, lang="en")
+                self.assertEqual(
+                    rewild_gate.CHECKER_TIMEOUT_S, runner.call_args.kwargs["timeout"]
+                )
+                runner.reset_mock()
+                rewild_gate.run_check(report, source, lang="en", timeout=120)
+                self.assertEqual(120, runner.call_args.kwargs["timeout"])
+
+    def test_run_gate_passes_the_timeout_to_the_checker(self):
+        from scripts import rewild_gate
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source = self.build(work, self.SOURCE_BODY)
+            review = work / "review.json"
+            write_review(review, report=report, source=source)
+            with mock.patch.object(
+                rewild_gate.subprocess, "run", wraps=subprocess.run
+            ) as runner:
+                rewild_gate.run_gate(
+                    report,
+                    source,
+                    report_lang="en",
+                    review_note_path=review,
+                    receipt_path=work / "receipt.json",
+                    timeout=120,
+                )
+            self.assertEqual(120, runner.call_args.kwargs["timeout"])
+
     def test_bookkeeping_errors_are_collected_not_returned_early(self):
         from scripts.rewild_gate import run_check
 

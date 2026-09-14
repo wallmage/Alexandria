@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import re
+import shlex
 import shutil
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -25,6 +26,7 @@ if str(ROOT) not in sys.path:
 from scripts import (  # noqa: E402
     content_gate,
     gate_severity,
+    report_blocks,
     report_contract,
     rewild_gate,
     source_fidelity,
@@ -103,11 +105,18 @@ CONTENT_CHECK_KEYS = (
     "length_is_substantive_not_padded",
 )
 
-VERIFICATION_NOTE_PREFIX = {
-    "en": "Verification note:",
-    "zh-CN": "核查说明：",
-    "zh-HK": "核實說明：",
-}
+#: J10: `report_blocks` owns the note prefixes so the rewild/content checks can
+#: mask the machine-written note. The literal stays as the fallback until that
+#: export lands.
+VERIFICATION_NOTE_PREFIX = getattr(
+    report_blocks,
+    "VERIFICATION_NOTE_PREFIXES",
+    {
+        "en": "Verification note:",
+        "zh-CN": "核查说明：",
+        "zh-HK": "核實說明：",
+    },
+)
 
 #: Every printed remedy (spec D14, ruling R6). Commands parse; the rest are the
 #: closed imperative list of spec §6 plus the two length imperatives of R6.
@@ -119,6 +128,9 @@ REMEDY_TEMPLATES = {
     "claim-bind": "alx claim bind {claim_id} --paragraph {paragraph}",
     "ledger-merge": "alx ledger merge {file}",
     "source-set": "alx source set {source_id} --provenance primary_independent",
+    "source-family-justification": (
+        "alx source set {source_id} --family-justification family-justification.txt"
+    ),
     "find": "alx find {source_id} {keyword}",
     "snapshot-restore": "alx snapshot --restore",
     "review-start": "alx review start {kind}",
@@ -130,69 +142,104 @@ REMEDY_TEMPLATES = {
     "issue-deliver": "alx issue --deliver",
     "render": "alx render",
     "set-field": "set field {field} in {file}",
+    # Addendum 6: a claim field re-enters the ledger only through `claim add`.
+    "set-field-claim": "set field {field} in {file}, then alx claim add {file}",
+    # J4: a refresh alone leaves the recorded probe contexts behind; only
+    # `claim add` re-binds them, so the remedy is the two-step sequence.
+    "refresh-rebind": "alx fetch --id {source_id} --refresh, then alx claim add {file}",
     "extend-quote": "extend the quote in {file}",
     "extend-report": "extend the report body in report.md",
     "delete-paragraph": "delete paragraph {paragraph} of report.md",
+    "edit-prose": "(edit prose; waivable by alx issue --deliver)",
+    # Ruling R9: inserting a link leaves the visible text unchanged, so it is a
+    # mechanical delta and never stales a review.
+    "add-link": "add the source link to paragraph {paragraph} of report.md",
+    "add-link-claim": (
+        "add the source link to the paragraph that states claim {claim_id} "
+        "in report.md"
+    ),
 }
 
-#: Class A families (spec §6.10, orchestrator ruling on the class tables); every
-#: other hard family defaults to Class F. `integrity/length` is split by
-#: severity: below the floor it arrives as a warning (Class A), above the
-#: ceiling it is hard and therefore Class F with a `delete paragraph` remedy.
+#: Ruling R8 plus spec §6's closed imperative list: what a printed remedy may
+#: say when it is not an `alx` command.
+CLOSED_IMPERATIVES = (
+    re.compile(r"^set field \S+ in \S+$"),
+    re.compile(r"^set field \S+ in \S+, then alx claim add \S+$"),
+    re.compile(r"^alx fetch --id S\d+ --refresh, then alx claim add \S+$"),
+    re.compile(r"^extend the quote in \S+$"),
+    re.compile(r"^extend the report body in report\.md$"),
+    re.compile(r"^delete paragraph \d+ of report\.md$"),
+    re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
+    re.compile(r"^add the source link to paragraph \d+ of report\.md$"),
+    re.compile(
+        r"^add the source link to the paragraph that states claim C\d+ "
+        r"in report\.md$"
+    ),
+)
+
+#: Class A families for the findings `alx` itself emits (spec §6.10); every
+#: other hard family of its own defaults to Class F. Findings produced by
+#: another module carry their own `klass` and are never re-classed here.
+#: `integrity/length` is split by severity: below the floor it arrives as a
+#: warning (Class A), above the ceiling it is hard and therefore Class F with a
+#: `delete paragraph` remedy.
 CLASS_A_FAMILIES = frozenset(
     {
         "tooling/receipt",
         "tooling/render",
-        "review/rewild-missing",
-        "review/rewild-stale",
+        "review/rewild",
         "rewild/humanization",
-        "rewild/style",
-        "rewild/ai-vocabulary",
+        "rewild/checker",
         "integrity/structure",
         "integrity/date-line",
         "binding/sources-section",
     }
 )
 
+#: Ruling R10: the spec §6.7 mechanical-repair list is the whitelist for
+#: printing `Fix: alx check --fix`. A finding of any other family may not
+#: advertise it, whichever module wrote the remedy, because `--fix` repairs
+#: nothing there and a weak model would simply re-run it. `Fix: alx check`
+#: (bare) is never an honest remedy for anything.
+MECHANICAL_FIX_FAMILIES = frozenset(
+    {
+        "ledger/source-ids",  # source_ids derived from source_evidence
+        "ledger/source-family",  # source_family from the registrable domain
+        "ledger/freshness",  # accessed / verified_at refreshed from cache meta
+        "binding/excerpt-missing",  # excerpt writes for unambiguous mappings
+        "binding/sources-section",  # Sources regeneration
+        "integrity/date-line",  # date-line whitespace normalization
+    }
+)
+
+#: The families `alx` emits itself; everything else it prints comes from the
+#: gate modules below and keeps that module's family name and class.
+OWN_FAMILIES = (
+    "binding/excerpt-missing",
+    "binding/leftover-prose",
+    "fidelity/cache-detached",
+    "fidelity/undecodable",
+    "fidelity/unreachable",
+    "integrity/encoding",
+    "review/content-missing",
+    "review/content-stale",
+    "review/rewild",
+    "rewild/humanization",
+    "tooling/receipt",
+    "tooling/render",
+)
+
 #: Every finding family `alx` can print, from itself and from T1-T4 (ruling R6:
-#: the parse test walks this registry so no remedy escapes D14).
-FAMILIES = (
-    tuple(sorted(validate_ledger.FAMILIES))
-    + tuple(sorted(source_fidelity.FAMILIES))
-    + (
-        "binding/claim-paragraph",
-        "binding/excerpt-missing",
-        "binding/leftover-prose",
-        "binding/link-not-in-ledger",
-        "binding/sources-section",
-        "content/check",
-        "content/claim-binding",
-        "content/claim-support",
-        "content/critical-finding",
-        "content/disclosure",
-        "content/language",
-        "content/score",
-        "fidelity/cache-detached",
-        "fidelity/undecodable",
-        "fidelity/unreachable",
-        "integrity/control-chars",
-        "integrity/date-line",
-        "integrity/encoding",
-        "integrity/length",
-        "integrity/quotation-lost",
-        "integrity/replacement-char",
-        "integrity/structure",
-        "review/content-missing",
-        "review/content-stale",
-        "review/rewild-missing",
-        "review/rewild-stale",
-        "rewild/ai-vocabulary",
-        "rewild/fidelity",
-        "rewild/humanization",
-        "rewild/region",
-        "rewild/style",
-        "tooling/receipt",
-        "tooling/render",
+#: the parse test walks this registry so no remedy escapes D14). One name set:
+#: each producing module owns the spelling of its own families.
+FAMILIES = tuple(
+    sorted(
+        set(validate_ledger.FAMILIES)
+        | set(source_fidelity.FAMILIES)
+        | set(rewild_gate.FAMILIES)
+        | set(content_gate.FAMILIES)
+        | set(validate_report.FAMILIES)
+        | set(OWN_FAMILIES)
     )
 )
 
@@ -206,10 +253,16 @@ ONLINE_CLASS_A_FAMILIES = frozenset(
     }
 )
 
-#: Spec §6.11 network budget. The rewild checker (300 s, rewild_gate) and the
-#: rasterizer (90 s, render_pdf_pages.SUBPROCESS_TIMEOUT_S) own theirs; neither
-#: `run_gate`, `render_pdf` nor `render_pages` accepts a timeout argument.
+#: Spec §7.2.5: the receipt tolerates this share of unverified sampled pairs.
+#: Past it, each unverified pair is a Class-A finding of its own.
+UNVERIFIED_STATUSES = frozenset({"unreachable", "undecodable"})
+UNVERIFIED_QUORUM = 0.25
+
+#: Spec §6.11 subprocess budgets. The rasterizer keeps its own 90 s
+#: (`render_pdf_pages.SUBPROCESS_TIMEOUT_S`, used by `render_pages`); md_to_pdf
+#: runs no subprocess.
 FETCH_TIMEOUT_SECONDS = 10
+REWILD_CHECKER_TIMEOUT_SECONDS = 120
 RESERVE_MINUTES = 8
 FETCH_STOP_MINUTES = 20
 DEGRADE_MINUTES = 15
@@ -218,6 +271,7 @@ EXCERPT_CHARS = 60
 MIN_EXTRACT_CHARS = 20
 MIN_SEGMENT_CHARS = 8
 MAX_WINDOW_CHARS = 300
+MAX_FINDING_CHARS = 300
 
 DEGRADE_INSTRUCTION = (
     "remaining <= 15 min: stop fixing, run `alx issue --deliver`, then `alx render`."
@@ -229,8 +283,27 @@ def remedy(key, **values):
     return REMEDY_TEMPLATES[key].format(**values)
 
 
+def set_field(field, file):
+    """Addendum 6: a claim input is only back in the ledger after `claim add`."""
+    key = "set-field-claim" if str(file).startswith("claims/") else "set-field"
+    return remedy(key, field=field, file=file)
+
+
+def add_link(paragraph, claim_id):
+    """Ruling R9: cite the claim where it is stated; `n` when it is known."""
+    if paragraph:
+        return remedy("add-link", paragraph=paragraph)
+    return remedy("add-link-claim", claim_id=claim_id or "C1")
+
+
 Finding = gate_severity.Finding
-render_grouped = gate_severity.render_grouped
+
+
+def render_grouped(findings, *, per_family=5):
+    """Spec §6.10: `alx` prints the class of every family it groups."""
+    return gate_severity.render_grouped(
+        findings, per_family=per_family, with_class=True
+    )
 
 
 def finding_class(family, severity, *, online=False):
@@ -274,10 +347,25 @@ def _pick_id(item, prefix):
     return match.group(0) if match else None
 
 
-def _keyword(text):
-    word = re.split(r"\s+", str(text).strip())[0] if str(text).strip() else ""
-    word = re.sub(r"[^\w,.\-一-鿿]", "", word)
-    return word or "keyword"
+def _find_keyword(message):
+    """`alx find` takes a KEYWORD: the term the producer quoted, never an id."""
+    for quoted in re.findall(r"'([^']+)'", str(message)):
+        token = re.split(r"\s+", quoted.strip())[0]
+        token = re.sub(r"[^\w,.\-\u4e00-\u9fff]", "", token)
+        if token and not _ID_RE["C"].match(token) and not _ID_RE["S"].match(token):
+            return token
+    return ""
+
+
+def _quote_or_find(item, source_id, claim_id):
+    """The quoted term when there is one, else the closed quote imperative."""
+    keyword = _find_keyword(item.message)
+    fix = (
+        remedy("find", source_id=source_id or "S1", keyword=keyword)
+        if keyword
+        else remedy("extend-quote", file="claims/*.json")
+    )
+    return fix, remedy("claim-drop", claim_id=claim_id) if claim_id else ""
 
 
 def _drop_or_refresh(item):
@@ -302,23 +390,22 @@ def _remedies(item, *, paragraphs=0):
         "integrity/replacement-char",
         "integrity/quotation-lost",
         "integrity/encoding",
-        "rewild/fidelity",
+        "fidelity/quotation-lost",
+        "fidelity/rewild",
+        "fidelity/semantic",
         "rewild/region",
     }:
-        return restore, restore
+        return "", restore
     if family == "integrity/length":
         if item.severity == "warn":
             return remedy("extend-report"), ""
-        return (
-            remedy("delete-paragraph", paragraph=max(paragraphs, 1)),
-            remedy("delete-paragraph", paragraph=max(paragraphs, 1)),
-        )
+        return "", remedy("delete-paragraph", paragraph=max(paragraphs, 1))
     if family in {"integrity/structure", "integrity/date-line"}:
-        return remedy("check-fix"), ""
+        return remedy("edit-prose"), ""
     if family == "binding/link-not-in-ledger":
         match = _URL_IN_MESSAGE.search(item.message)
         url = match.group(0) if match else ""
-        return (remedy("fetch-url", url=url) if url else remedy("check-fix")), ""
+        return (remedy("fetch-url", url=url) if url else ""), ""
     if family in {"binding/claim-paragraph", "binding/paragraph"}:
         candidate = re.search(r"candidates: (\d+)", item.message)
         paragraph = int(candidate.group(1)) if candidate else 1
@@ -340,13 +427,20 @@ def _remedies(item, *, paragraphs=0):
     if family == "binding/sources-section":
         return remedy("check-fix"), ""
     if family in {"fidelity/cache-missing", "fidelity/cache-detached"}:
-        refresh = remedy("fetch-refresh", source_id=source_id or "S1")
-        return refresh, refresh
-    if family in {"fidelity/mismatch", "fidelity/context-changed"}:
+        return remedy("fetch-refresh", source_id=source_id or "S1"), ""
+    if family == "fidelity/context-changed":
+        # J4: the refresh alone keeps the old probe contexts; `claim add`
+        # re-confirms the extract and re-binds them, which clears the finding.
         return (
-            remedy("find", source_id=source_id or "S1", keyword=_keyword(item.message)),
+            remedy(
+                "refresh-rebind",
+                source_id=source_id or "S1",
+                file="claims/*.json",
+            ),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
+    if family == "fidelity/mismatch":
+        return _quote_or_find(item, source_id, claim_id)
     if family in {"fidelity/short-segment", "ledger/extract-length"}:
         return (
             remedy("extend-quote", file="claims/*.json"),
@@ -356,7 +450,7 @@ def _remedies(item, *, paragraphs=0):
         return remedy("issue-deliver"), _drop_or_refresh(item)
     if family == "ledger/claim-input":
         return (
-            remedy("set-field", field="claim-input", file="claims/*.json"),
+            set_field("claim-input", "claims/*.json"),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
     if family in {"ledger/person", "ledger/harm"}:
@@ -364,13 +458,17 @@ def _remedies(item, *, paragraphs=0):
             remedy("ledger-merge", file="people.json"),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
+    if family == "ledger/https":
+        match = _URL_IN_MESSAGE.search(item.message)
+        https = re.sub(r"^http://", "https://", match.group(0)) if match else ""
+        return (remedy("fetch-url", url=https) if https else ""), ""
+    if family == "ledger/host-conflict":
+        return remedy("source-family-justification", source_id=source_id or "S1"), ""
     if family in {
         "ledger/provenance",
         "ledger/key-claim",
         "ledger/source-family",
         "ledger/undated-reason",
-        "ledger/host-conflict",
-        "ledger/https",
         "ledger/portfolio",
     }:
         return remedy("source-set", source_id=source_id or "S1"), _drop_or_refresh(item)
@@ -383,13 +481,20 @@ def _remedies(item, *, paragraphs=0):
         "ledger/derived",
         "ledger/date-granularity",
     }:
+        return _quote_or_find(item, source_id, claim_id)
+    if family == "ledger/triangulation":
         return (
-            remedy("find", source_id=source_id or "S1", keyword=_keyword(item.message)),
+            set_field("triangulation", "claims/*.json"),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family == "ledger/reference":
+        return (
+            set_field("supports", "claims/*.json"),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
     if family == "ledger/excluded-supports":
         return (
-            remedy("set-field", field="supports", file="claims/*.json"),
+            set_field("supports", "claims/*.json"),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
     if family.startswith("content/") or family.startswith("review/content"):
@@ -400,28 +505,150 @@ def _remedies(item, *, paragraphs=0):
         return remedy("review-iter", kind="rewild"), remedy(
             "review-start", kind="rewild"
         )
+    if family in {"rewild/ai-vocabulary", "rewild/style", "rewild/length"}:
+        return remedy("edit-prose"), ""
     if family.startswith("rewild/"):
-        return remedy("issue-deliver"), restore
+        return remedy("issue-deliver"), ""
     if family == "ledger/schema":
         location, _, detail = item.message.partition(": ")
         required = re.search(r"'([^']+)' is a required property", detail)
         field = required.group(1) if required else location.rsplit(".", 1)[-1]
         file = "claims/*.json" if location.startswith("claims.") else "ledger.json"
         return (
-            remedy("set-field", field=field or "schema_version", file=file),
+            set_field(field or "schema_version", file),
             _drop_or_refresh(item),
         )
-    return remedy("check-fix"), _drop_or_refresh(item)
+    # Ruling R10: the fallback for an unmatched family is never `check --fix`.
+    if adopted_class(item) == "A":
+        return remedy("edit-prose"), ""
+    return _quote_or_find(item, source_id, claim_id)
 
 
-def is_finding(item):
-    """T1/T2 load `gate_severity` twice (top-level and as `scripts.`), so the
-    dataclass identity differs between modules; match on shape instead."""
-    return hasattr(item, "family") and hasattr(item, "severity")
+is_finding = gate_severity.is_finding
+
+_FINDING_FIELDS = ("family", "severity", "klass", "ids", "message", "fix", "remove")
+
+
+def as_findings(items):
+    """T1 stores findings as `asdict` payloads and imports its own `Finding`.
+
+    Both forms must survive into classification: a dict is rebuilt, any
+    finding-shaped object is kept (`isinstance` would drop the other copy of
+    the class), and anything else is ignored.
+    """
+    findings = []
+    for item in items or []:
+        if isinstance(item, dict):
+            item = Finding(
+                **{name: item[name] for name in _FINDING_FIELDS if name in item}
+            )
+        if is_finding(item):
+            findings.append(item)
+    return findings
+
+
+def adopted_class(item, *, online=False):
+    """The producing module's class wins (spec §6.10); `alx` only fills gaps."""
+    if item.severity == "warn":
+        return "A"
+    if online and item.family in ONLINE_CLASS_A_FAMILIES:
+        return "A"
+    klass = getattr(item, "klass", "")
+    if klass in {"F", "A"}:
+        return klass
+    return finding_class(item.family, item.severity)
+
+
+#: Families whose printed remedy `alx` owns even when the producer offers one:
+#: the producers' generic advice here is not the repair the finding needs
+#: (an http url is re-fetched under its https form; a host conflict is resolved
+#: by a family_justification, never by re-declaring provenance; J4: a refresh
+#: alone never clears a changed context, only the refresh plus `claim add`).
+REMEDY_OVERRIDES = frozenset(
+    {"ledger/https", "ledger/host-conflict", "fidelity/context-changed"}
+)
+
+_EMBEDDED_REMEDY = re.compile(r"\s*(?:Fix|Remove):\s*`?[^`.\n]+`?\.?\s*$")
+_BARE_SET_FIELD = re.compile(r"^set field (\S+)$")
+_PARSER_FOR_REMEDIES = None
+
+
+def valid_remedy(text):
+    """Spec D14: a printed remedy parses as `alx ...` or is a closed imperative."""
+    global _PARSER_FOR_REMEDIES
+    text = str(text or "").strip().strip("`")
+    if not text:
+        return False
+    if any(pattern.match(text) for pattern in CLOSED_IMPERATIVES):
+        return True
+    if text.startswith("alx "):
+        if _PARSER_FOR_REMEDIES is None:
+            _PARSER_FOR_REMEDIES = build_parser()
+        with redirect_stderr(io.StringIO()):
+            try:
+                _PARSER_FOR_REMEDIES.parse_args(shlex.split(text)[1:])
+            except (SystemExit, ValueError):
+                return False
+        return True
+    return False
+
+
+def _named_file(item):
+    """Claim findings are edited in the claim inputs; the rest in the ledger."""
+    return (
+        "claims/*.json"
+        if any(str(value).startswith("C") for value in item.ids or ())
+        else "ledger.json"
+    )
+
+
+def _completed_remedy(text, item):
+    """`set field x` from a producer becomes the closed imperative in full."""
+    match = _BARE_SET_FIELD.match(str(text or "").strip())
+    if match:
+        return set_field(match.group(1), _named_file(item))
+    return text
+
+
+def _strip_embedded_remedies(message):
+    """Producers that append `Fix:`/`Remove:` to the prose must not print twice."""
+    text = str(message).rstrip()
+    while True:
+        shorter = _EMBEDDED_REMEDY.sub("", text)
+        if shorter == text:
+            return text
+        text = shorter
+
+
+def _fit(message, ids, fix, remove):
+    """Item 6: the line stays under 300 chars; the remedy is never truncated."""
+    prefix = f"{', '.join(ids)}: " if ids else ""
+    tail = ""
+    if fix:
+        tail += f" Fix: {fix}."
+    if remove:
+        tail += f" Remove: `{remove}`."
+    budget = MAX_FINDING_CHARS - len("  ") - len(prefix) - len(tail) - 1
+    body = message.rstrip(".")
+    if len(body) > budget:
+        # Minor 2: a budget at or below zero still cuts the message; the ids and
+        # the remedy are never truncated, so only they may overrun the cap.
+        body = body[: max(budget - 1, 0)].rstrip() + "\u2026"
+    return body
+
+
+def honest_fix(family, text):
+    """Ruling R10: which `Fix:` a family is allowed to advertise."""
+    text = str(text or "").strip().strip("`")
+    if text == remedy("check"):
+        return False
+    if text == remedy("check-fix"):
+        return family in MECHANICAL_FIX_FAMILIES
+    return True
 
 
 def adopt(findings, *, online=False, paragraphs=0):
-    """Re-class every finding and rewrite its remedies through the registry."""
+    """Print the producer's remedies when it has them, `alx`'s own when not."""
     adopted = []
     seen = set()
     for item in findings:
@@ -436,14 +663,32 @@ def adopt(findings, *, online=False, paragraphs=0):
         if key in seen:
             continue
         seen.add(key)
-        fix, remove = _remedies(item, paragraphs=paragraphs)
+        klass = adopted_class(item, online=online)
+        fix = _completed_remedy(item.fix, item)
+        fix = fix if valid_remedy(fix) else ""
+        remove = _completed_remedy(getattr(item, "remove", ""), item)
+        remove = remove if valid_remedy(remove) else ""
+        if klass == "A":
+            # Addendum: nothing to drop; `alx issue --deliver` waives it.
+            remove = ""
+        # Ruling R10: a dishonest `Fix:` sends the whole line back to `_remedies`
+        # rather than leaving the finding with a `Remove:` and no repair.
+        rejected = bool(fix) and not honest_fix(item.family, fix)
+        fix = "" if rejected else fix
+        if rejected or (not fix and not remove) or item.family in REMEDY_OVERRIDES:
+            fix, remove = _remedies(item, paragraphs=paragraphs)
+            if klass == "A":
+                remove = ""
+        if remove and remove == fix:
+            fix = ""
+        message = _strip_embedded_remedies(item.message)
         adopted.append(
             Finding(
                 family=item.family,
                 severity=item.severity,
-                klass=finding_class(item.family, item.severity, online=online),
+                klass=klass,
                 ids=list(item.ids or []),
-                message=item.message,
+                message=_fit(message, list(item.ids or []), fix, remove),
                 fix=fix,
                 remove=remove,
             )
@@ -618,8 +863,8 @@ def sources_heading_offset(text):
     return offset
 
 
-def body_paragraphs(text):
-    """Numbered body paragraphs: (number, start, end, text)."""
+def _fallback_split_body_paragraphs(text):
+    """The local copy of T3's numbering, used until its export lands."""
     limit = sources_heading_offset(text)
     body = text[:limit] if limit is not None else text
     masked = _FENCE_RE.sub(lambda match: " " * len(match.group(0)), body)
@@ -630,8 +875,33 @@ def body_paragraphs(text):
         if first.startswith(("#", ">", "```", "|")):
             continue
         number += 1
-        numbered.append((number, start, end, body[start:end]))
+        numbered.append((number, body[start:end]))
     return numbered
+
+
+def body_paragraphs(text):
+    """Numbered body paragraphs: (number, start, end, text).
+
+    J3: one numbering for the whole skill. `validate_report` owns it, so the
+    `--paragraph N` `alx` prints is the N the binding rules mean; `alx` only
+    adds the offsets its own paragraph deletion needs.
+    """
+    splitter = getattr(validate_report, "split_body_paragraphs", None)
+    numbered = (
+        splitter(text) if splitter is not None
+        else _fallback_split_body_paragraphs(text)
+    )
+    located = []
+    cursor = 0
+    for number, block in numbered:
+        start = text.find(block, cursor)
+        if start < 0:
+            start = text.find(block)
+        if start < 0:
+            continue
+        cursor = start + len(block)
+        located.append((number, start, cursor, block))
+    return located
 
 
 def markdown_links(text):
@@ -1077,6 +1347,10 @@ def cmd_source_set(args):
         source["undated_reason"] = Path(args.undated_reason).read_text(
             encoding="utf-8"
         ).strip()
+    if args.family_justification:
+        source["family_justification"] = Path(args.family_justification).read_text(
+            encoding="utf-8"
+        ).strip()
     ws.save_ledger(ledger)
     _emit(
         ws,
@@ -1158,30 +1432,6 @@ CLAIM_ADD_FAMILIES = frozenset(
     }
 )
 
-#: Ledger-schema claim fields that `references/claim-input.schema.json` does not
-#: list while `additionalProperties: false` rejects them. `alx` carries them
-#: around the claim-input validator and re-attaches them after expansion.
-CLAIM_INPUT_PASSTHROUGH = ("decision_relevance", "named_subjects")
-
-#: Ledger-schema keys a v4 claim must carry that `claim-input` never supplies.
-CLAIM_DEFAULTS = {
-    "as_of": None,
-    "confidence": "medium",
-    "status": "supported",
-    "supports": [],
-    "contradicts": [],
-    "person_ids": [],
-    "human_harm_review": None,
-    "reasoning": None,
-    "decision_relevance": None,
-    "what_would_change": None,
-    "resolution": None,
-    "limitations": None,
-    "verified_at": None,
-}
-
-
-
 def _batch_findings(ws, ledger, item, seen_ids):
     """Only what `alx` owns: batch uniqueness and cache presence (spec §6.4)."""
     findings = []
@@ -1218,17 +1468,12 @@ def _batch_findings(ws, ledger, item, seen_ids):
     return findings
 
 
-def claim_input_body(item):
-    """The claim-input object minus the fields its schema does not declare."""
-    return {
-        key: value
-        for key, value in item.items()
-        if key not in CLAIM_INPUT_PASSTHROUGH
-    }
-
-
 def expand_claim_input(ws, item, ledger):
-    """`validate_ledger.expand_claim_input` plus the ledger-schema defaults."""
+    """`validate_ledger.expand_claim_input` with this workspace's cache meta.
+
+    T2 owns the ledger-schema defaults (ruling: one place owns them); `alx`
+    only supplies the cache metadata the expansion reads.
+    """
     source_ids = []
     for record in item.get("source_evidence") or []:
         source_id = record.get("source_id")
@@ -1239,42 +1484,7 @@ def expand_claim_input(ws, item, ledger):
         entry = cached(ws, source_id)
         if entry is not None:
             cache_meta[source_id] = entry[1]
-    claim = validate_ledger.expand_claim_input(
-        claim_input_body(item), ledger, cache_meta=cache_meta
-    )
-    claim.pop("report_paragraph", None)  # ruling R4: bindings live in state.json
-    for key in CLAIM_INPUT_PASSTHROUGH:
-        if key in item:
-            claim[key] = item[key]
-    for key, value in CLAIM_DEFAULTS.items():
-        claim.setdefault(key, value)
-    if isinstance(claim.get("verified_at"), str):
-        claim["verified_at"] = claim["verified_at"][:10]
-    if claim.get("as_of") is None:
-        # The cache stamp is UTC and `report_date` is local, so preferring
-        # verified_at keeps `verified_at >= as_of` across a date rollover.
-        claim["as_of"] = claim.get("verified_at") or ledger.get("report_date")
-    evidence = claim.get("source_evidence") or []
-    if evidence and not claim.get("extract_or_location"):
-        claim["extract_or_location"] = evidence[0].get("extract_or_location", "")
-    triangulation = claim.get("triangulation") or {}
-    if not triangulation.get("rationale"):
-        families = sorted(
-            {
-                source.get("source_family", "")
-                for source in ledger.get("sources", [])
-                if source.get("source_id") in source_ids and source.get("source_family")
-            }
-        )
-        triangulation["rationale"] = (
-            "Independent source families carry this claim: " + ", ".join(families) + "."
-            if len(families) >= 2
-            else "Only one source family carries this claim: "
-            + (families[0] if families else "none")
-            + "."
-        )
-        claim["triangulation"] = triangulation
-    return claim
+    return validate_ledger.expand_claim_input(item, ledger, cache_meta=cache_meta)
 
 
 def cmd_claim_add(args):
@@ -1294,7 +1504,7 @@ def cmd_claim_add(args):
             + [
                 item_finding
                 for item_finding in validate_ledger.claim_findings(
-                    claim_input_body(item), ledger, cache_dir=ws.sources
+                    item, ledger, cache_dir=ws.sources
                 )
                 if not is_finding(item_finding)
                 or item_finding.family in CLAIM_ADD_FAMILIES
@@ -1321,6 +1531,9 @@ def cmd_claim_add(args):
             claims.append(claim)
         if isinstance(item.get("report_paragraph"), int):
             state.setdefault("bindings", {})[claim["claim_id"]] = item["report_paragraph"]
+            record_binding_hashes(
+                state, ws.report_text(), {claim["claim_id"]: item["report_paragraph"]}
+            )
         record_probe_contexts(ws, claim)
         seen.add(claim["claim_id"])
         accepted += 1
@@ -1339,6 +1552,22 @@ def _claim_paragraph(state, claim):
     return state.get("bindings", {}).get(claim.get("claim_id"))
 
 
+def record_binding_hashes(state, text, mapping):
+    """J2: remember which paragraph a claim was bound to, not just its number.
+
+    Numbers shift as soon as one paragraph is deleted; the hash of the bound
+    paragraph does not, so a later `claim drop --apply` deletes the paragraph
+    the binding meant and `binding/leftover-prose` recognises what survived.
+    """
+    blocks = {number: block for number, _s, _e, block in body_paragraphs(text)}
+    hashes = state.setdefault("binding_hashes", {})
+    for claim_id, number in mapping.items():
+        block = blocks.get(number)
+        if block:
+            hashes[claim_id] = _sha256_text(masked_prose(block))
+    return hashes
+
+
 def cmd_claim_bind(args):
     ws, state, ledger = _open(args)
     ids = {claim.get("claim_id") for claim in ledger.get("claims", [])}
@@ -1346,6 +1575,7 @@ def cmd_claim_bind(args):
         print(f"{args.claim_id} is not in the ledger.", file=sys.stderr)
         return 1
     state.setdefault("bindings", {})[args.claim_id] = args.paragraph
+    record_binding_hashes(state, ws.report_text(), {args.claim_id: args.paragraph})
     ws.save_state(state)
     _emit(
         ws,
@@ -1376,6 +1606,27 @@ def _drop_plan(ws, state, ledger, claim_id):
     return paragraph, co_mapped, dependents
 
 
+def _paragraph_to_delete(state, text, claim_id, paragraph):
+    """J2: the paragraph recorded at bind time wins over its stale number."""
+    blocks = body_paragraphs(text)
+    recorded = state.get("binding_hashes", {}).get(claim_id)
+    if recorded:
+        for entry in blocks:
+            if _sha256_text(masked_prose(entry[3])) == recorded:
+                return entry
+    if paragraph is None:
+        return None
+    return next((entry for entry in blocks if entry[0] == paragraph), None)
+
+
+def _renumber_bindings(state, deleted):
+    """Every binding after the deleted paragraph moves up by one."""
+    bindings = state.get("bindings", {})
+    for other, number in list(bindings.items()):
+        if isinstance(number, int) and number > deleted:
+            bindings[other] = number - 1
+
+
 def apply_drop(ws, state, ledger, claim_id, reason):
     """The §6.8 mechanical scope drop; returns the lines it would print."""
     paragraph, co_mapped, dependents = _drop_plan(ws, state, ledger, claim_id)
@@ -1391,17 +1642,16 @@ def apply_drop(ws, state, ledger, claim_id, reason):
         )
     dropped = [claim_id, *co_mapped]
     text = ws.report_text()
-    if paragraph is not None:
-        for number, start, end, block in body_paragraphs(text):
-            if number == paragraph:
-                state.setdefault("mechanical_deletions", []).append(
-                    _sha256_text(masked_prose(block))
-                )
-                text = text[:start] + text[end:]
-                text = re.sub(r"\n{3,}", "\n\n", text)
-                break
+    target = _paragraph_to_delete(state, text, claim_id, paragraph)
+    if target is not None:
+        number, start, end, block = target
+        state.setdefault("mechanical_deletions", []).append(
+            _sha256_text(masked_prose(block))
+        )
+        text = re.sub(r"\n{3,}", "\n\n", text[:start] + text[end:])
         ws.report.write_text(text, encoding="utf-8")
-        lines.append(f"Deleted paragraph {paragraph} of report.md.")
+        _renumber_bindings(state, number)
+        lines.append(f"Deleted paragraph {number} of report.md.")
     stamp = _now().isoformat()
     remaining = []
     ledger.setdefault("excluded_claims", [])
@@ -1422,6 +1672,7 @@ def apply_drop(ws, state, ledger, claim_id, reason):
     drops = state.setdefault("mechanical_drops", [])
     for value in dropped:
         state.get("bindings", {}).pop(value, None)
+        state.get("binding_hashes", {}).pop(value, None)
         if value not in drops:
             drops.append(value)
     ws.save_ledger(ledger)
@@ -1514,7 +1765,7 @@ def cmd_snapshot(args):
         if latest is None:
             print("No snapshot to restore; run `alx snapshot` first.", file=sys.stderr)
             return 1
-        shutil.copyfile(latest, ws.report)
+        ws.report.write_text(_snapshot_text(ws, state), encoding="utf-8")
         _emit(
             ws,
             state,
@@ -1548,9 +1799,38 @@ def cmd_snapshot(args):
 # --------------------------------------------------------------------------
 
 
-def _snapshot_text(ws):
+def _snapshot_text(ws, state):
+    """J6: the snapshot minus the paragraphs `claim drop --apply` deleted.
+
+    A quotation that lived in a mechanically deleted paragraph is an allowed
+    loss, and a restore must never resurrect a dropped Class-F paragraph —
+    otherwise `quotation-lost` and `claim drop` chase each other.
+    """
     snapshot = ws.latest_snapshot()
-    return snapshot.read_text(encoding="utf-8") if snapshot is not None else None
+    if snapshot is None:
+        return None
+    text = snapshot.read_text(encoding="utf-8")
+    deleted = set(state.get("mechanical_deletions", []))
+    if not deleted:
+        return text
+    for _number, start, end, block in reversed(body_paragraphs(text)):
+        if _sha256_text(masked_prose(block)) in deleted:
+            text = text[:start] + text[end:]
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def _effective_snapshot(ws, state):
+    """J6: the snapshot the tiers compare against, minus the dropped paragraphs."""
+    snapshot = ws.latest_snapshot()
+    if snapshot is None:
+        return None
+    text = _snapshot_text(ws, state)
+    if text == snapshot.read_text(encoding="utf-8"):
+        return snapshot
+    path = ws.alx / "snapshot.effective.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 def _integrity_findings(ws, state, ledger):
@@ -1560,13 +1840,45 @@ def _integrity_findings(ws, state, ledger):
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         return [finding("integrity/encoding", f"report.md is not UTF-8: {exc}.")]
-    return list(
-        validate_report.integrity_findings(
+    return [
+        _date_line_finding(item, ws, state, ledger)
+        for item in validate_report.integrity_findings(
             text,
             ledger,
-            snapshot_text=_snapshot_text(ws),
+            snapshot_text=_snapshot_text(ws, state),
             lang=state.get("lang", "en"),
         )
+    ]
+
+
+def _date_line_finding(item, ws, state, ledger):
+    """`check --fix` may only be advertised where it repairs (spec §6.7).
+
+    It normalizes the date line's whitespace; a date line in the wrong place or
+    in the wrong form is a formatting defect `--fix` cannot repair, so spec
+    §6.10 makes it Class A and the only honest remedy is editing `report.md`.
+    """
+    if not is_finding(item) or item.family != "integrity/date-line":
+        return item
+    if _date_line_repairable(ws, state, ledger):
+        return Finding(**{**vars(item), "fix": remedy("check-fix"), "remove": ""})
+    return Finding(
+        **{**vars(item), "klass": "A", "fix": remedy("edit-prose"), "remove": ""}
+    )
+
+
+def _date_line_repairable(ws, state, ledger):
+    """True when the immediate blockquote holds the date bar its whitespace."""
+    try:
+        expected = report_contract.localized_date(
+            state.get("lang", "en"), date.fromisoformat(ledger.get("report_date", ""))
+        )
+    except (TypeError, ValueError):
+        return False
+    folded = re.sub(r"\s+", "", expected)
+    return any(
+        re.sub(r"\s+", "", line) == folded
+        for line in _metadata_lines(ws.report_text())
     )
 
 
@@ -1647,13 +1959,14 @@ def _ledger_findings(ws, ledger):
 
 
 def paragraph_mapping(ws, state, ledger, text):
-    """{claim_id: paragraph} for every reported claim (spec §6.7c)."""
+    """({claim_id: paragraph}, {claim_id: candidates}) — spec §6.7c."""
     paragraphs = body_paragraphs(text)
     urls_by_paragraph = {
         number: {normalize_url(url) for _label, url in markdown_links(block)}
         for number, _start, _end, block in paragraphs
     }
     mapping = {}
+    unbound = {}
     for claim in ledger.get("claims", []):
         if not claim.get("include_in_report", True):
             continue
@@ -1674,7 +1987,9 @@ def paragraph_mapping(ws, state, ledger, text):
         ]
         if len(candidates) == 1:
             mapping[claim_id] = candidates[0]
-    return mapping, []
+        else:
+            unbound[claim_id] = candidates
+    return mapping, unbound
 
 
 def _bound_ledger(state, ledger):
@@ -1725,23 +2040,95 @@ def _regenerate_sources(ws, ledger):
     return True
 
 
+def _excerpts_located(claim, prose):
+    """True when every recorded excerpt is still in the bound paragraph."""
+    excerpts = claim.get("report_excerpts") or []
+    return bool(excerpts) and all(
+        re.sub(r"\s+", " ", str(excerpt)).strip() in prose for excerpt in excerpts
+    )
+
+
+def _subject_paragraph(claim, paragraphs):
+    """The first body paragraph that states the claim's subject term (R9)."""
+    terms = sorted(
+        re.findall(r"[\w一-鿿]{4,}", str(claim.get("claim", ""))),
+        key=len,
+        reverse=True,
+    )[:3]
+    for number in sorted(paragraphs):
+        prose = masked_prose(paragraphs[number])
+        if any(term in prose for term in terms):
+            return number
+    return None
+
+
+def _claim_paragraph_number(claim, paragraphs, mapping):
+    """Where the claim is stated: its binding, its excerpt, else its subject."""
+    number = mapping.get(claim.get("claim_id"))
+    if number:
+        return number
+    for candidate, block in sorted(paragraphs.items()):
+        if _excerpts_located(claim, re.sub(r"\s+", " ", masked_prose(block))):
+            return candidate
+    return _subject_paragraph(claim, paragraphs)
+
+
+def _excerpt_remedy(claim, claim_id, candidates, paragraphs, mapping):
+    """`binding/excerpt-missing`: write it, bind it, or cite the claim."""
+    if mapping.get(claim_id):
+        return remedy("check-fix")
+    if candidates:
+        return remedy("claim-bind", claim_id=claim_id, paragraph=candidates[0])
+    return add_link(_claim_paragraph_number(claim, paragraphs, mapping), claim_id)
+
+
+def _binding_remedy(item, unbound):
+    """J3: print the candidate `alx`'s own numbering found, never a bare `N`."""
+    if not is_finding(item) or item.family != "binding/claim-paragraph":
+        return item
+    claim_id = _pick_id(item, "C")
+    candidates = unbound.get(claim_id) or []
+    if not claim_id or not candidates:
+        return item
+    return Finding(
+        **{
+            **vars(item),
+            "ids": list(item.ids or []) or [claim_id],
+            "fix": remedy("claim-bind", claim_id=claim_id, paragraph=candidates[0]),
+            "remove": remedy("claim-drop", claim_id=claim_id),
+        }
+    )
+
+
 def _binding_findings(ws, state, ledger, *, fix=False):
     """Section (c): T4's binding rules, excerpt binding and leftover prose."""
     text = ws.report_text()
-    mapping, _unused = paragraph_mapping(ws, state, ledger, text)
+    mapping, unbound = paragraph_mapping(ws, state, ledger, text)
     paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
     if fix:
         for claim in ledger.get("claims", []):
             number = mapping.get(claim.get("claim_id"))
             block = paragraphs.get(number)
-            if block and not claim.get("report_excerpts"):
-                excerpt = re.sub(r"\s+", " ", masked_prose(block))[:EXCERPT_CHARS]
-                claim["report_excerpts"] = [excerpt]
+            if not block:
+                continue
+            prose = re.sub(r"\s+", " ", masked_prose(block))
+            # The excerpt is re-derived whenever the bound paragraph no longer
+            # contains it, so a prose edit (humanization) does not leave every
+            # claim "cannot be located".
+            if not _excerpts_located(claim, prose):
+                claim["report_excerpts"] = [prose[:EXCERPT_CHARS]]
         ws.save_ledger(ledger)
         _regenerate_sources(ws, ledger)
         text = ws.report_text()
-        mapping, _unused = paragraph_mapping(ws, state, ledger, text)
-    findings = list(validate_report.binding_findings(text, _bound_ledger(state, ledger)))
+        mapping, unbound = paragraph_mapping(ws, state, ledger, text)
+    record_binding_hashes(state, text, mapping)
+    ws.save_state(state)
+    findings = [
+        _binding_remedy(item, unbound)
+        for item in validate_report.binding_findings(
+            text, _bound_ledger(state, ledger)
+        )
+    ]
     # Ruling R3: the schema no longer demands report_excerpts; `check`(c) does.
     for claim in ledger.get("claims", []):
         if claim.get("include_in_report") is not True:
@@ -1749,12 +2136,19 @@ def _binding_findings(ws, state, ledger, *, fix=False):
         if claim.get("report_excerpts"):
             continue
         claim_id = claim.get("claim_id", "")
+        candidates = unbound.get(claim_id)
         findings.append(
             finding(
                 "binding/excerpt-missing",
                 f"{claim_id} is included in the report with no report_excerpts; "
                 "bind it to a paragraph, then `alx check --fix` writes the excerpt.",
                 ids=[claim_id],
+                # A bound claim's excerpt is written by `--fix`; an unbound one
+                # with candidates needs the binding; with no candidate at all
+                # the claim is cited nowhere, so R9 says where the link goes
+                # (addendum 7).
+                fix=_excerpt_remedy(claim, claim_id, candidates, paragraphs, mapping),
+                remove=remedy("claim-drop", claim_id=claim_id),
             )
         )
     deleted = set(state.get("mechanical_deletions", []))
@@ -1767,7 +2161,19 @@ def _binding_findings(ws, state, ledger, *, fix=False):
                     "report.md.",
                 )
             )
-    return findings, mapping
+    return findings, _paragraph_table(mapping, unbound)
+
+
+def _paragraph_table(mapping, unbound):
+    """Spec §6.7(c): every include_in_report claim, bound or not."""
+    table = dict(mapping)
+    for claim_id, candidates in unbound.items():
+        table[claim_id] = (
+            f"unbound (candidates: {', '.join(str(n) for n in candidates)})"
+            if candidates
+            else "unbound (no candidate)"
+        )
+    return table
 
 
 def _fidelity_findings(ws, ledger):
@@ -1778,32 +2184,35 @@ def _fidelity_findings(ws, ledger):
         online=False,
         cache_dir=ws.sources,
     )
-    return [
-        item for item in (result.get("findings") or []) if isinstance(item, Finding)
-    ]
+    return as_findings(result.get("findings"))
 
 
 def _rewild_findings(ws, state):
-    """Section (e): the one seam T3 has not landed yet."""
-    snapshot = ws.latest_snapshot()
+    """Section (e): the offline rewild tiers.
+
+    `review_note_path` stays `None`: the note's hashes are stamped by `issue`
+    (step 4), so before then they never match the working report. The note's
+    freshness is judged by alx's own mechanical-delta rule in section (f).
+    """
+    snapshot = _effective_snapshot(ws, state)
     if snapshot is None:
         return []
     run_check = getattr(rewild_gate, "run_check", None)
     if run_check is None:
         return [
             finding(
-                "review/rewild-missing",
+                "rewild/checker",
                 "rewild evaluator unavailable: `rewild_gate.run_check` is missing, "
                 "so section (e) did not run.",
             )
         ]
-    note = ws.reviews / "rewild.json"
     return list(
         run_check(
             ws.report,
             snapshot,
             lang=state.get("lang", "en"),
-            review_note_path=note if note.exists() else None,
+            review_note_path=None,
+            timeout=REWILD_CHECKER_TIMEOUT_SECONDS,
         )
     )
 
@@ -1815,44 +2224,58 @@ def _note_completeness(ws, state, ledger, kind):
         return [f"reviews/{kind}.json is missing"]
     note = _read_json(path)
     missing = []
+    # Item 4: every entry is the exact JSON path of the field to fill.
     if note.get("status") != "completed":
-        missing.append("status=completed")
+        missing.append('status (must be "completed")')
     if kind == "rewild":
         checks = note.get("fidelity_checks") or {}
         missing.extend(
-            f"fidelity_checks.{name}"
+            f"fidelity_checks.{name} (must be true)"
             for name in sorted(rewild_gate.REQUIRED_FIDELITY_CHECKS)
             if checks.get(name) is not True
         )
         for index, item in enumerate(note.get("findings") or [], start=1):
             if item.get("disposition") not in {"resolved", "rejected"}:
-                missing.append(f"findings[{index}].disposition")
-            if item.get("category") in {"region", "fidelity"} and (
+                missing.append(
+                    f"findings[{index}].disposition (resolved | rejected)"
+                )
+            elif item.get("category") in {"region", "fidelity"} and (
                 item.get("disposition") != "resolved"
             ):
-                missing.append(f"findings[{index}] unresolved {item.get('category')}")
+                missing.append(
+                    f"findings[{index}].disposition (must be resolved for "
+                    f"category {item.get('category')})"
+                )
         return missing
     scores = note.get("scores") or {}
     for name in CONTENT_SCORE_KEYS:
         entry = scores.get(name) or {}
         if not isinstance(entry.get("score"), int):
-            missing.append(f"scores.{name}")
+            missing.append(f"scores.{name}.score (integer 1-5)")
         elif entry["score"] < 4:
-            missing.append(f"scores.{name}={entry['score']} below 4")
+            missing.append(f"scores.{name}.score (is {entry['score']}, below 4)")
+        if not str(entry.get("rationale") or "").strip():
+            missing.append(f"scores.{name}.rationale (20+ chars)")
     checks = note.get("checks") or {}
     missing.extend(
-        f"checks.{name}" for name in CONTENT_CHECK_KEYS if checks.get(name) is not True
+        f"checks.{name} (must be true)"
+        for name in CONTENT_CHECK_KEYS
+        if checks.get(name) is not True
     )
     if not note.get("section_reviews"):
-        missing.append("section_reviews")
+        missing.append("section_reviews (at least one section)")
     if not note.get("completion_note"):
         missing.append("completion_note")
     for index, item in enumerate(note.get("findings") or [], start=1):
         if item.get("severity") == "critical" and item.get("disposition") != "fixed":
-            missing.append(f"findings[{index}] critical not fixed")
+            missing.append(
+                f"findings[{index}].disposition (a critical finding must be fixed)"
+            )
         excerpt = item.get("report_disclosure_excerpt")
         if excerpt and excerpt not in ws.report_text():
-            missing.append(f"findings[{index}].report_disclosure_excerpt not located")
+            missing.append(
+                f"findings[{index}].report_disclosure_excerpt (not in report.md)"
+            )
     # Spec §6.7(f): one disposition per retained claim->paragraph mapping.
     dispositions = {
         entry.get("claim_id"): entry.get("disposition")
@@ -1862,7 +2285,10 @@ def _note_completeness(ws, state, ledger, kind):
     mapping, _unused = paragraph_mapping(ws, state, ledger, ws.report_text())
     for claim_id in sorted(mapping):
         if not dispositions.get(claim_id):
-            missing.append(f"claim_support[{claim_id}].disposition")
+            missing.append(
+                f"claim_support[{claim_id}].disposition "
+                "(supported | qualified | removed)"
+            )
     return missing
 
 
@@ -1942,12 +2368,18 @@ def _mechanical_ledger(ledger, state):
     return json.dumps(stripped, ensure_ascii=False, sort_keys=True)
 
 
+def _review_family(kind, suffix):
+    """One name set: `rewild_gate` owns `review/rewild`; `alx` owns content."""
+    return "review/rewild" if kind == "rewild" else f"review/{kind}-{suffix}"
+
+
 def freshness_findings(ws, state, ledger, kind):
     """Spec §6.8: current inputs must equal the reviewed copy up to mechanics."""
     record = state.get("reviews", {}).get(kind, {})
-    family = f"review/{kind}"
     if not record.get("finished"):
-        return [finding(f"review/{kind}-missing", f"the {kind} review is missing.")]
+        return [
+            finding(_review_family(kind, "missing"), f"the {kind} review is missing.")
+        ]
     reviewed = ws.review_dir(kind, record["iteration"])
     current = _paragraph_set(ws.report_text(), state)
     previous = _paragraph_set(
@@ -1964,7 +2396,7 @@ def freshness_findings(ws, state, ledger, kind):
     if changed or removed:
         findings.append(
             finding(
-                f"{family}-stale",
+                _review_family(kind, "stale"),
                 f"re-review required: {len(changed)} paragraph(s) added or changed and "
                 f"{len(removed)} removed since the {kind} review.",
             )
@@ -1976,7 +2408,7 @@ def freshness_findings(ws, state, ledger, kind):
         ):
             findings.append(
                 finding(
-                    f"{family}-stale",
+                    _review_family(kind, "stale"),
                     "re-review required: the ledger changed beyond accessed/"
                     "verified_at/report_excerpts since the content review.",
                 )
@@ -1984,15 +2416,90 @@ def freshness_findings(ws, state, ledger, kind):
     return findings
 
 
+_CANNOT_LOCATE = re.compile(r"Claim (C\d+) cannot be located in the report")
+_NO_NEARBY_CITATION = re.compile(r"Claim (C\d+) has no nearby citation")
+
+
+def _content_binding_remedies(items, ws, state, ledger):
+    """A binding defect is repaired by binding, never by a new review round.
+
+    `content_gate` reports both of these as `content/check`, whose generic
+    remedy is `alx review start content --iter`; that re-review fixes nothing
+    here. Ruling R9: inserting the link leaves the visible text unchanged, so
+    it is a mechanical delta and the finished review stays fresh.
+    """
+    text = ws.report_text()
+    paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
+    mapping, _unbound = paragraph_mapping(ws, state, ledger, text)
+    claims = {claim.get("claim_id"): claim for claim in ledger.get("claims", [])}
+    repaired = []
+    for item in items:
+        match = _CANNOT_LOCATE.search(str(item.message)) or _NO_NEARBY_CITATION.search(
+            str(item.message)
+        )
+        if match is None:
+            repaired.append(item)
+            continue
+        claim_id = match.group(1)
+        number = _claim_paragraph_number(
+            claims.get(claim_id, {"claim_id": claim_id}), paragraphs, mapping
+        )
+        family = item.family
+        if _CANNOT_LOCATE.search(str(item.message)):
+            # `--fix` re-derives report_excerpts from the bound paragraph. That
+            # is the §6.7 mechanical excerpt write, so ruling R10 lets the
+            # finding advertise `--fix` — under the family that owns the repair.
+            family = "binding/excerpt-missing"
+            fix = (
+                remedy("check-fix")
+                if mapping.get(claim_id) or not number
+                else remedy("claim-bind", claim_id=claim_id, paragraph=number)
+            )
+        else:
+            fix = add_link(number, claim_id)
+        repaired.append(
+            Finding(
+                family=family,
+                severity=item.severity,
+                klass=getattr(item, "klass", "F"),
+                ids=list(item.ids or []) or [claim_id],
+                message=item.message,
+                fix=fix,
+                remove=remedy("claim-drop", claim_id=claim_id),
+            )
+        )
+    return repaired
+
+
+def _content_check(ws, ledger):
+    """J9: the review half of `content_gate` only.
+
+    Its ledger half re-runs `validate_references`, which section (b) already
+    reported; printed twice, the second copy carries `alx review start content
+    --iter`, a remedy that repairs no ledger defect. Until
+    `include_ledger_checks` lands, the duplicates are dropped by message.
+    """
+    note = ws.reviews / "content.json"
+    try:
+        return content_gate.run_check(
+            ws.report, ws.ledger_path, note, include_ledger_checks=False
+        )
+    except TypeError:
+        duplicated = set(validate_ledger.validate_references(ledger))
+        return [
+            item
+            for item in content_gate.run_check(ws.report, ws.ledger_path, note)
+            if str(getattr(item, "message", item)) not in duplicated
+        ]
+
+
 def _review_findings(ws, state, ledger):
     """Section (f): both notes' gate checks plus §6.8 freshness."""
     findings = []
     if (ws.reviews / "content.json").exists():
         findings.extend(
-            content_gate.run_check(
-                ws.report,
-                ws.ledger_path,
-                ws.reviews / "content.json",
+            _content_binding_remedies(
+                _content_check(ws, ledger), ws, state, ledger
             )
         )
     for kind in REVIEW_KINDS:
@@ -2001,9 +2508,9 @@ def _review_findings(ws, state, ledger):
         if record.get("finished") and note_missing:
             findings.append(
                 finding(
-                    f"review/{kind}-stale",
-                    f"the {kind} review note is incomplete: "
-                    f"{', '.join(note_missing[:3])}.",
+                    _review_family(kind, "stale"),
+                    f"reviews/{kind}.json is incomplete: "
+                    f"{'; '.join(note_missing)}.",
                 )
             )
             continue
@@ -2093,6 +2600,21 @@ def run_check(ws, state, ledger, *, fix=False, mapping_out=None):
     return adopt(findings, paragraphs=len(body_paragraphs(ws.report_text())))
 
 
+def _record_last_check(state, findings):
+    """What `alx status` reports; J7: `issue` refreshes it after its remedies."""
+    state["last_check"] = {
+        "at": _now().isoformat(),
+        "hard": len(hard_findings(findings)),
+        "class_f": len(class_f_findings(findings)),
+        "families": sorted({item.family for item in findings}),
+    }
+
+
+def _claim_order(claim_id):
+    digits = re.sub(r"\D", "", str(claim_id))
+    return (int(digits) if digits else 0, str(claim_id))
+
+
 def _status_line(state, findings, remaining):
     hard = len(hard_findings(findings))
     elapsed, _remaining = _minutes(state)
@@ -2114,20 +2636,14 @@ def cmd_check(args):
     findings = run_check(ws, state, ledger, fix=args.fix, mapping_out=mapping)
     ledger = ws.load_ledger()
     _elapsed, remaining = _minutes(state)
-    table = ", ".join(
-        f"{claim_id}={paragraph}" for claim_id, paragraph in sorted(mapping.items())
-    )
-    lines = [
-        f"claim->paragraph: {table or 'none bound'}",
+    rows = sorted(mapping.items(), key=lambda row: _claim_order(row[0]))
+    lines = [f"claim->paragraph ({len(rows)} claims):" if rows else "claim->paragraph: none"]
+    lines += [f"  {claim_id}={paragraph}" for claim_id, paragraph in rows]
+    lines += [
         render_grouped(findings),
         _status_line(state, findings, remaining),
     ]
-    state["last_check"] = {
-        "at": _now().isoformat(),
-        "hard": len(hard_findings(findings)),
-        "class_f": len(class_f_findings(findings)),
-        "families": sorted({item.family for item in findings}),
-    }
+    _record_last_check(state, findings)
     ws.save_state(state)
     _emit(
         ws,
@@ -2142,6 +2658,120 @@ def cmd_check(args):
 # --------------------------------------------------------------------------
 # review lifecycle
 # --------------------------------------------------------------------------
+
+
+#: Spec §6.8: `review start` prints what to fill, so a model never has to read
+#: `scripts/` or a schema to learn the note format. One row per JSON path:
+#: allowed values, then the one-line meaning.
+CONTENT_NOTE_GUIDE = (
+    ('status', '"completed"', "set it last, when every field below is filled"),
+    (
+        "scores.<key>.score",
+        "integer 1-5; 4 or more passes",
+        "one key each: " + ", ".join(CONTENT_SCORE_KEYS),
+    ),
+    ("scores.<key>.rationale", "text, 20+ chars", "why that score"),
+    (
+        "checks.<key>",
+        "true | false; all must be true",
+        "one key each: " + ", ".join(CONTENT_CHECK_KEYS),
+    ),
+    (
+        "section_reviews[]",
+        "one object per H2 section, at least one",
+        'keys: section_heading, purpose, new_value, evidence_or_reasoning, '
+        "limitation_or_tradeoff, contribution_to_governing_question "
+        '(20+ chars each), disposition="keep"',
+    ),
+    (
+        "findings[]",
+        "may stay empty",
+        "keys: finding_id F<n>, severity critical|major|minor, category "
+        "scope|evidence|reasoning|counterevidence|depth|decision_value|"
+        "forecast|structure|writing, location, finding, disposition "
+        "fixed|accepted_limitation|rejected, rationale, "
+        "report_disclosure_excerpt (report text verbatim, or null)",
+    ),
+    (
+        "evidence_limitations[]",
+        "texts; may stay empty",
+        "what the evidence cannot settle",
+    ),
+    (
+        "visual_assets[]",
+        "may stay empty",
+        "keys: path, sha256, usage body|cover|body_and_cover, "
+        'visible_text_and_claims_review (20+ chars), disposition="approved"',
+    ),
+    ("completion_note", "text", "what you checked and what stands"),
+    (
+        "claim_support[].paragraph",
+        "integer >= 1",
+        "the paragraph that states the claim; correct the prefilled number "
+        "when it is wrong",
+    ),
+    (
+        "claim_support[].disposition",
+        "supported | qualified | removed",
+        "one entry per retained claim, prefilled empty",
+    ),
+    (
+        "claim_support[].note",
+        "text, 1+ chars",
+        "how that paragraph's evidence carries the claim",
+    ),
+)
+
+
+def _rewild_note_guide():
+    return (
+        ('status', '"completed"', "set it last"),
+        (
+            "fidelity_checks.<key>",
+            "true | false; all must be true",
+            "one key each: "
+            + ", ".join(sorted(rewild_gate.REQUIRED_FIDELITY_CHECKS)),
+        ),
+        (
+            "findings[]",
+            "may stay empty",
+            "keys: category style|region|fidelity, finding, disposition "
+            "resolved|rejected (region and fidelity must be resolved), "
+            "reason (10+ chars)",
+        ),
+    )
+
+
+def _note_instructions(kind):
+    """The printed field list `review start` owes the reviewer (item 4)."""
+    guide = CONTENT_NOTE_GUIDE if kind == "content" else _rewild_note_guide()
+    lines = [f"Fill reviews/{kind}.json — every field below, nothing else:"]
+    lines.extend(f"  {path}: {values} — {meaning}" for path, values, meaning in guide)
+    lines.append(
+        f"Then `alx review finish {kind}`; it names the JSON path of whatever "
+        "is still missing."
+    )
+    return lines
+
+
+def _claim_support_skeleton(ws, state, ledger):
+    """One entry per retained `include_in_report` claim (item 4)."""
+    mapping, unbound = paragraph_mapping(ws, state, ledger, ws.report_text())
+    entries = []
+    for claim in ledger.get("claims", []):
+        if claim.get("include_in_report") is not True:
+            continue
+        claim_id = claim.get("claim_id", "")
+        candidates = unbound.get(claim_id) or []
+        entries.append(
+            {
+                "claim_id": claim_id,
+                "paragraph": mapping.get(claim_id) or (candidates[0] if candidates else 1),
+                "disposition": "",
+                "note": "",
+            }
+        )
+    return entries
 
 
 def _note_skeleton(ws, state, kind, ledger):
@@ -2177,7 +2807,7 @@ def _note_skeleton(ws, state, kind, ledger):
         "findings": [],
         "evidence_limitations": [],
         "completion_note": "",
-        "claim_support": [],
+        "claim_support": _claim_support_skeleton(ws, state, ledger),
     }
 
 
@@ -2217,13 +2847,9 @@ def cmd_review_start(args):
         if kind == "rewild"
         else "references/content-quality.md §13 review protocol"
     )
-    lines.extend(
-        [
-            f"Review copy: {target}",
-            f"Fill reviews/{kind}.json per {protocol}, then run "
-            f"`alx review finish {kind}`.",
-        ]
-    )
+    lines.append(f"Review copy: {target}")
+    lines.extend(_note_instructions(kind))
+    lines.append(f"Judge the report by {protocol}.")
     _emit(ws, state, f"review start {kind}", f"iteration {iteration}", lines)
     return 0
 
@@ -2308,6 +2934,22 @@ def _insert_verification_note(ws, lang, notes):
     return note
 
 
+def _remove_verification_note(ws):
+    """J10: an aborted `issue` takes its own note paragraph back out.
+
+    Left behind, the machine-written note is prose the next run's rewild tiers
+    judge as text that is not in the pre-humanization source.
+    """
+    text = ws.report_text()
+    prefixes = tuple(VERIFICATION_NOTE_PREFIX.values())
+    updated = text
+    for _start, _end, block in _blocks(text):
+        if block.strip().startswith(prefixes):
+            updated = updated.replace(block + "\n\n", "").replace(block, "")
+    if updated != text:
+        ws.report.write_text(re.sub(r"\n{3,}", "\n\n", updated), encoding="utf-8")
+
+
 def _auto_remedies(ws, state, ledger, findings, lines):
     """Spec §6.9.1: `--deliver` drops scope, it never waives Class F."""
     restore = [
@@ -2319,10 +2961,13 @@ def _auto_remedies(ws, state, ledger, findings, lines):
             "integrity/control-chars",
             "integrity/replacement-char",
             "integrity/encoding",
+            # The producer of a lost quotation is `rewild_gate`, which names the
+            # family `fidelity/quotation-lost`; both must auto-restore.
+            "fidelity/quotation-lost",
         }
     ]
     if restore and ws.latest_snapshot() is not None:
-        shutil.copyfile(ws.latest_snapshot(), ws.report)
+        ws.report.write_text(_snapshot_text(ws, state), encoding="utf-8")
         lines.append("auto-remedy: report.md restored from the latest snapshot.")
     claim_ids = []
     for item in class_f_findings(findings):
@@ -2337,8 +2982,47 @@ def _auto_remedies(ws, state, ledger, findings, lines):
     return ws.load_state(), ws.load_ledger()
 
 
+def _online_findings(result):
+    """Spec §6.9.2: the live statuses T1 reports, as classifiable findings.
+
+    `check_source_fidelity` records unreachable/undecodable/mismatch on the
+    check, not as a finding, so `alx` derives them here: a live MISMATCH is
+    Class F, and unverified sources are the Class-A availability finding once
+    they pass the policy quorum.
+    """
+    result = result or {}
+    findings = as_findings(result.get("findings"))
+    checks = [item for item in result.get("checks") or [] if isinstance(item, dict)]
+    unverified = [
+        item for item in checks if item.get("status") in UNVERIFIED_STATUSES
+    ]
+    beyond_quorum = bool(checks) and len(unverified) / len(checks) > UNVERIFIED_QUORUM
+    for check in checks:
+        status = check.get("status")
+        ids = [
+            str(value)
+            for value in (check.get("claim_id"), check.get("source_id"))
+            if value
+        ]
+        detail = str(check.get("detail") or status)
+        if status == "mismatch":
+            findings.append(finding("fidelity/mismatch", detail, ids=ids))
+        elif status in UNVERIFIED_STATUSES and beyond_quorum:
+            findings.append(
+                finding(
+                    f"fidelity/{status}",
+                    f"{detail} Unverified sources are past the "
+                    f"{int(UNVERIFIED_QUORUM * 100)}% quorum.",
+                    ids=ids,
+                )
+            )
+    return findings
+
+
 def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
     """Step 2: deadline-bound live fidelity, then re-probe refreshed sources."""
+    # J1: only a receipt this pass wrote may be hashed into `issue.json`.
+    (ws.receipts / "source-fidelity.json").unlink(missing_ok=True)
     _elapsed, remaining = _minutes(state)
     if remaining < RESERVE_MINUTES:
         delivery_notes.append(
@@ -2348,24 +3032,22 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
         return [], True
     receipt_path = ws.receipts / "source-fidelity.json"
     cap = min(ONLINE_CAP_MINUTES, max(remaining - RESERVE_MINUTES, 1))
+    timeout = min(FETCH_TIMEOUT_SECONDS, cap * 60)
     try:
-        result = source_fidelity.issue_source_fidelity_receipt(
-            ws.ledger_path,
-            receipt_path,
+        result = source_fidelity.check_source_fidelity(
+            ledger,
             sample_size=args.sample_size,
-            timeout=min(FETCH_TIMEOUT_SECONDS, cap * 60),
+            online=True,
+            timeout=timeout,
             cache_dir=ws.sources,
             deadline=_deadline_epoch(state),
-            force=True,
         )
     except Exception as exc:  # availability failures are Class A
         delivery_notes.append(f"online source fidelity failed: {exc}")
         return [], False
     _write_json(ws.alx / "fidelity-result.json", result or {})
     refreshed = list((result or {}).get("refreshed_source_ids", []))
-    findings = [
-        item for item in (result or {}).get("findings") or [] if isinstance(item, Finding)
-    ]
+    findings = _online_findings(result)
     if refreshed:
         for claim in ledger.get("claims", []):
             if set(claim.get("source_ids", [])) & set(refreshed):
@@ -2379,12 +3061,34 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
         f"source fidelity: {(result or {}).get('status', 'unknown')}, "
         f"{len(refreshed)} source(s) refreshed."
     )
-    return adopt(findings, online=True), True
-
-
-#: T1 binds the source-fidelity receipt to the ledger alone (no report hash);
-#: T4's `--fast` hash check demands one from every receipt. Known seam defect.
-RECEIPT_ARTIFACT = "source-fidelity receipt does not record report_sha256"
+    adopted = adopt(findings, online=True)
+    blocking = class_f_findings(adopted)
+    if not blocking:
+        # The receipt is written from this same pass; there is no second fetch.
+        try:
+            source_fidelity.issue_source_fidelity_receipt(
+                ws.ledger_path,
+                receipt_path,
+                sample_size=args.sample_size,
+                timeout=timeout,
+                cache_dir=ws.sources,
+                deadline=_deadline_epoch(state),
+                force=True,
+                result=result,
+            )
+        except Exception as exc:  # a refused receipt is Class A
+            delivery_notes.append(f"source-fidelity receipt not issued: {exc}")
+    unverified = [item for item in adopted if item.klass == "A"]
+    if unverified:
+        # The detail is printed; the delivery note itself is prose that goes
+        # into the report's Verification note, so it carries no ids or figures.
+        lines.append(render_grouped(unverified))
+        delivery_notes.extend(
+            f"{family}: a sampled source was not re-read live; the recorded "
+            "cache stands as its evidence"
+            for family in sorted({item.family for item in unverified})
+        )
+    return blocking, True
 
 
 def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
@@ -2414,7 +3118,7 @@ def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
     errors = [
         line.removeprefix("[FAIL] ")
         for line in captured.getvalue().splitlines()
-        if line.startswith("[FAIL] ") and RECEIPT_ARTIFACT not in line
+        if line.startswith("[FAIL] ")
     ]
     if errors:
         delivery_notes.append(
@@ -2430,6 +3134,10 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         note_path = ws.reviews / f"{kind}.json"
         if not note_path.exists():
             continue
+        if freshness_findings(ws, state, ledger, kind):
+            # Spec §6.8: `issue` stamps the current hashes only when the
+            # freshness rule passes; a stale note must fail its gate instead.
+            continue
         note = _read_json(note_path)
         note["report_sha256"] = file_sha256(ws.report)
         if kind == "rewild" and snapshot is not None:
@@ -2437,6 +3145,7 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         if kind == "content":
             note["ledger_sha256"] = file_sha256(ws.ledger_path)
         _write_json(note_path, note)
+    blocking = []
     rewild_receipt = ws.receipts / "rewild.json"
     errors = rewild_gate.run_gate(
         ws.report,
@@ -2445,8 +3154,10 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         review_note_path=ws.reviews / "rewild.json",
         receipt_path=rewild_receipt,
         force=True,
+        timeout=REWILD_CHECKER_TIMEOUT_SECONDS,
     )
     if errors:
+        blocking.extend(_refused_receipt(_rewild_findings(ws, state)))
         delivery_notes.append(f"rewild receipt not issued: {errors[0]}")
     else:
         receipts["rewild"] = rewild_receipt
@@ -2460,12 +3171,18 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         force=True,
     )
     if errors:
+        blocking.extend(_refused_receipt(_content_check(ws, ledger)))
         delivery_notes.append(f"content receipt not issued: {errors[0]}")
     else:
         receipts["content"] = content_receipt
     _verify_receipts_in_process(ws, state, receipts, delivery_notes)
     lines.append(f"receipts written: {', '.join(sorted(receipts)) or 'none'}")
-    return receipts
+    return receipts, blocking
+
+
+def _refused_receipt(findings):
+    """J5: a refused gate keeps its producer's class, never `tooling/receipt`."""
+    return class_f_findings(adopt(as_findings(findings)))
 
 
 def cmd_issue(args):
@@ -2484,33 +3201,69 @@ def cmd_issue(args):
         state, ledger = _auto_remedies(ws, state, ledger, blocking, lines)
         findings = run_check(ws, state, ledger, fix=False)
         blocking = class_f_findings(findings)
+    # J7: `alx status` must report what `issue` just saw, remedies included.
+    _record_last_check(state, findings)
+    ws.save_state(state)
     if blocking:
         lines.append(render_grouped(blocking))
         lines.append("issue refused: Class F findings are never waivable.")
+        _remove_verification_note(ws)
         _emit(ws, state, "issue", f"{len(blocking)} class-F", lines)
         return 1
     online_findings, ok = _online_phase(
         ws, state, ledger, args, lines, delivery_notes, disclosures
     )
+    if online_findings and not args.deliver:
+        lines.append(render_grouped(online_findings))
+        lines.append("issue refused: live fidelity found Class F findings.")
+        _remove_verification_note(ws)
+        _emit(ws, state, "issue", "online class-F", lines)
+        return 1
     if online_findings:
-        if args.deliver:
-            state, ledger = _auto_remedies(ws, state, ledger, online_findings, lines)
-        else:
+        # Spec §6.9.1 + J5: the drops change the report and the ledger, so the
+        # whole offline check runs again and whatever survives still refuses.
+        state, ledger = _auto_remedies(ws, state, ledger, online_findings, lines)
+        findings = run_check(ws, state, ledger, fix=False)
+        blocking = class_f_findings(findings)
+        _record_last_check(state, findings)
+        ws.save_state(state)
+        if blocking:
+            lines.append(render_grouped(blocking))
+            lines.append("issue refused: Class F findings are never waivable.")
+            _remove_verification_note(ws)
+            _emit(ws, state, "issue", f"{len(blocking)} class-F", lines)
+            return 1
+        # J1: the receipt is owed by the ledger that is actually delivered, so
+        # the live pass runs once more over the ledger minus the dropped claims.
+        online_findings, ok = _online_phase(
+            ws, state, ledger, args, lines, delivery_notes, disclosures
+        )
+        if online_findings:
             lines.append(render_grouped(online_findings))
             lines.append("issue refused: live fidelity found Class F findings.")
+            _remove_verification_note(ws)
             _emit(ws, state, "issue", "online class-F", lines)
             return 1
     note_items = delivery_notes + disclosures
     if note_items:
         note = _insert_verification_note(ws, state.get("lang", "en"), note_items)
         lines.append(f"verification note: {note[:60]}")
-    receipts = _receipt_phase(ws, state, ledger, lines, delivery_notes)
+    receipts, gate_blocking = _receipt_phase(ws, state, ledger, lines, delivery_notes)
+    if gate_blocking:
+        # J5: a gate failure keeps its producer's class; Class F is never a
+        # receipt-tooling note, with or without `--deliver`.
+        lines.append(render_grouped(gate_blocking))
+        lines.append("issue refused: Class F findings are never waivable.")
+        _remove_verification_note(ws)
+        _emit(ws, state, "issue", f"{len(gate_blocking)} class-F", lines)
+        return 1
     if delivery_notes and not args.deliver:
         lines.append(render_grouped([_class_a_finding(note) for note in delivery_notes]))
         lines.append(
             "issue aborted before the receipt: rerun with `alx issue --deliver` to "
             "deliver with recorded limitations."
         )
+        _remove_verification_note(ws)
         _emit(ws, state, "issue", "class-A abort", lines)
         return 1
     if delivery_notes:
@@ -2587,7 +3340,24 @@ def cmd_render(args):
         else ["executive", md_to_pdf.select_adaptive_companion(subject)]
     )
     lines = []
-    for template in templates:
+    for index, template in enumerate(templates):
+        _elapsed, remaining = _minutes(state)
+        if index and remaining < RESERVE_MINUTES:
+            # J7: Executive first; the companion is dropped rather than risk the
+            # rasterizer running past the cap. Class A — the delivery stands.
+            lines.append(
+                render_grouped(
+                    [
+                        finding(
+                            "tooling/render",
+                            f"{template} companion not rendered: {remaining} min "
+                            f"left, reserve is {RESERVE_MINUTES} min.",
+                            fix=remedy("render"),
+                        )
+                    ]
+                )
+            )
+            break
         output = ws.dir / f"report-{template}.pdf"
         kwargs = {
             "template": template,
@@ -2708,6 +3478,7 @@ def build_parser():
     source_set.add_argument("--accountability", choices=ACCOUNTABILITY_BASES)
     source_set.add_argument("--published")
     source_set.add_argument("--undated-reason", dest="undated_reason")
+    source_set.add_argument("--family-justification", dest="family_justification")
     source_set.set_defaults(handler=cmd_source_set)
 
     find = subparsers.add_parser("find", help="verbatim windows from the cache")

@@ -33,6 +33,10 @@ FIDELITY_NOTES_SCHEMA = ROOT / "references" / "rewild-fidelity-notes.schema.json
 #: and attribution drift (Fidelity), wrong-region vocabulary (Region), and AI
 #: vocabulary. Every other section is style, which reports without blocking.
 HARD_WARNING_SECTIONS = ("Fidelity", "Region", "AI vocabulary")
+#: Default naturalness-checker subprocess budget. `run_check`/`run_gate` take a
+#: `timeout` keyword so a deadline-bound caller can shorten it (spec 6.11: `alx`
+#: passes 120 s).
+CHECKER_TIMEOUT_S = 300
 PROFILES = {
     "en": ("rewild", "en"),
     "zh-CN": ("rewild-zh", "zh"),
@@ -810,6 +814,21 @@ def _predicate_is_negated(clause, predicate, report_lang):
     return any(token in prefix for token in NEGATIONS[report_lang])
 
 
+def _mask_verification_note(text):
+    """Blank the machine-written Verification note before every tier.
+
+    `alx issue` writes that paragraph (spec §6.9); it is not the writer's
+    prose, so it is never counted for style, semantic fidelity, quantities or
+    quotation preservation.
+    """
+    try:
+        from .report_blocks import mask_verification_note
+    except ImportError:
+        from report_blocks import mask_verification_note
+
+    return mask_verification_note(text)
+
+
 def _checker_prose(text):
     """Return report-body prose for Rewild, preserving Markdown table cells."""
     try:
@@ -1434,7 +1453,7 @@ def _checker_path(report_lang):
     )
 
 
-def _run_rewild_checker(report_text, source_text, report_lang):
+def _run_rewild_checker(report_text, source_text, report_lang, timeout=CHECKER_TIMEOUT_S):
     """Run the bundled checker on masked prose; return (result, errors)."""
     _, checker_lang = PROFILES[report_lang]
     report_prose = _style_prose(report_text)
@@ -1466,10 +1485,10 @@ def _run_rewild_checker(report_text, source_text, report_lang):
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=300,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            return None, ["Rewild checker timed out after 300 seconds."]
+            return None, [f"Rewild checker timed out after {timeout} seconds."]
     try:
         result = _checker_result(completed.stdout)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -1593,7 +1612,9 @@ def _checker_warning_family(section):
     return "rewild/region"
 
 
-def run_check(report_path, source_path, *, lang, review_note_path=None):
+def run_check(
+    report_path, source_path, *, lang, review_note_path=None, timeout=CHECKER_TIMEOUT_S
+):
     """Return every tier as findings and write nothing.
 
     Unlike :func:`run_gate` this never returns early. A missing review note
@@ -1642,7 +1663,7 @@ def run_check(report_path, source_path, *, lang, review_note_path=None):
         )
     if len(texts) < 2:
         return findings
-    report_text = texts["report"]
+    report_text = _mask_verification_note(texts["report"])
     source_text = texts["pre-Rewild source"]
 
     findings.extend(_integrity_findings(report_text, source_text))
@@ -1656,7 +1677,9 @@ def run_check(report_path, source_path, *, lang, review_note_path=None):
         _finding("rewild/length", message, fix="alx check")
         for message in _length_errors(report_text, lang)
     )
-    result, checker_errors = _run_rewild_checker(report_text, source_text, lang)
+    result, checker_errors = _run_rewild_checker(
+        report_text, source_text, lang, timeout
+    )
     findings.extend(
         _finding("rewild/checker", message, fix="alx check")
         for message in checker_errors
@@ -1703,6 +1726,7 @@ def run_gate(
     waiver_path=None,
     fidelity_notes_path=None,
     force=False,
+    timeout=CHECKER_TIMEOUT_S,
 ):
     """Return errors; write a receipt only after the exact report passes."""
     report_path = Path(report_path).resolve()
@@ -1754,7 +1778,7 @@ def run_gate(
             errors.append(f"{label} file must be UTF-8 text: {exc}")
     if errors:
         return errors
-    report_text = texts["report"]
+    report_text = _mask_verification_note(texts["report"])
     source_text = texts["pre-Rewild source"]
     # Integrity first: corrupted prose is not a style judgment, and every
     # later tier would be measuring mangled text.
@@ -1844,7 +1868,7 @@ def run_gate(
     checker = _checker_path(report_lang)
     checker_lang = PROFILES[report_lang][1]
     result, checker_errors = _run_rewild_checker(
-        report_text, source_text, report_lang
+        report_text, source_text, report_lang, timeout
     )
     if checker_errors:
         return checker_errors

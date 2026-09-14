@@ -56,12 +56,24 @@ class RepositoryContractTests(unittest.TestCase):
     def test_readmes_explain_the_name_unlimited_scope_and_pdf_output(self):
         required_phrases = {
             "README.md": (
+                "亚历山大图书馆",
+                "全世界的知识",
+                "任何主题",
+                "没有固定的选题限制",
+                "专业制作",
+                "紧跟在相关事实后的引用",
+                "alx",
+                "60 分钟",
+            ),
+            "README.en.md": (
                 "Library of Alexandria",
                 "the world's knowledge",
                 "anything",
                 "no fixed subject limits",
                 "professionally produced PDF",
                 "citations beside the claims",
+                "alx",
+                "60-minute",
             ),
             "README.zh-CN.md": (
                 "亚历山大图书馆",
@@ -70,6 +82,8 @@ class RepositoryContractTests(unittest.TestCase):
                 "没有固定的选题限制",
                 "专业制作",
                 "紧跟在相关事实后的引用",
+                "alx",
+                "60 分钟",
             ),
             "README.zh-HK.md": (
                 "亞歷山大圖書館",
@@ -78,6 +92,8 @@ class RepositoryContractTests(unittest.TestCase):
                 "沒有固定的選題限制",
                 "專業製作",
                 "緊貼相關事實的引用",
+                "alx",
+                "60 分鐘",
             ),
         }
         for filename, phrases in required_phrases.items():
@@ -104,6 +120,8 @@ class RepositoryContractTests(unittest.TestCase):
 
     def test_skill_is_progressively_disclosed_and_runtime_neutral(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        body = skill.split("---", 2)[2]
+        self.assertLessEqual(len(body.splitlines()), 150)
         self.assertLess(len(skill.split()), 3000)
         for legacy_token in (
             "AskUserQuestion",
@@ -117,6 +135,16 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertNotIn(legacy_token, skill)
         self.assertNotIn("python3 scripts/", skill)
         self.assertNotIn(".venv/bin/", skill)
+        self.assertIn(
+            '"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py"',
+            skill,
+        )
+        self.assertIn("nothing ships that failed a fabrication check; under time pressure drop it", skill)
+        self.assertIn(
+            "never edit `report.md` after `snapshot` except through the humanize step and review-driven fixes",
+            skill,
+        )
+        self.assertIn("when remaining ≤ 15 min stop fixing and run `alx issue --deliver`", skill)
 
     def test_pdf_commands_resolve_bundled_paths_from_skill_root(self):
         production = (ROOT / "references" / "pdf-production.md").read_text(
@@ -163,9 +191,8 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertIn("Rewild hard gate", skill)
         self.assertIn("Every report must pass", skill)
-        self.assertIn("Do not proceed to Step 7", skill)
-        self.assertIn("scripts/rewild_gate.py", skill)
-        self.assertIn("--rewild-receipt", skill)
+        self.assertIn("scripts/alx.py", skill)
+        self.assertIn("review start rewild", skill)
         self.assertNotIn(
             "If the user explicitly asks to remove AI-like writing", skill
         )
@@ -216,10 +243,9 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertTrue(quality.is_file())
         self.assertTrue(schema_path.is_file())
         self.assertIn("content quality hard gate", skill.casefold())
-        self.assertIn("scripts/content_gate.py", skill)
-        self.assertIn("--content-receipt", skill)
-        self.assertIn("scripts/source_fidelity.py", skill)
-        self.assertIn("--source-fidelity-receipt", skill)
+        self.assertIn("scripts/alx.py", skill)
+        self.assertIn("review start content", skill)
+        self.assertIn("`alx issue --deliver`", skill)
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
         self.assertIn("tests/ci_render_matrix.py", workflow)
@@ -284,6 +310,27 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(1, schema["properties"]["coverage"]["minItems"])
         self.assertEqual(1, schema["properties"]["sources"]["minItems"])
         self.assertEqual(1, schema["properties"]["claims"]["minItems"])
+
+    def test_references_match_spec_thresholds_and_alx_lifecycle(self):
+        recording = (ROOT / "references" / "evidence-recording.md").read_text(
+            encoding="utf-8"
+        )
+        protocol = (ROOT / "references" / "research-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        rewild = (ROOT / "references" / "rewild-gate.md").read_text(encoding="utf-8")
+        quality = (ROOT / "references" / "content-quality.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("at least 10 characters", recording)
+        self.assertNotIn("at least 40 characters from each claim-bearing", recording)
+        self.assertIn("CJK minimum 20", protocol)
+        self.assertIn("weighted-source-evidence-v2", protocol)
+        self.assertNotIn("--allow-unverified", protocol)
+        self.assertIn("alx snapshot", rewild)
+        self.assertIn("alx review start rewild", rewild)
+        self.assertIn("alx review start content", quality)
+        self.assertIn("alx issue", quality)
 
 
 if __name__ == "__main__":

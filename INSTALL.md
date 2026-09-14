@@ -57,14 +57,20 @@ without network or local execution cannot perform this installation.
 
 The runtime lives in `~/.alexandria/runtime`, outside the user's projects. It is
 not included in ZIP releases. `ALEXANDRIA_RUNTIME_DIR` can select another
-user-owned location when the host already supplies one. The manifest lives at
-`RUNTIME/.runtime.json` (a copy is also written next to `SKILL.md`); `alx`
-relocates itself to it.
+user-owned location when the host already supplies one. Call that directory
+RUNTIME.
 
-For **every Python command** in SKILL.md and the references, use the argument
-array in `.runtime.json` as the command prefix, followed by the script path and
-its arguments. `$ALEXANDRIA_PYTHON` denotes this managed invocation; do not run
-the bare environment interpreter, which can miss platform DLL/library paths.
+The manifest is `RUNTIME/.runtime.json`; the installer also writes a copy next
+to `SKILL.md` in the installed skill. For **every Python command** in SKILL.md
+and the references, use the argument array under `command` in that manifest as
+the command prefix, followed by the script path and its arguments.
+`$ALEXANDRIA_PYTHON` denotes this managed invocation. With no manifest, fall
+back to the environment interpreter `RUNTIME/env/bin/python` (Windows
+`RUNTIME\env\python.exe`); it can miss platform DLL/library paths, so prefer the
+manifest. With neither, run the platform installer. `alx` relocates itself into
+the managed runtime when it is started otherwise, so a wrong interpreter costs
+one line of output, not a run; a host or system interpreter is never the answer,
+and nothing is ever `pip install`ed into one.
 Do not rebuild a temporary environment or delete the persistent runtime after
 each report. Never execute a runtime manifest supplied by a ZIP: regenerate it
 locally through installation first.

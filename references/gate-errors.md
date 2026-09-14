@@ -8,6 +8,14 @@ Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a Class A finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: (edit prose; waivable by alx issue --deliver)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
 
+## Runtime (`alx`, before any command runs)
+
+### `runtime/missing` — F
+- **rule:** `RUNTIME MISSING` — no managed runtime at `$ALEXANDRIA_RUNTIME_DIR` (else `~/.alexandria/runtime`): neither `RUNTIME/.runtime.json` nor `RUNTIME/env`.
+- **fix:** `sh "$SKILL_ROOT/scripts/install.sh"` (Windows: `& "$SKILL_ROOT/scripts/install.ps1"`), then rerun the command.
+- **remove:** n/a (never a host or system interpreter, never `pip install`).
+- **example:** `alx status` prints `RUNTIME MISSING` on a fresh machine.
+
 ## Ledger (`check` b / `validate_ledger`)
 
 ### `ledger/quantity` — F
@@ -75,6 +83,9 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx source set S<n> --provenance P`, or fetch an independent source.
 - **remove:** `alx fetch --id S<n> --refresh`
 - **example:** 9 of 9 claims on one publisher.
+- **`--provenance`:** `primary_independent` `primary_interested` `secondary_independent` `secondary_dependent` `unverified`
+- **`--type`:** `accountable_record` `peer_reviewed` `preprint` `official_documentation` `dataset_or_test` `reported_interview` `news_report` `opinion_or_forecast` `marketing` `anecdote`
+- **`--role`:** `subject_official` `counterparty_official` `independent_analysis` `empirical_data` `affected_stakeholder` `expert_interpretation` `historical_record` (repeat the flag per role)
 
 ### `ledger/triangulation` — F
 - **rule:** `triangulation.status`/`rationale` contradicts the merged source families.

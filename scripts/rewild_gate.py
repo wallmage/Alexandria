@@ -1727,6 +1727,7 @@ def run_gate(
     fidelity_notes_path=None,
     force=False,
     timeout=CHECKER_TIMEOUT_S,
+    snapshot_sha256=None,
 ):
     """Return errors; write a receipt only after the exact report passes."""
     report_path = Path(report_path).resolve()
@@ -1917,6 +1918,9 @@ def run_gate(
         "report_sha256": file_sha256(report_path),
         "source_path": str(source_path),
         "source_sha256": file_sha256(source_path),
+        # Ruling R11: `source` may be the effective snapshot (the original
+        # minus mechanically dropped paragraphs); record what it came from.
+        "snapshot_sha256": snapshot_sha256 or file_sha256(source_path),
         "checker_path": str(checker),
         "checker_sha256": file_sha256(checker),
         "review_note_path": str(review_note_path),

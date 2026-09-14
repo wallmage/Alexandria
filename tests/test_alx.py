@@ -2539,5 +2539,163 @@ class RemedyTests(AlxTestCase):
                 parser.parse_args(shlex.split(text.strip())[1:])
 
 
+class RewildEffectiveSnapshotTests(AlxTestCase):
+    """Ruling R11: the Rewild receipt is taken against the EFFECTIVE snapshot.
+
+    `claim drop --apply` deletions are mechanical (spec §6.8), so a quotation
+    that only ever lived in a dropped paragraph is not a lost quotation. A
+    quotation lost from a surviving paragraph still is.
+    """
+
+    QUOTE = "\u300c\u767b\u8a18\u518a\u8a18\u9304\u300d"
+
+    def prepared_with_quote(self):
+        """bootstrap + a quotation inside C2's paragraph, snapshotted."""
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        path = self.dir / "report.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "as the [registry note]",
+                f"as {self.QUOTE} in the [registry note]",
+            ),
+            encoding="utf-8",
+        )
+        self.run_in("snapshot")
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        for name in ("dir", "root", "run_alx", "run_in", "state", "ledger"):
+            setattr(reviews, name, getattr(self, name))
+        reviews.finish_reviews()
+
+    def quotation_gate(self, stack, seen):
+        """Replace the Rewild gate with its real quotation tier only."""
+        def gate(report_path, source_path, **kwargs):
+            seen["source"] = Path(source_path)
+            lost = alx.rewild_gate._quotation_findings(
+                Path(source_path).read_text(encoding="utf-8"),
+                Path(report_path).read_text(encoding="utf-8"),
+            )
+            if lost:
+                return [item.message for item in lost]
+            Path(kwargs["receipt_path"]).write_text(
+                json.dumps(
+                    {
+                        "status": "passed",
+                        "report_sha256": alx.file_sha256(self.dir / "report.md"),
+                        "ledger_sha256": alx.file_sha256(self.dir / "ledger.json"),
+                        "source_sha256": alx.file_sha256(source_path),
+                        "snapshot_sha256": kwargs.get("snapshot_sha256"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return []
+
+        stack.enter_context(
+            mock.patch.object(alx.rewild_gate, "run_gate", side_effect=gate)
+        )
+
+    def test_a_dropped_paragraph_s_quotation_does_not_refuse_the_receipt(self):
+        from contextlib import ExitStack
+
+        self.prepared_with_quote()
+        code, out = self.run_in("claim", "drop", "C2", "--apply")
+        self.assertEqual(0, code, out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertNotIn(self.QUOTE, report)
+        snapshot = self.dir / "report.pre-rewild.md"
+        self.assertIn(self.QUOTE, snapshot.read_text(encoding="utf-8"))
+        seen = {}
+        with ExitStack() as stack:
+            issues = IssueTests("test_issue_writes_receipts_and_verification_note")
+            issues.dir = self.dir
+            issues.stub_gates(stack, rewild=False)
+            self.quotation_gate(stack, seen)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertEqual("snapshot.effective.md", seen["source"].name)
+        self.assertNotIn(self.QUOTE, seen["source"].read_text(encoding="utf-8"))
+        receipt = json.loads(
+            (self.dir / "receipts" / "rewild.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(alx.file_sha256(seen["source"]), receipt["source_sha256"])
+        self.assertEqual(alx.file_sha256(snapshot), receipt["snapshot_sha256"])
+        note = json.loads(
+            (self.dir / "reviews" / "rewild.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(alx.file_sha256(seen["source"]), note["source_sha256"])
+
+    def test_a_quotation_lost_from_a_surviving_paragraph_still_refuses(self):
+        from contextlib import ExitStack
+
+        self.prepared_with_quote()
+        code, out = self.run_in("claim", "drop", "C2", "--apply")
+        self.assertEqual(0, code, out)
+        path = self.dir / "report.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "\u300c\u539f\u59cb\u65e5\u8a18\u300d", "the original diaries"
+            ),
+            encoding="utf-8",
+        )
+        seen = {}
+        with ExitStack() as stack:
+            issues = IssueTests("test_issue_writes_receipts_and_verification_note")
+            issues.dir = self.dir
+            issues.stub_gates(stack, rewild=False)
+            self.quotation_gate(stack, seen)
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn("quotation-lost", out)
+        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+
+
+class ParkedReviewNoteTests(AlxTestCase):
+    """Item 4 leftovers: every invalid note path is named, nothing is guessed."""
+
+    def test_finish_names_the_empty_claim_support_note(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("review", "start", "content")
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(1, code)
+        self.assertIn("claim_support[C1].note", out)
+
+    def test_an_unbound_claim_is_prefilled_null_and_named_by_finish(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        path = self.dir / "report.md"
+        text = path.read_text(encoding="utf-8")
+        bound = [
+            block
+            for block in text.split("\n\n")
+            if "[registry note]" in block
+        ]
+        self.assertEqual(1, len(bound), text)
+        path.write_text(text.replace(bound[0] + "\n\n", ""), encoding="utf-8")
+        self.run_in("review", "start", "content")
+        note = json.loads(
+            (self.dir / "reviews" / "content.json").read_text(encoding="utf-8")
+        )
+        entries = {entry["claim_id"]: entry["paragraph"] for entry in note["claim_support"]}
+        self.assertIsNone(entries["C2"])
+        _code, out = self.run_in("review", "finish", "content")
+        self.assertIn("claim_support.1.paragraph", out)
+
+    def test_review_start_prints_the_rewild_guide(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("snapshot")
+        code, out = self.run_in("review", "start", "rewild")
+        self.assertEqual(0, code, out)
+        self.assertIn("Fill reviews/rewild.json", out)
+        self.assertIn("fidelity_checks.<key>: true | false; all must be true", out)
+        for name in sorted(alx.rewild_gate.REQUIRED_FIDELITY_CHECKS):
+            with self.subTest(check=name):
+                self.assertIn(name, out)
+        self.assertIn("disposition resolved|rejected", out)
+        self.assertIn("alx review finish rewild", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2280,18 +2280,32 @@ def _note_completeness(ws, state, ledger, kind):
                 f"findings[{index}].report_disclosure_excerpt (not in report.md)"
             )
     # Spec §6.7(f): one disposition per retained claim->paragraph mapping.
-    dispositions = {
-        entry.get("claim_id"): entry.get("disposition")
+    entries = {
+        entry.get("claim_id"): entry
         for entry in note.get("claim_support") or []
         if isinstance(entry, dict)
     }
     mapping, _unused = paragraph_mapping(ws, state, ledger, ws.report_text())
     for claim_id in sorted(mapping):
-        if not dispositions.get(claim_id):
+        entry = entries.get(claim_id) or {}
+        if not entry.get("disposition"):
             missing.append(
                 f"claim_support[{claim_id}].disposition "
                 "(supported | qualified | removed)"
             )
+        if not str(entry.get("note") or "").strip():
+            missing.append(
+                f"claim_support[{claim_id}].note "
+                "(why the paragraph is supported by this claim)"
+            )
+    # The note must also satisfy the schema `content_gate` enforces, or
+    # `finish` would exit 0 on a note the gate then rejects.
+    missing.extend(
+        f"{error} (content-review schema)"
+        for error in validate_ledger.validate_schema(
+            note, _read_json(content_gate.CONTENT_REVIEW_SCHEMA)
+        )
+    )
     return missing
 
 
@@ -2751,17 +2765,18 @@ def _note_instructions(kind):
 
 def _claim_support_skeleton(ws, state, ledger):
     """One entry per retained `include_in_report` claim (item 4)."""
-    mapping, unbound = paragraph_mapping(ws, state, ledger, ws.report_text())
+    mapping, _unbound = paragraph_mapping(ws, state, ledger, ws.report_text())
     entries = []
     for claim in ledger.get("claims", []):
         if claim.get("include_in_report") is not True:
             continue
         claim_id = claim.get("claim_id", "")
-        candidates = unbound.get(claim_id) or []
         entries.append(
             {
                 "claim_id": claim_id,
-                "paragraph": mapping.get(claim_id) or (candidates[0] if candidates else 1),
+                # An unbound claim gets `null`, never a guessed paragraph: a
+                # prefilled number is a binding the reviewer never made.
+                "paragraph": mapping.get(claim_id),
                 "disposition": "",
                 "note": "",
             }
@@ -3123,7 +3138,12 @@ def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
 
 def _receipt_phase(ws, state, ledger, lines, delivery_notes):
     """Step 4 receipts; the rule tiers were already classified by `check`."""
-    snapshot = ws.latest_snapshot()
+    # Ruling R11: the gate compares against the EFFECTIVE snapshot (the
+    # snapshot minus the paragraphs `claim drop --apply` deleted), exactly as
+    # check does. Those deletions are mechanical per spec 6.8, so a quotation
+    # that only lived in a dropped paragraph is not a lost quotation.
+    original = ws.latest_snapshot()
+    snapshot = _effective_snapshot(ws, state)
     receipts = {}
     for kind in REVIEW_KINDS:
         note_path = ws.reviews / f"{kind}.json"
@@ -3150,6 +3170,7 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         receipt_path=rewild_receipt,
         force=True,
         timeout=REWILD_CHECKER_TIMEOUT_SECONDS,
+        snapshot_sha256=file_sha256(original) if original is not None else None,
     )
     if errors:
         blocking.extend(_refused_receipt(_rewild_findings(ws, state)))

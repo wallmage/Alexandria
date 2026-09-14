@@ -3452,6 +3452,37 @@ def _offline_probe_findings(ledger, cache_dir):
     return findings
 
 
+#: Keys `references/evidence-ledger.schema.json` requires on every claim that a
+#: claim-input object never supplies. `expand_claim_input` fills them so its
+#: result validates against the ledger schema (pinned contract: claim-input ->
+#: full v4 claim).
+CLAIM_DEFAULTS = {
+    "as_of": None,
+    "confidence": "medium",
+    "status": "supported",
+    "supports": [],
+    "contradicts": [],
+    "person_ids": [],
+    "human_harm_review": None,
+    "reasoning": None,
+    "decision_relevance": None,
+    "what_would_change": None,
+    "resolution": None,
+    "limitations": None,
+    "verified_at": None,
+}
+
+
+def _triangulation_rationale(families):
+    if len(families) >= 2:
+        return "Independent source families carry this claim: " + ", ".join(families) + "."
+    return (
+        "Only one source family carries this claim: "
+        + (families[0] if families else "none")
+        + "."
+    )
+
+
 def expand_claim_input(item, ledger, *, cache_meta):
     evidence = item.get("source_evidence") if isinstance(item.get("source_evidence"), list) else []
     source_ids = list(
@@ -3480,14 +3511,26 @@ def expand_claim_input(item, ledger, *, cache_meta):
                 fetched = meta["fetched_at"]
                 break
     claim = dict(item)
+    claim.pop("report_paragraph", None)
     claim["source_ids"] = source_ids
     claim["include_in_report"] = True
     claim["report_excerpts"] = []
     claim["triangulation"] = {
         "status": "met" if len(families) >= 2 else "limited",
+        "rationale": _triangulation_rationale(sorted(families)),
     }
     if fetched:
         claim["verified_at"] = fetched
+    for key, value in CLAIM_DEFAULTS.items():
+        claim.setdefault(key, value)
+    if isinstance(claim.get("verified_at"), str):
+        claim["verified_at"] = claim["verified_at"][:10]
+    if claim.get("as_of") is None:
+        # The cache stamp is UTC and `report_date` is local, so preferring
+        # verified_at keeps `verified_at >= as_of` across a date rollover.
+        claim["as_of"] = claim.get("verified_at") or ledger.get("report_date")
+    if evidence and not claim.get("extract_or_location"):
+        claim["extract_or_location"] = evidence[0].get("extract_or_location", "")
     return claim
 
 

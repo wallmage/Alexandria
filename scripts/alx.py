@@ -135,64 +135,53 @@ REMEDY_TEMPLATES = {
     "delete-paragraph": "delete paragraph {paragraph} of report.md",
 }
 
-#: Class A families (spec §6.10, orchestrator ruling on the class tables); every
-#: other hard family defaults to Class F. `integrity/length` is split by
-#: severity: below the floor it arrives as a warning (Class A), above the
-#: ceiling it is hard and therefore Class F with a `delete paragraph` remedy.
+#: Class A families for the findings `alx` itself emits (spec §6.10); every
+#: other hard family of its own defaults to Class F. Findings produced by
+#: another module carry their own `klass` and are never re-classed here.
+#: `integrity/length` is split by severity: below the floor it arrives as a
+#: warning (Class A), above the ceiling it is hard and therefore Class F with a
+#: `delete paragraph` remedy.
 CLASS_A_FAMILIES = frozenset(
     {
         "tooling/receipt",
         "tooling/render",
-        "review/rewild-missing",
-        "review/rewild-stale",
+        "review/rewild",
         "rewild/humanization",
-        "rewild/style",
-        "rewild/ai-vocabulary",
+        "rewild/checker",
         "integrity/structure",
         "integrity/date-line",
         "binding/sources-section",
     }
 )
 
+#: The families `alx` emits itself; everything else it prints comes from the
+#: gate modules below and keeps that module's family name and class.
+OWN_FAMILIES = (
+    "binding/excerpt-missing",
+    "binding/leftover-prose",
+    "fidelity/cache-detached",
+    "fidelity/undecodable",
+    "fidelity/unreachable",
+    "integrity/encoding",
+    "review/content-missing",
+    "review/content-stale",
+    "review/rewild",
+    "rewild/humanization",
+    "tooling/receipt",
+    "tooling/render",
+)
+
 #: Every finding family `alx` can print, from itself and from T1-T4 (ruling R6:
-#: the parse test walks this registry so no remedy escapes D14).
-FAMILIES = (
-    tuple(sorted(validate_ledger.FAMILIES))
-    + tuple(sorted(source_fidelity.FAMILIES))
-    + (
-        "binding/claim-paragraph",
-        "binding/excerpt-missing",
-        "binding/leftover-prose",
-        "binding/link-not-in-ledger",
-        "binding/sources-section",
-        "content/check",
-        "content/claim-binding",
-        "content/claim-support",
-        "content/critical-finding",
-        "content/disclosure",
-        "content/language",
-        "content/score",
-        "fidelity/cache-detached",
-        "fidelity/undecodable",
-        "fidelity/unreachable",
-        "integrity/control-chars",
-        "integrity/date-line",
-        "integrity/encoding",
-        "integrity/length",
-        "integrity/quotation-lost",
-        "integrity/replacement-char",
-        "integrity/structure",
-        "review/content-missing",
-        "review/content-stale",
-        "review/rewild-missing",
-        "review/rewild-stale",
-        "rewild/ai-vocabulary",
-        "rewild/fidelity",
-        "rewild/humanization",
-        "rewild/region",
-        "rewild/style",
-        "tooling/receipt",
-        "tooling/render",
+#: the parse test walks this registry so no remedy escapes D14). One name set:
+#: each producing module owns the spelling of its own families.
+FAMILIES = tuple(
+    sorted(
+        set(validate_ledger.FAMILIES)
+        | set(source_fidelity.FAMILIES)
+        | set(rewild_gate.FAMILIES)
+        | set(content_gate.FAMILIES)
+        | set(validate_report.FAMILIES)
+        | set(OWN_FAMILIES)
     )
 )
 
@@ -206,10 +195,11 @@ ONLINE_CLASS_A_FAMILIES = frozenset(
     }
 )
 
-#: Spec §6.11 network budget. The rewild checker (300 s, rewild_gate) and the
-#: rasterizer (90 s, render_pdf_pages.SUBPROCESS_TIMEOUT_S) own theirs; neither
-#: `run_gate`, `render_pdf` nor `render_pages` accepts a timeout argument.
+#: Spec §6.11 subprocess budgets. The rasterizer keeps its own 90 s
+#: (`render_pdf_pages.SUBPROCESS_TIMEOUT_S`, used by `render_pages`); md_to_pdf
+#: runs no subprocess.
 FETCH_TIMEOUT_SECONDS = 10
+REWILD_CHECKER_TIMEOUT_SECONDS = 120
 RESERVE_MINUTES = 8
 FETCH_STOP_MINUTES = 20
 DEGRADE_MINUTES = 15
@@ -302,7 +292,9 @@ def _remedies(item, *, paragraphs=0):
         "integrity/replacement-char",
         "integrity/quotation-lost",
         "integrity/encoding",
-        "rewild/fidelity",
+        "fidelity/quotation-lost",
+        "fidelity/rewild",
+        "fidelity/semantic",
         "rewild/region",
     }:
         return restore, restore
@@ -414,14 +406,23 @@ def _remedies(item, *, paragraphs=0):
     return remedy("check-fix"), _drop_or_refresh(item)
 
 
-def is_finding(item):
-    """T1/T2 load `gate_severity` twice (top-level and as `scripts.`), so the
-    dataclass identity differs between modules; match on shape instead."""
-    return hasattr(item, "family") and hasattr(item, "severity")
+is_finding = gate_severity.is_finding
+
+
+def adopted_class(item, *, online=False):
+    """The producing module's class wins (spec §6.10); `alx` only fills gaps."""
+    if item.severity == "warn":
+        return "A"
+    if online and item.family in ONLINE_CLASS_A_FAMILIES:
+        return "A"
+    klass = getattr(item, "klass", "")
+    if klass in {"F", "A"}:
+        return klass
+    return finding_class(item.family, item.severity)
 
 
 def adopt(findings, *, online=False, paragraphs=0):
-    """Re-class every finding and rewrite its remedies through the registry."""
+    """Rewrite every finding's remedies through the registry, class intact."""
     adopted = []
     seen = set()
     for item in findings:
@@ -441,7 +442,7 @@ def adopt(findings, *, online=False, paragraphs=0):
             Finding(
                 family=item.family,
                 severity=item.severity,
-                klass=finding_class(item.family, item.severity, online=online),
+                klass=adopted_class(item, online=online),
                 ids=list(item.ids or []),
                 message=item.message,
                 fix=fix,
@@ -1158,30 +1159,6 @@ CLAIM_ADD_FAMILIES = frozenset(
     }
 )
 
-#: Ledger-schema claim fields that `references/claim-input.schema.json` does not
-#: list while `additionalProperties: false` rejects them. `alx` carries them
-#: around the claim-input validator and re-attaches them after expansion.
-CLAIM_INPUT_PASSTHROUGH = ("decision_relevance", "named_subjects")
-
-#: Ledger-schema keys a v4 claim must carry that `claim-input` never supplies.
-CLAIM_DEFAULTS = {
-    "as_of": None,
-    "confidence": "medium",
-    "status": "supported",
-    "supports": [],
-    "contradicts": [],
-    "person_ids": [],
-    "human_harm_review": None,
-    "reasoning": None,
-    "decision_relevance": None,
-    "what_would_change": None,
-    "resolution": None,
-    "limitations": None,
-    "verified_at": None,
-}
-
-
-
 def _batch_findings(ws, ledger, item, seen_ids):
     """Only what `alx` owns: batch uniqueness and cache presence (spec §6.4)."""
     findings = []
@@ -1218,17 +1195,12 @@ def _batch_findings(ws, ledger, item, seen_ids):
     return findings
 
 
-def claim_input_body(item):
-    """The claim-input object minus the fields its schema does not declare."""
-    return {
-        key: value
-        for key, value in item.items()
-        if key not in CLAIM_INPUT_PASSTHROUGH
-    }
-
-
 def expand_claim_input(ws, item, ledger):
-    """`validate_ledger.expand_claim_input` plus the ledger-schema defaults."""
+    """`validate_ledger.expand_claim_input` with this workspace's cache meta.
+
+    T2 owns the ledger-schema defaults (ruling: one place owns them); `alx`
+    only supplies the cache metadata the expansion reads.
+    """
     source_ids = []
     for record in item.get("source_evidence") or []:
         source_id = record.get("source_id")
@@ -1239,42 +1211,7 @@ def expand_claim_input(ws, item, ledger):
         entry = cached(ws, source_id)
         if entry is not None:
             cache_meta[source_id] = entry[1]
-    claim = validate_ledger.expand_claim_input(
-        claim_input_body(item), ledger, cache_meta=cache_meta
-    )
-    claim.pop("report_paragraph", None)  # ruling R4: bindings live in state.json
-    for key in CLAIM_INPUT_PASSTHROUGH:
-        if key in item:
-            claim[key] = item[key]
-    for key, value in CLAIM_DEFAULTS.items():
-        claim.setdefault(key, value)
-    if isinstance(claim.get("verified_at"), str):
-        claim["verified_at"] = claim["verified_at"][:10]
-    if claim.get("as_of") is None:
-        # The cache stamp is UTC and `report_date` is local, so preferring
-        # verified_at keeps `verified_at >= as_of` across a date rollover.
-        claim["as_of"] = claim.get("verified_at") or ledger.get("report_date")
-    evidence = claim.get("source_evidence") or []
-    if evidence and not claim.get("extract_or_location"):
-        claim["extract_or_location"] = evidence[0].get("extract_or_location", "")
-    triangulation = claim.get("triangulation") or {}
-    if not triangulation.get("rationale"):
-        families = sorted(
-            {
-                source.get("source_family", "")
-                for source in ledger.get("sources", [])
-                if source.get("source_id") in source_ids and source.get("source_family")
-            }
-        )
-        triangulation["rationale"] = (
-            "Independent source families carry this claim: " + ", ".join(families) + "."
-            if len(families) >= 2
-            else "Only one source family carries this claim: "
-            + (families[0] if families else "none")
-            + "."
-        )
-        claim["triangulation"] = triangulation
-    return claim
+    return validate_ledger.expand_claim_input(item, ledger, cache_meta=cache_meta)
 
 
 def cmd_claim_add(args):
@@ -1294,7 +1231,7 @@ def cmd_claim_add(args):
             + [
                 item_finding
                 for item_finding in validate_ledger.claim_findings(
-                    claim_input_body(item), ledger, cache_dir=ws.sources
+                    item, ledger, cache_dir=ws.sources
                 )
                 if not is_finding(item_finding)
                 or item_finding.family in CLAIM_ADD_FAMILIES
@@ -1784,7 +1721,12 @@ def _fidelity_findings(ws, ledger):
 
 
 def _rewild_findings(ws, state):
-    """Section (e): the one seam T3 has not landed yet."""
+    """Section (e): the offline rewild tiers.
+
+    `review_note_path` stays `None`: the note's hashes are stamped by `issue`
+    (step 4), so before then they never match the working report. The note's
+    freshness is judged by alx's own mechanical-delta rule in section (f).
+    """
     snapshot = ws.latest_snapshot()
     if snapshot is None:
         return []
@@ -1792,18 +1734,18 @@ def _rewild_findings(ws, state):
     if run_check is None:
         return [
             finding(
-                "review/rewild-missing",
+                "rewild/checker",
                 "rewild evaluator unavailable: `rewild_gate.run_check` is missing, "
                 "so section (e) did not run.",
             )
         ]
-    note = ws.reviews / "rewild.json"
     return list(
         run_check(
             ws.report,
             snapshot,
             lang=state.get("lang", "en"),
-            review_note_path=note if note.exists() else None,
+            review_note_path=None,
+            timeout=REWILD_CHECKER_TIMEOUT_SECONDS,
         )
     )
 
@@ -1942,12 +1884,18 @@ def _mechanical_ledger(ledger, state):
     return json.dumps(stripped, ensure_ascii=False, sort_keys=True)
 
 
+def _review_family(kind, suffix):
+    """One name set: `rewild_gate` owns `review/rewild`; `alx` owns content."""
+    return "review/rewild" if kind == "rewild" else f"review/{kind}-{suffix}"
+
+
 def freshness_findings(ws, state, ledger, kind):
     """Spec §6.8: current inputs must equal the reviewed copy up to mechanics."""
     record = state.get("reviews", {}).get(kind, {})
-    family = f"review/{kind}"
     if not record.get("finished"):
-        return [finding(f"review/{kind}-missing", f"the {kind} review is missing.")]
+        return [
+            finding(_review_family(kind, "missing"), f"the {kind} review is missing.")
+        ]
     reviewed = ws.review_dir(kind, record["iteration"])
     current = _paragraph_set(ws.report_text(), state)
     previous = _paragraph_set(
@@ -1964,7 +1912,7 @@ def freshness_findings(ws, state, ledger, kind):
     if changed or removed:
         findings.append(
             finding(
-                f"{family}-stale",
+                _review_family(kind, "stale"),
                 f"re-review required: {len(changed)} paragraph(s) added or changed and "
                 f"{len(removed)} removed since the {kind} review.",
             )
@@ -1976,7 +1924,7 @@ def freshness_findings(ws, state, ledger, kind):
         ):
             findings.append(
                 finding(
-                    f"{family}-stale",
+                    _review_family(kind, "stale"),
                     "re-review required: the ledger changed beyond accessed/"
                     "verified_at/report_excerpts since the content review.",
                 )
@@ -2001,7 +1949,7 @@ def _review_findings(ws, state, ledger):
         if record.get("finished") and note_missing:
             findings.append(
                 finding(
-                    f"review/{kind}-stale",
+                    _review_family(kind, "stale"),
                     f"the {kind} review note is incomplete: "
                     f"{', '.join(note_missing[:3])}.",
                 )
@@ -2382,11 +2330,6 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
     return adopt(findings, online=True), True
 
 
-#: T1 binds the source-fidelity receipt to the ledger alone (no report hash);
-#: T4's `--fast` hash check demands one from every receipt. Known seam defect.
-RECEIPT_ARTIFACT = "source-fidelity receipt does not record report_sha256"
-
-
 def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
     """Spec §6.9.4: validate_report `--fast --final-once`; never a second fetch."""
     if not {"rewild", "content"} <= set(receipts):
@@ -2414,7 +2357,7 @@ def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
     errors = [
         line.removeprefix("[FAIL] ")
         for line in captured.getvalue().splitlines()
-        if line.startswith("[FAIL] ") and RECEIPT_ARTIFACT not in line
+        if line.startswith("[FAIL] ")
     ]
     if errors:
         delivery_notes.append(
@@ -2429,6 +2372,10 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
     for kind in REVIEW_KINDS:
         note_path = ws.reviews / f"{kind}.json"
         if not note_path.exists():
+            continue
+        if freshness_findings(ws, state, ledger, kind):
+            # Spec §6.8: `issue` stamps the current hashes only when the
+            # freshness rule passes; a stale note must fail its gate instead.
             continue
         note = _read_json(note_path)
         note["report_sha256"] = file_sha256(ws.report)
@@ -2445,6 +2392,7 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         review_note_path=ws.reviews / "rewild.json",
         receipt_path=rewild_receipt,
         force=True,
+        timeout=REWILD_CHECKER_TIMEOUT_SECONDS,
     )
     if errors:
         delivery_notes.append(f"rewild receipt not issued: {errors[0]}")

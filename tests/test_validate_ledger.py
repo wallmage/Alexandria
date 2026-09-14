@@ -3352,6 +3352,62 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertIn("=== HARD", err.getvalue())
 
+    def test_expanded_key_claim_input_validates_against_the_ledger_schema(self):
+        """Pinned contract: claim-input -> full v4 claim (spec §6.4, §9)."""
+        data = valid_quality_ledger()
+        item = {
+            "claim_id": "C7",
+            "claim": "The registry logged 4,000 documents in March 2026.",
+            "kind": "fact",
+            "importance": "key",
+            "decision_relevance": "Sets the scale of the registry backlog.",
+            "what_would_change": "A corrected registry export.",
+            "source_evidence": [
+                {
+                    "source_id": "S1",
+                    "extract_or_location": (
+                        "The registry logged 4,000 documents in March 2026."
+                    ),
+                },
+                {
+                    "source_id": "S2",
+                    "extract_or_location": (
+                        "The registry logged 4,000 documents in March 2026."
+                    ),
+                },
+            ],
+        }
+        input_schema = json.loads(
+            (ROOT / "references" / "claim-input.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual([], validate_ledger.validate_schema(item, input_schema))
+        expanded = validate_ledger.expand_claim_input(item, data, cache_meta={})
+        schema = json.loads(
+            validate_ledger.DEFAULT_SCHEMA.read_text(encoding="utf-8")
+        )
+        claim_schema = dict(schema["$defs"]["claim"], **{"$defs": schema["$defs"]})
+        self.assertEqual([], validate_ledger.validate_schema(expanded, claim_schema))
+
+    def test_expand_claim_input_drops_the_report_paragraph_binding(self):
+        data = valid_quality_ledger()
+        item = {
+            "claim_id": "C8",
+            "claim": "Revenue increased by 12%.",
+            "kind": "fact",
+            "importance": "supporting",
+            "report_paragraph": 4,
+            "source_evidence": [
+                {
+                    "source_id": "S2",
+                    "extract_or_location": "Revenue increased by 12% last year.",
+                },
+            ],
+        }
+        expanded = validate_ledger.expand_claim_input(item, data, cache_meta={})
+        self.assertNotIn("report_paragraph", expanded)
+
     def test_expand_claim_input_and_claim_findings_do_not_short_circuit(self):
         data = valid_quality_ledger()
         item = {
@@ -3371,9 +3427,11 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         self.assertTrue(expanded["include_in_report"])
         self.assertEqual([], expanded["report_excerpts"])
         self.assertEqual("2026-07-28", expanded["verified_at"])
-        self.assertNotIn("status", expanded)
-        self.assertNotIn("confidence", expanded)
-        self.assertFalse((expanded.get("triangulation") or {}).get("rationale"))
+        # Pinned contract: claim-input -> full v4 claim. The expansion owns the
+        # ledger-schema defaults, so `alx` never has to fill them itself.
+        self.assertEqual("supported", expanded["status"])
+        self.assertEqual("medium", expanded["confidence"])
+        self.assertTrue((expanded.get("triangulation") or {}).get("rationale"))
         findings = validate_ledger.claim_findings(item, data)
         families = {item.family for item in findings}
         self.assertGreaterEqual(len(findings), 2)

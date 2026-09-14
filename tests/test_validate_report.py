@@ -890,6 +890,62 @@ Short.
         rewild_fn.assert_not_called()
         online.assert_not_called()
 
+    def test_fast_accepts_a_ledger_bound_source_fidelity_receipt(self):
+        """T1 binds that receipt to the ledger; the report hash lives in issue.json."""
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            report.write_text(GOOD_REPORT, encoding="utf-8")
+            ledger = work / "ledger.json"
+            ledger.write_text(
+                json.dumps(
+                    {
+                        "sources": [
+                            {"source_id": "S1", "url": "https://example.com/a"},
+                            {"source_id": "S2", "url": "https://example.org/b"},
+                        ],
+                        "claims": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rewild, content, fidelity = self._bound_receipts(work, report, ledger)
+            fidelity.write_text(
+                json.dumps(
+                    {
+                        "policy": "weighted-source-evidence-v2",
+                        "ledger_sha256": hashlib.sha256(
+                            ledger.read_bytes()
+                        ).hexdigest(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with (
+                redirect_stderr(stderr),
+                mock.patch.object(validate_report, "validate_rewild_receipt"),
+                mock.patch.object(
+                    validate_report, "validate_source_fidelity_receipt_online"
+                ),
+            ):
+                code = validate_report.main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--rewild-receipt",
+                        str(rewild),
+                        "--content-receipt",
+                        str(content),
+                        "--source-fidelity-receipt",
+                        str(fidelity),
+                        "--fast",
+                    ]
+                )
+        self.assertEqual(0, code, stderr.getvalue())
+        self.assertNotIn("report_sha256", stderr.getvalue())
+
     def test_fast_rejects_stale_receipt_hashes(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)

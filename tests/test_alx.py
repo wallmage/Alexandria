@@ -1044,7 +1044,7 @@ class IssueTests(AlxTestCase):
         reviews.run_in = self.run_in
         reviews.finish_reviews()
 
-    def stub_gates(self, stack, *, online=None):
+    def stub_gates(self, stack, *, online=None, rewild=True):
         calls = {"online": 0, "rewild": 0, "content": 0, "network": 0}
 
         def bound(payload):
@@ -1097,9 +1097,10 @@ class IssueTests(AlxTestCase):
                 side_effect=fake_online,
             )
         )
-        stack.enter_context(
-            mock.patch.object(alx.rewild_gate, "run_gate", side_effect=fake_rewild)
-        )
+        if rewild:
+            stack.enter_context(
+                mock.patch.object(alx.rewild_gate, "run_gate", side_effect=fake_rewild)
+            )
         stack.enter_context(
             mock.patch.object(
                 alx.content_gate, "run_content_gate", side_effect=fake_content
@@ -1142,6 +1143,61 @@ class IssueTests(AlxTestCase):
         self.assertLess(
             report.index(alx.VERIFICATION_NOTE_PREFIX["en"]), report.index("## Sources")
         )
+
+    def test_length_floor_is_class_a_and_only_deliver_issues(self):
+        """Spec §6.10: `rewild/length` is Class A, and `rewild_gate` owns the class."""
+        from contextlib import ExitStack
+
+        self.prepared()
+        _code, out = self.run_in("check")
+        self.assertIn("[rewild/length]", out)
+        # Class A: `rewild_gate` set it, so `issue` gets past step 1.
+        self.assertEqual(0, self.state()["last_check"]["class_f"])
+        with ExitStack() as stack:
+            self.stub_gates(stack, rewild=False)
+            code, out = self.run_in("issue")
+            self.assertEqual(1, code, out)
+            self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(any("minimum is" in note for note in notes["notes"]), notes)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
+
+    def test_issue_stamps_the_note_hashes_before_running_the_gates(self):
+        """Spec §6.8/§6.9 step 4: stamp, then gate; `check` never judges hashes."""
+        from contextlib import ExitStack
+
+        self.prepared()
+        # A mechanical delta (spec §6.8) moves the report off the reviewed hash
+        # without making either review stale.
+        code, out = self.run_in("claim", "drop", "C2", "--apply")
+        self.assertEqual(0, code, out)
+        for kind in ("rewild", "content"):
+            note = json.loads(
+                (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
+            )
+            self.assertNotEqual(
+                alx.file_sha256(self.dir / "report.md"), note.get("report_sha256")
+            )
+        # `check` section (e) passes review_note_path=None, so the hashes the
+        # note still carries are never a finding there.
+        _code, out = self.run_in("check")
+        self.assertNotIn("report_sha256", out)
+        self.assertNotIn("[review/rewild]", out)
+        with ExitStack() as stack:
+            self.stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        for kind in ("rewild", "content"):
+            note = json.loads(
+                (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                alx.file_sha256(self.dir / "report.md"), note["report_sha256"]
+            )
 
     def test_issue_refuses_class_f_without_deliver(self):
         from contextlib import ExitStack
@@ -1315,6 +1371,41 @@ class StatusTests(AlxTestCase):
         self.assertIn("snapshot", out)
         self.assertIn("Next:", out)
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
+
+
+#: SKILL.md placeholders -> a value `alx`'s parser accepts (spec D14).
+SKILL_PLACEHOLDERS = {
+    '"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py"': "",
+    '"$WORK/claims/C1.json"': "claims/C1.json",
+    '"$REPORT_LANG"': "en",
+    '"$SUBJECT_FILE"': "subject.md",
+    '"$PATCH"': "patch.json",
+    '"$WORK"': "DIR",
+    "URL": "https://example.org/study",
+    "KEYWORD": "1918",
+}
+
+
+class SkillRunbookTests(unittest.TestCase):
+    def test_every_alx_command_line_in_skill_md_parses(self):
+        """Spec D14: every printed command is one `alx`'s own parser accepts."""
+        parser = alx.build_parser()
+        text = (
+            Path(alx.__file__).resolve().parents[1] / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        lines = [
+            line.strip().strip("`")
+            for line in text.splitlines()
+            if "scripts/alx.py" in line
+        ]
+        self.assertGreaterEqual(len(lines), 10, "SKILL.md lost its command lines")
+        for line in lines:
+            command = line
+            for placeholder, value in SKILL_PLACEHOLDERS.items():
+                command = command.replace(placeholder, value)
+            with self.subTest(command=line):
+                self.assertNotIn("$", command)
+                parser.parse_args(shlex.split(command))
 
 
 class RemedyTests(AlxTestCase):

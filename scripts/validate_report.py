@@ -1235,13 +1235,22 @@ def _receipt_hash_errors(args, markdown_path):
             ledger_hash = hashlib.sha256(Path(args.ledger).read_bytes()).hexdigest()
         except OSError as exc:
             errors.append(f"Evidence ledger could not be hashed: {exc}")
-    for _flag, value, label in (
-        ("--rewild-receipt", args.rewild_receipt, "Rewild gate receipt"),
-        ("--content-receipt", args.content_receipt, "Content quality gate receipt"),
+    for _flag, value, label, report_bound in (
+        ("--rewild-receipt", args.rewild_receipt, "Rewild gate receipt", True),
+        (
+            "--content-receipt",
+            args.content_receipt,
+            "Content quality gate receipt",
+            True,
+        ),
+        # The source-fidelity receipt binds claims to sources, so it records a
+        # ledger hash and no report hash; the report hash lives in
+        # receipts/issue.json.
         (
             "--source-fidelity-receipt",
             args.source_fidelity_receipt,
             "source-fidelity receipt",
+            False,
         ),
     ):
         if not value or not Path(value).is_file():
@@ -1256,7 +1265,8 @@ def _receipt_hash_errors(args, markdown_path):
             continue
         recorded = payload.get("report_sha256")
         if not recorded:
-            errors.append(f"{label} does not record report_sha256.")
+            if report_bound:
+                errors.append(f"{label} does not record report_sha256.")
         elif recorded != report_hash:
             errors.append(
                 f"{label} report_sha256 does not match the current report."

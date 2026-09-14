@@ -65,6 +65,7 @@ FAMILY_MODULES = (
     "scripts.gate_severity",
     "scripts.md_to_pdf",
     "scripts.render_pdf_pages",
+    "scripts.alx",
 )
 
 

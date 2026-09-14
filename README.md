@@ -1,53 +1,150 @@
 # Alexandria
 
-Give this repository URL or the ZIP to your agent and say “Install this skill.” The agent must follow [INSTALL.md](INSTALL.md), including automatic runtime setup and PDF verification.
+**给你一个主题，还你一份经过调查、交叉验证、写作与审稿的深度研究报告。**
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文（香港）](README.zh-HK.md)
+古今中外，人物、历史、科技、商业、思想、社会，任何主题都可以成为 Alexandria 的研究对象。它会判断该用什么研究框架，拆解问题，组织研究智能体分头查证，再由主编统合证据、形成判断，交付有出处、讲得透、读得下去的长篇报告。
 
-Alexandria is named after the Library of Alexandria, whose ambition was to bring the world's knowledge under one roof. I built the Alexandria skill in the same spirit: a research assistant you can ask about anything. It works out what needs investigating, finds current sources, weighs the evidence, and turns the results into a complete report in the language you used.
+Alexandria 的名字来自亚历山大图书馆。把广阔的知识带到读者面前，是这个项目的出发点；让每一个重要判断经得起追问，是它的工作标准。
 
-## How it works
+**它把一间研究编辑部的工作流程，装进了一个 skill：从怎么提问、怎么搜索、怎么判断资料可信，到怎么论证、怎么写、怎么审，环环相接。**
 
-1. **Frame the subject.** Alexandria can approach a person, organization, artifact, event, concept, system, or any combination of them. These categories are research lenses, not boundaries: anything can be researched. There are no fixed subject limits, so ask any question.
-2. **Research with context.** It checks current claims against fresh evidence without throwing away older sources that explain the history or mechanism. Each important claim keeps its source, date, confidence, and any serious contradiction.
-3. **Write and produce.** The evidence becomes one argument rather than a pile of notes; before typesetting, every draft must pass the language-specific Rewild gate and a second content review that tests the conclusion, source independence, counterevidence, reasoning, depth, and practical value against the exact final report.
+[简体中文](README.md) · [English（旧版，待更新）](README.en.md) · [繁體中文（香港）](README.zh-HK.md)
 
-You spend less time directing the research and sorting links. What comes back is a coherent argument with sources you can inspect.
+## 一套能研究任何主题的框架
 
-As soon as you send a topic, Alexandria acknowledges it and asks one short, optional batch of production questions: template, “Prepared by,” client name, and whether to add confidentiality wording and stamps. It starts researching immediately instead of waiting for your reply. You can answer later; if you do not choose a template, Alexandria delivers two PDFs with identical content—Executive by default and one design adapted to the topic.
+研究明朝财政、研究一家芯片公司、研究一种哲学思想，需要追问的问题各不相同。Alexandria 内置六类研究框架，接到主题后选择适合的框架；跨领域题目则组合相关维度。
 
-## What you can research
+| 研究对象 | 框架会追问什么 |
+|---|---|
+| **人物** | 成长背景如何影响选择？哪些决定改变了人生轨迹？成就、争议与时代环境如何相互作用？ |
+| **组织** | 如何诞生和演变？内部怎样运作？靠什么竞争？利益与权力如何分配？ |
+| **产品、技术与作品** | 核心原理是什么？经历了哪些变化？实际效果如何？与替代方案相比，优势和限制在哪里？ |
+| **事件** | 什么条件促成了它？触发点是什么？各方做了什么？后果如何延续至今？ |
+| **概念、理论与方法** | 最初要解决什么问题？核心逻辑是什么？如何发展？哪些批评和反例最有力？ |
+| **行业、制度与系统** | 规则如何运行？资金、信息和权力怎样流动？谁获益、谁承担代价？变化由什么推动？ |
 
-Alexandria can investigate founders and public figures, companies and institutions, products and technologies, wars and elections, theories and methods, entire industries, social trends, obscure historical questions, or something that fits no familiar category. The examples are starting points, not a menu. You are free to ask about any subject and shape the research around any angle.
+每个相关维度都会进一步变成具体的研究问题，明确优先级、所需证据和完成条件。对于可能改变最终结论的问题，研究投入会更多。
 
-It is designed for questions that deserve more than a quick summary: How did this happen? What is really driving it? Who benefits? What changed recently, and why does it matter?
+框架负责保证研究覆盖，章节则围绕题目重新组织。历史研究可以沿着关键转折展开，技术研究可以逐层拆解原理，商业研究可以围绕竞争与取舍展开。读者看到的是为这个主题写的文章。
 
-## What the finished report looks like
+## 像真正的编辑部一样运作
 
-You receive a professionally produced PDF—not a rough text export. It has a considered cover, table of contents, topic-specific chapters, clear judgments, careful typography, and citations beside the claims they support.
+**主编统筹问题与结论，研究员分头调查，审稿环节检验成稿。** 在支持多智能体的环境中，Alexandria 按研究范围分配并行任务；无法并行时，也按同一研究计划逐项完成。
 
-Eleven templates share one production system. The type scale, the table and citation styling, and the structure of the body pages stay the same across all of them, because those are what decide whether forty pages remain readable. What changes is the cover treatment, the palette, and the typeface—which is most of what a reader actually registers. A private-equity memo and a river-basin conservation study should not arrive looking alike, and they do not.
+主编先确定整篇报告必须回答的核心问题，再为研究员划分职责。有人追溯历史与原始记录，有人查当前数据和实际表现，有人专门寻找争议、失败案例与相反证据。分工随题目变化。
 
-| | Template | Look | Best for |
-|---|---|---|---|
-| A | **Executive** (default) | Ivory, navy, teal; restrained consulting register | Business, strategy, finance, policy, organizations |
-| B | **Spectrum** | White, cobalt, violet, electric lime; bold signal panels | Digital products, media, consumer tech, startups |
-| C | **Atlas** | White, forest green, sage; editorial imagery, field-journal character | People, history, culture, art, society, natural science |
-| D | **Horizon** | Black, white, cobalt; panoramic photography, floating observation cards | Infrastructure, climate and energy, geopolitics, supply chains, cities |
-| E | **Maison** | Warm ivory, monumental serif, generous space; premium magazine feel | Luxury, hospitality, retail, travel, real estate, consumer brands |
-| F | **Blueprint** | Black, white, technical cyan; grids, datums, process maps | Operating models, org design, engineering, governance, transformation |
-| G | **Terrain** | Forest green, cream; aerial imagery, contour lines, cartographic notation | Ecology, conservation, agriculture, water, land use |
-| H | **Orbit** | Electric cobalt, black, white; orbital geometry, research-lab precision | AI, semiconductors, robotics, advanced science, deep tech |
-| I | **Sunbeam** | Ink black, tangerine, sunflower yellow; oversized serif, circular signals | Entrepreneurship, education, youth, civic participation, social impact |
-| J | **Current** | Warm white, flowing orange ribbons, friendly sans; route-like diagrams | Mobility, customer journeys, innovation programs, service operations |
-| K | **Apricot** | Warm ivory, apricot accents; human-scale photography, calm serif layouts | Workplace culture, care, public health, learning, people strategy |
+搜索也有明确设计：从主题名称、别名和专业术语入手，深入论文、档案、财报、公共数据等原始材料，再寻找独立报道、当事人经验、后续修订与撤回记录。必要时使用资料的原始语言检索。
 
-Choose one and Alexandria produces that version. If you do not choose, it produces Executive plus a deterministic topic-adaptive version from the other ten designs—the same topic always selects the same template; the second PDF reuses the same finished report, sources, and citations, so it adds no research or writing tokens and only one local rendering pass. “Prepared by” defaults to Alexandria, the client field stays hidden unless supplied, and confidentiality is Off unless requested. Turning it On adds a “Strictly Confidential” stamp and a “Controlled copy · Not for external distribution” footer.
+研究员带回的材料包括证据、出处、矛盾、尚未解决的问题和初步分析。主编合并资料、去除重复，判断哪些发现相互支持，哪些需要继续查证，并对最终论证负责。
 
-Length is deliberately substantial: every English report must stay between 7,500 and 15,000 words; every Chinese report must stay between 5,000 and 10,000 non-whitespace characters. The subject determines where it lands inside that range, with roughly ten or more finished PDF pages as the production target.
+搜索规模由问题决定，可以多轮扩展。**结束调查的条件是关键问题已有证据支持，或分歧与缺口已经明确，继续搜索不再实质改变判断。** 包内不设凑数的来源配额，也不以搜到多少链接作为质量证明。
 
-## Why try it
+## 每个来源都要评价，每个关键判断都要查证
 
-Deep research often fails in one of two ways: it produces a pile of links, or it gives a smooth answer with no way to inspect the evidence. Alexandria is built to avoid both. Start with one topic and add an angle if you have one.
+### 五类来源背景，加上证据类型与可信度评估
 
-> Research NVIDIA’s role in the AI boom. Explain its advantages, risks, and current position.
+Alexandria 会辨别资料与研究对象的关系，区分五类来源背景：
+
+| 来源类别 | 核实时关注什么 |
+|---|---|
+| **一手且独立** | 是否直接掌握证据，研究或记录方法是否可靠？ |
+| **一手但有利益关系** | 官方文件、厂商数据、当事人陈述究竟能证明什么？哪些只是自身主张？ |
+| **二手且独立** | 是否做过独立调查？解释能否追溯到原始证据？ |
+| **二手且依赖其他报道** | 是否只是转述同一份材料？有没有新增核实？ |
+| **匿名、不可核实或转载** | 原始出处在哪里？能否验证？是否只能作为继续调查的线索？ |
+
+同时，它会区分财务披露、同行评审研究、预印本、官方文档、独立测试、新闻采访、观点与营销材料，再对具体判断标注高、中、低可信度。
+
+权威性与独立性需要分别判断。财报能支持披露的营收数字，不能直接证明产品更好；企业公告能证明公司公布了某项计划，不能证明计划一定可行。即使出自知名媒体，一篇转述稿也不能凭空增加一份独立证据。
+
+### 交叉验证会一直追到共同出处
+
+十家网站转载同一篇稿件，背后仍然只有一个来源。来自同一家机构的多个页面，或者使用同一数据集的多项研究，也不能简单算成多方印证。
+
+Alexandria 会合并这些共同来源。关键判断要获得充分交叉验证，需要至少两个独立来源体系相互支持，其中至少一个独立于研究对象。证据不足时，会降低结论的可信度，并说明限制。
+
+遇到冲突，先核对日期、定义、样本与利益关系，再寻找原始记录和后续更正。能解决的分歧，要说明采信哪一方、为什么；解决不了的，保留分歧及其对结论的影响。
+
+### 主动寻找能推翻自己的证据
+
+在确认核心判断前，Alexandria 要提出最有力的另一种解释，并搜索能区分两种解释的证据。失败案例、负面结果、边界条件与当事人的反对意见，都属于研究任务。
+
+例如，研究一项技术是否领先，除了找支持其表现的测试，还要检查测试条件、失败场景和替代方案。最终判断必须经受这些反证的检验。
+
+### 先建证据记录，再开始成文
+
+重要说法都有对应的证据记录：原文摘录或位置、来源、日期、可信程度、相关矛盾，以及从证据到判断的推理过程。事实、当事人主张、估算和分析分别记录。
+
+写作之前，先核对引语、清理重复来源、处理争议并标明资料缺口。交付前，再对关键结论优先抽样回查在线原文，确认记录中的证据确实出自所引页面。会变化的信息还要检查时效。
+
+这样，读者既能知道结论是什么，也能沿着引用检查它为什么成立。
+
+## 不同主题，采用不同的写法
+
+**资料整理完成后，主编才把证据写成有主线的文章。** 结论先说清，再展开事实、解释、判断与影响；章节的篇幅和节奏服从内容的重要程度。
+
+Alexandria 内置六种写作模式：
+
+| 写作模式 | 适用主题与写法 |
+|---|---|
+| **分析型** | 公司、科技、市场与政策：先给判断，比较方案，解释数据与取舍。 |
+| **叙事型** | 人物与事件：围绕有资料支持的关键经历和选择展开。 |
+| **解释型** | 概念与系统：从具体例子进入原理，再检验例外与局限。 |
+| **调查型** | 争议与责任：分别呈现指控、记录、回应和独立核实结果。 |
+| **历史型** | 历史与变迁：结合当时的材料、关键转折与后世研究，解释变化如何发生。 |
+| **评论型** | 作品、产品与思想：先明确评价标准，再比较、论证并给出判断。 |
+
+中文和英文各有独立的编辑规则，简体中文与港式繁体也分别处理语域和用词。历史题材着重时代条件与因果脉络，科技题材着重原理、数据与实际限制。每份报告选择一种主要文体，保持全文声音一致。
+
+## 写完，还要经过两轮编辑审查
+
+**第一轮是 Rewild 去 AI 味。** 英文、简体中文和港式繁体各有内置规则，检查空话、机械过渡、重复句式、刻意排比和千篇一律的段末总结。该删的删，该重写的重写，同时保留研究报告应有的专业语气。
+
+这一轮还要对照修改前的原稿审查：数字、引语、引用、限定条件和因果关系有没有被改坏？“可能”有没有被写成“一定”？去掉套话之后，证据与原意必须保留。
+
+**第二轮重新审查内容质量。** 在最终稿上，从八个维度评分：是否回答问题、证据强度、证据覆盖、推理完整性、反证处理、解释深度、实际价值和写作清晰度。每项都要求达到 4/5，发现实质问题就返修。
+
+审稿还会检查长文的结构：各节是否只是重复同一种段落套路？是否把篇幅平均分给了轻重不同的问题？读完一节，读者是否真的多理解了一件事？
+
+自动检查结果与接受审查的具体版本绑定。之后修改正文，需要重新检查，避免拿旧稿的通过结果替新稿背书。自动工具不可用时，由智能体完成相应人工核实与审阅。
+
+## 最后，才是把内容做成精美报告
+
+研究、写作与审稿完成后，Alexandria 才进入 PDF 制作。
+
+内置 **11 套视觉模板**，覆盖稳重的商业报告、人文历史、科技、生态等主题。默认交付两份内容相同的 PDF：一份使用 Executive，另一份根据主题自动匹配风格。你也可以直接指定一种模板。
+
+成品包含封面、目录、分章正文和可点击引用。生成后会重新打开 PDF，检查文字、链接、字体、分页与溢出，并查看页面图像，修正裁切、空白页等问题。需要查看设计选项时，可读[模板说明](references/pdf-templates.md)。
+
+你会拿到：
+
+- **完整长篇报告**：中文 5,000–10,000 个非空白字符；英文 7,500–15,000 词。篇幅用证据、分析与解释支撑。
+- **经过检查的 PDF**：以约十页或以上为制作目标，实际页数随语言与版式变化。
+- **Markdown 源稿**：方便检索、摘录、修改和继续使用。
+- **紧随相关论断的来源引用**：支持你继续阅读和核对关键证据。
+
+## 为什么跑一次可能要半小时？
+
+因为一次完整研究要走完这条链路：
+
+**选题拆解 → 分工搜索 → 来源评价 → 交叉验证与反证 → 证据汇总 → 主编成文 → Rewild 编辑 → 内容复审 → PDF 制作与目检**
+
+交叉验证发现矛盾，就要继续找原始记录；审稿发现论证缺口，就要补研究；文字修改影响了结论，就要重新核对。时间花在这些调查、核实和返修上。
+
+复杂主题可能需要半小时或更久，实际耗时取决于题目、资料可得性、模型和运行环境。选择 Alexandria，是愿意给研究留出时间，换取一份能深入理解主题、追溯证据并反复使用的成果。
+
+## 开始你的第一份研究
+
+把仓库链接或 ZIP 交给支持技能、联网研究和本地执行的智能体，说：
+
+> 帮我安装这个 skill。
+
+智能体会按 [INSTALL.md](INSTALL.md) 完成环境安装和 PDF 验证。装好后，直接给它一个主题：
+
+> 用 Alexandria 深度研究：为什么明朝财政长期困于白银？从制度、贸易与地方治理解释，写成中文报告。
+
+> 用 Alexandria 研究 NVIDIA 的竞争优势。拆解硬件、软件生态与客户依赖，并检验最可能削弱它的因素。
+
+> 用 Alexandria 解释存在主义。讲清它的问题意识、主要分歧，以及它如何影响普通人的选择。
+
+有想了解的角度、读者或时间范围，就一并告诉它。只有一个主题，也可以开始。

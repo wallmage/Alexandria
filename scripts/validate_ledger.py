@@ -3587,7 +3587,42 @@ def _claim_input_schema_findings(claim):
     ]
 
 
-def _extract_length_findings(claim):
+def _cached_documents(claim, cache_dir):
+    """Normalized cache text for every source this claim cites."""
+    if not cache_dir:
+        return []
+    try:
+        from source_fidelity import normalize_text, read_cache, strip_markup
+    except ImportError:
+        return []
+    source_ids = list(claim.get("source_ids") or [])
+    source_ids.extend(
+        entry.get("source_id")
+        for entry in claim.get("source_evidence") or []
+        if isinstance(entry, dict) and entry.get("source_id")
+    )
+    documents = []
+    for source_id in dict.fromkeys(source_ids):
+        cached = read_cache(cache_dir, source_id)
+        if cached is None:
+            continue
+        text = cached[0]
+        documents.append(
+            strip_markup(text) if "<" in str(text or "") else normalize_text(text)
+        )
+    return documents
+
+
+def _is_verbatim(text, documents):
+    if not documents:
+        return False
+    from source_fidelity import normalize_text
+
+    whole = normalize_text(text)
+    return bool(whole) and any(whole in document for document in documents)
+
+
+def _extract_length_findings(claim, *, cache_dir=None):
     findings = []
     claim_id = claim.get("claim_id", "")
     texts = []
@@ -3596,6 +3631,7 @@ def _extract_length_findings(claim):
     for entry in claim.get("source_evidence") or []:
         if isinstance(entry, dict) and entry.get("extract_or_location"):
             texts.append(str(entry.get("extract_or_location")))
+    documents = _cached_documents(claim, cache_dir)
     for text in texts:
         folded = unicodedata.normalize("NFKC", text)
         compact = re.sub(r"\s+", "", folded)
@@ -3614,9 +3650,15 @@ def _extract_length_findings(claim):
                     remove=_drop(claim_id),
                 )
             )
+        # Literal-whole-first: a window that is verbatim in the cached source
+        # was not assembled around an author ellipsis, so it is not split.
+        if _is_verbatim(text, documents):
+            continue
         for segment in re.split(r"…|\.\.\.", folded):
             piece = re.sub(r"\s+", "", segment)
-            if piece and len(piece) < 8:
+            if not any(character.isalnum() for character in piece):
+                continue
+            if len(piece) < 8:
                 findings.append(
                     Finding(
                         family="ledger/extract-length",
@@ -3637,7 +3679,7 @@ def _extract_length_findings(claim):
 def claim_findings(claim, ledger, *, cache_dir=None):
     findings = []
     findings.extend(_claim_input_schema_findings(claim))
-    findings.extend(_extract_length_findings(claim))
+    findings.extend(_extract_length_findings(claim, cache_dir=cache_dir))
     working = dict(claim)
     if working.get("source_ids") is None and working.get("source_evidence"):
         working = expand_claim_input(working, ledger, cache_meta={})

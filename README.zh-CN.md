@@ -8,7 +8,7 @@ Alexandria 得名于亚历山大图书馆。那座图书馆曾怀抱汇聚世间
 
 **Alexandria 把研究质量落实到了每一步该做的事上。** 成文前先整理证据与推理，交付前优先抽样回查关键结论引用的原文；写完再经过 Rewild 去 AI 味和八个维度的内容复审。你拿到的报告会讲清原理、因果与取舍，保留重要的反对意见，并让你沿着引用核对判断的依据。最后，再配上按主题匹配的版式，交付 PDF 与可编辑的 Markdown 源稿。
 
-[简体中文](README.md) · [English（旧版，待更新）](README.en.md) · [繁體中文（香港）](README.zh-HK.md)
+[简体中文](README.md) · [English](README.en.md) · [繁體中文（香港）](README.zh-HK.md)
 
 ## 一套能研究任何主题的框架
 

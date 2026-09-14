@@ -23,12 +23,14 @@ try:
     from .artifact_safety import validated_artifact_path
     from .gate_severity import emit_findings, hard_errors, warning
     from .report_blocks import mask_fenced_code as _mask_fenced_code
+    from .report_blocks import report_length
     from .report_contract import detect_language, localized_date, report_length_policy
     from .source_fidelity import validate_source_fidelity_receipt_online
 except ImportError:
     from artifact_safety import validated_artifact_path
     from gate_severity import emit_findings, hard_errors, warning
     from report_blocks import mask_fenced_code as _mask_fenced_code
+    from report_blocks import report_length
     from report_contract import detect_language, localized_date, report_length_policy
     from source_fidelity import validate_source_fidelity_receipt_online
 
@@ -679,18 +681,12 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
         )
     if lang:
         try:
-            minimum, maximum, unit = report_length_policy(lang)
+            minimum, maximum, _unit = report_length_policy(lang)
         except ValueError:
             minimum = None
         if minimum is not None:
-            sections = _h2_sections(text)
-            prose = _report_prose(text, sections)
-            if unit == "words":
-                actual = len(re.findall(r"\b[\w'-]+\b", prose, re.UNICODE))
-                label = "words"
-            else:
-                actual = len(re.findall(r"[A-Za-z0-9\u3400-\u9fff]", prose))
-                label = "characters"
+            # R12: one length definition for every consumer (report_blocks).
+            actual, label = report_length(text, lang)
             if actual < minimum or actual > maximum:
                 findings.append(
                     _finding(

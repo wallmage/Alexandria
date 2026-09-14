@@ -193,7 +193,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.
 
 ### `integrity/length` — F/A
-- **rule:** report length outside the validator's band (en 7,500–15,000 words; zh 5,000–10,000 non-ws chars). Below the floor arrives as a warning (Class A); above the ceiling is hard.
+- **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. Below the floor arrives as a warning (Class A); above the ceiling is hard.
 - **fix:** extend the report body in report.md (below the floor; Class A).
 - **remove:** delete paragraph `<n>` of report.md (above the ceiling)
 - **example:** 16,400 words; ceiling 15,000.
@@ -307,7 +307,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** 9 consecutive sentences open with the subject.
 
 ### `rewild/length` — A
-- **rule:** length floor or ceiling, language and script checks (en 7,500–15,000 words; zh 5,000–10,000 non-ws chars).
+- **rule:** length floor or ceiling, language and script checks (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), the same count as `integrity/length`, counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`).
 - **fix:** (edit prose; waivable by alx issue --deliver)
 - **remove:** n/a (ruling R8).
 - **example:** report has 68 words; minimum is 7,500.

@@ -3642,3 +3642,62 @@ class CjkRationaleMinimumTests(unittest.TestCase):
         self.assertTrue(
             any("threshold 40, actual 30" in error for error in errors), errors
         )
+
+
+class SchemaRemedyTests(unittest.TestCase):
+    """J2: a schema finding's remedy names the field the schema error named."""
+
+    def _schema_findings(self, ledger):
+        return [
+            item
+            for item in validate_ledger.collect_findings(ledger)
+            if item.family == "ledger/schema"
+        ]
+
+    def _fix_for(self, ledger, location, needle=""):
+        for item in self._schema_findings(ledger):
+            if item.message.startswith(f"{location}:") and needle in item.message:
+                return item.fix
+        self.fail(f"no schema finding for {location} {needle}")
+
+    def test_short_claim_rationale_points_at_that_claim_path(self):
+        ledger = living_harm_ledger()
+        ledger["claims"][-1]["person_claim_assessment"]["rationale"] = "本主張需複核"
+        path = "claims.1.person_claim_assessment.rationale"
+        fix = self._fix_for(ledger, path)
+        self.assertEqual(
+            f"set field {path} in claims/*.json, then alx claim add claims/*.json",
+            fix,
+        )
+        self.assertNotIn("schema_version", fix)
+
+    def test_bad_top_level_field_points_at_that_field(self):
+        ledger = living_harm_ledger()
+        ledger.pop("unresolved_questions", None)
+        self.assertEqual(
+            "set field unresolved_questions in ledger.json",
+            self._fix_for(ledger, "<root>", "unresolved_questions"),
+        )
+
+    def test_mergeable_section_path_points_at_ledger_merge(self):
+        ledger = living_harm_ledger()
+        ledger["people"][0].pop("living_status", None)
+        self.assertEqual(
+            "set field people.0.living_status in people via alx ledger merge",
+            self._fix_for(ledger, "people.0"),
+        )
+
+    def test_no_finding_names_a_field_its_message_did_not(self):
+        ledger = living_harm_ledger()
+        ledger["claims"][-1]["person_claim_assessment"]["rationale"] = "本主張需複核"
+        for item in self._schema_findings(ledger):
+            location = item.message.split(":", 1)[0]
+            named = re.match(r"^set field (\S+) ", item.fix)
+            with self.subTest(message=item.message):
+                self.assertIsNotNone(named, item.fix)
+                field = named.group(1)
+                self.assertTrue(
+                    field in item.message
+                    or (location != "<root>" and field.startswith(f"{location}.")),
+                    item.fix,
+                )

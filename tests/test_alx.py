@@ -2746,3 +2746,150 @@ class ParkedReviewNoteTests(AlxTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FileArgumentTests(AlxTestCase):
+    """J1 / D10: every FILE-typed argument is a path, validated before the run.
+
+    Prose passed inline used to reach `Path(...).read_text` and traceback with
+    `FileNotFoundError`; it must be one line and exit 2.
+    """
+
+    PROSE = "OAC finding aid is a living catalog record, not a dated publication."
+
+    def assert_refused(self, flag, code, out):
+        self.assertEqual(2, code, out)
+        self.assertIn(f"{flag} expects a file path", out)
+        self.assertIn("(D10)", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_init_refuses_prose_for_subject_and_reader(self):
+        code, out = self.run_alx(
+            "init", self.dir, "--lang", "en", "--subject", self.PROSE
+        )
+        self.assert_refused("--subject", code, out)
+        subject = self.root / "subject.txt"
+        subject.write_text("Ledger Study\n", encoding="utf-8")
+        code, out = self.run_alx(
+            "init",
+            self.dir,
+            "--lang",
+            "en",
+            "--subject",
+            subject,
+            "--reader",
+            self.PROSE,
+        )
+        self.assert_refused("--reader", code, out)
+
+    def test_source_set_refuses_prose_for_both_file_flags(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        for flag in ("--undated-reason", "--family-justification"):
+            with self.subTest(flag=flag):
+                code, out = self.run_in("source", "set", "S1", flag, self.PROSE)
+                self.assert_refused(flag, code, out)
+
+    def test_claim_add_and_ledger_merge_refuse_prose_paths(self):
+        self.init()
+        code, out = self.run_in("claim", "add", self.PROSE)
+        self.assert_refused("FILE", code, out)
+        code, out = self.run_in("ledger", "merge", self.PROSE)
+        self.assert_refused("PATCH", code, out)
+
+
+ZH_SENTENCE = "档案馆在三月公开了一千二百零四件文件，登记处也确认了同一数字。"
+
+
+def zh_report(paragraphs):
+    date_line = alx.report_contract.localized_date("zh-CN", None)
+    body = "\n\n".join(
+        "".join(ZH_SENTENCE for _ in range(6)) for _ in range(paragraphs)
+    )
+    return (
+        "# 档案研究\n\n"
+        "> 档案公开是否与登记处的统计一致。\n"
+        f"> {date_line}\n\n"
+        "## 发现\n\n"
+        f"{body}\n\n"
+        "## 来源\n\n"
+        "- [档案研究](https://example.org/study)\n"
+    )
+
+
+class ReportLengthTests(AlxTestCase):
+    """Ruling R12: one length definition for every consumer.
+
+    `report_blocks.report_length` is the only counter; `validate_report`'s
+    integrity check, `rewild_gate`'s floor and `alx check` all quote it, so a
+    report can never be long enough for one gate and short for another.
+    """
+
+    def test_six_thousand_character_zh_report_passes_both_length_checks(self):
+        text = zh_report(32)
+        count, unit = alx.report_blocks.report_length(text, "zh-CN")
+        self.assertEqual("report-body characters", unit)
+        self.assertGreaterEqual(count, 5000)
+        self.assertLessEqual(count, 10000)
+        ledger = {"report_date": "2026-09-14", "brief": {"report_language": "zh-CN"}}
+        families = [
+            item.family
+            for item in alx.validate_report.integrity_findings(
+                text, ledger, lang="zh-CN"
+            )
+        ]
+        self.assertNotIn("integrity/length", families)
+        self.assertEqual([], alx.rewild_gate._length_errors(text, "zh-CN"))
+
+    def test_a_short_zh_report_fails_both_with_the_same_count(self):
+        text = zh_report(2)
+        count, unit = alx.report_blocks.report_length(text, "zh-CN")
+        self.assertLess(count, 5000)
+        messages = [
+            item.message
+            for item in alx.validate_report.integrity_findings(
+                text,
+                {"report_date": "2026-09-14", "brief": {"report_language": "zh-CN"}},
+                lang="zh-CN",
+            )
+            if item.family == "integrity/length"
+        ]
+        self.assertTrue(any(f"{count} {unit}" in item for item in messages), messages)
+        rewild = alx.rewild_gate._length_errors(text, "zh-CN")
+        self.assertTrue(any(f"{count} {unit}" in item for item in rewild), rewild)
+
+    def test_check_prints_the_same_count_unit_and_band(self):
+        self.bootstrap()
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        count, unit = alx.report_blocks.report_length(report, "en")
+        _code, out = self.run_in("check")
+        self.assertIn(f"length {count} {unit}; floor 7500, ceiling 15000", out)
+
+
+class ReviewNoteFloorTests(AlxTestCase):
+    """J3: `review finish` keeps the full floor for non-CJK review prose."""
+
+    def note(self, text):
+        return {
+            "section_reviews": [
+                {
+                    "section_heading": "Findings",
+                    "purpose": "Advance the report's governing question fully.",
+                    "new_value": "Adds distinct evidence and decision value.",
+                    "evidence_or_reasoning": "Supported by the bound ledger.",
+                    "limitation_or_tradeoff": text,
+                    "contribution_to_governing_question": "Moves to the judgment.",
+                    "disposition": "keep",
+                }
+            ]
+        }
+
+    def test_chinese_note_passes_and_english_of_the_same_length_does_not(self):
+        self.assertEqual([], alx._prose_floor_missing(self.note("1915年残13天没有逐日表。"), "content"))
+        missing = alx._prose_floor_missing(self.note("Thin, unusable"), "content")
+        self.assertTrue(
+            any("threshold 20, actual 14" in item for item in missing), missing
+        )
+        self.assertTrue(
+            all("content-review schema" in item for item in missing), missing
+        )

@@ -194,7 +194,7 @@
         },
         "rationale": {
           "type": "string",
-          "minLength": 20
+          "minLength": 10
         }
       }
     },
@@ -217,23 +217,23 @@
         },
         "purpose": {
           "type": "string",
-          "minLength": 20
+          "minLength": 10
         },
         "new_value": {
           "type": "string",
-          "minLength": 20
+          "minLength": 10
         },
         "evidence_or_reasoning": {
           "type": "string",
-          "minLength": 20
+          "minLength": 10
         },
         "limitation_or_tradeoff": {
           "type": "string",
-          "minLength": 20
+          "minLength": 10
         },
         "contribution_to_governing_question": {
           "type": "string",
-          "minLength": 20
+          "minLength": 10
         },
         "disposition": {
           "const": "keep"
@@ -264,7 +264,7 @@
         },
         "visible_text_and_claims_review": {
           "type": "string",
-          "minLength": 20
+          "minLength": 10
         },
         "disposition": {
           "const": "approved"

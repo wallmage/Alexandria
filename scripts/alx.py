@@ -1,0 +1,2796 @@
+#!/usr/bin/env python3
+"""Alexandria's single entry point: one CLI over the research gates.
+
+`alx` is thin orchestration over the existing modules used as libraries
+(spec 09-14-01 §5). Free text enters only through files; every command
+appends one worklog line and prints the elapsed/remaining footer last.
+"""
+
+import argparse
+import hashlib
+import io
+import json
+import re
+import shutil
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts import (  # noqa: E402
+    content_gate,
+    gate_severity,
+    report_contract,
+    rewild_gate,
+    source_fidelity,
+    validate_ledger,
+    validate_report,
+)
+
+LANGUAGES = ("en", "zh-CN", "zh-HK")
+ARCHETYPES = (
+    "person",
+    "organization",
+    "artifact",
+    "event",
+    "concept",
+    "system",
+    "hybrid",
+)
+LIVING_STATUSES = ("living", "recently_deceased", "deceased", "unknown")
+PROTECTED_STATUSES = frozenset({"living", "recently_deceased", "unknown"})
+PROVENANCES = (
+    "primary_independent",
+    "primary_interested",
+    "secondary_independent",
+    "secondary_dependent",
+    "unverified",
+)
+EVIDENCE_TYPES = (
+    "accountable_record",
+    "peer_reviewed",
+    "preprint",
+    "official_documentation",
+    "dataset_or_test",
+    "reported_interview",
+    "news_report",
+    "opinion_or_forecast",
+    "marketing",
+    "anecdote",
+)
+SOURCE_ROLES = (
+    "subject_official",
+    "counterparty_official",
+    "independent_analysis",
+    "empirical_data",
+    "affected_stakeholder",
+    "expert_interpretation",
+    "historical_record",
+)
+ACCOUNTABILITY_BASES = (
+    "none",
+    "court_or_regulator_record",
+    "named_source_investigation",
+    "subject_admission",
+)
+REVIEW_KINDS = ("rewild", "content")
+
+CONTENT_SCORE_KEYS = (
+    "question_answered",
+    "evidence_strength",
+    "evidence_coverage",
+    "reasoning_integrity",
+    "counterevidence",
+    "explanatory_depth",
+    "decision_value",
+    "writing_clarity",
+)
+CONTENT_CHECK_KEYS = (
+    "central_judgment_answers_question",
+    "priority_coverage_resolved",
+    "key_claims_traceable",
+    "source_independence_calibrated",
+    "counterevidence_tested",
+    "uncertainty_visible",
+    "recommendations_or_implications_supported",
+    "forecasts_conditional",
+    "section_value_density_reviewed",
+    "length_is_substantive_not_padded",
+)
+
+VERIFICATION_NOTE_PREFIX = {
+    "en": "Verification note:",
+    "zh-CN": "核查说明：",
+    "zh-HK": "核實說明：",
+}
+
+#: Every printed remedy (spec D14, ruling R6). Commands parse; the rest are the
+#: closed imperative list of spec §6 plus the two length imperatives of R6.
+REMEDY_TEMPLATES = {
+    "fetch-refresh": "alx fetch --id {source_id} --refresh",
+    "fetch-url": "alx fetch {url}",
+    "claim-add": "alx claim add {file}",
+    "claim-drop": "alx claim drop {claim_id} --apply",
+    "claim-bind": "alx claim bind {claim_id} --paragraph {paragraph}",
+    "ledger-merge": "alx ledger merge {file}",
+    "source-set": "alx source set {source_id} --provenance primary_independent",
+    "find": "alx find {source_id} {keyword}",
+    "snapshot-restore": "alx snapshot --restore",
+    "review-start": "alx review start {kind}",
+    "review-iter": "alx review start {kind} --iter",
+    "review-restore": "alx review restore {kind}",
+    "check": "alx check",
+    "check-fix": "alx check --fix",
+    "issue": "alx issue",
+    "issue-deliver": "alx issue --deliver",
+    "render": "alx render",
+    "set-field": "set field {field} in {file}",
+    "extend-quote": "extend the quote in {file}",
+    "extend-report": "extend the report body in report.md",
+    "delete-paragraph": "delete paragraph {paragraph} of report.md",
+}
+
+#: Class A families (spec §6.10, orchestrator ruling on the class tables); every
+#: other hard family defaults to Class F. `integrity/length` is split by
+#: severity: below the floor it arrives as a warning (Class A), above the
+#: ceiling it is hard and therefore Class F with a `delete paragraph` remedy.
+CLASS_A_FAMILIES = frozenset(
+    {
+        "tooling/receipt",
+        "tooling/render",
+        "review/rewild-missing",
+        "review/rewild-stale",
+        "rewild/humanization",
+        "rewild/style",
+        "rewild/ai-vocabulary",
+        "integrity/structure",
+        "integrity/date-line",
+        "binding/sources-section",
+    }
+)
+
+#: Every finding family `alx` can print, from itself and from T1-T4 (ruling R6:
+#: the parse test walks this registry so no remedy escapes D14).
+FAMILIES = (
+    tuple(sorted(validate_ledger.FAMILIES))
+    + tuple(sorted(source_fidelity.FAMILIES))
+    + (
+        "binding/claim-paragraph",
+        "binding/excerpt-missing",
+        "binding/leftover-prose",
+        "binding/link-not-in-ledger",
+        "binding/sources-section",
+        "content/check",
+        "content/claim-binding",
+        "content/claim-support",
+        "content/critical-finding",
+        "content/disclosure",
+        "content/language",
+        "content/score",
+        "fidelity/cache-detached",
+        "fidelity/undecodable",
+        "fidelity/unreachable",
+        "integrity/control-chars",
+        "integrity/date-line",
+        "integrity/encoding",
+        "integrity/length",
+        "integrity/quotation-lost",
+        "integrity/replacement-char",
+        "integrity/structure",
+        "review/content-missing",
+        "review/content-stale",
+        "review/rewild-missing",
+        "review/rewild-stale",
+        "rewild/ai-vocabulary",
+        "rewild/fidelity",
+        "rewild/humanization",
+        "rewild/region",
+        "rewild/style",
+        "tooling/receipt",
+        "tooling/render",
+    )
+)
+
+#: Offline these are fabrication findings (Class F): a cache is present and the
+#: extract does not survive in it. Live, the same families mean the network was
+#: unusable beyond the policy quorum, which `--deliver` may waive (spec §6.10).
+ONLINE_CLASS_A_FAMILIES = frozenset(
+    {
+        "fidelity/unreachable",
+        "fidelity/undecodable",
+    }
+)
+
+#: Spec §6.11 network budget. The rewild checker (300 s, rewild_gate) and the
+#: rasterizer (90 s, render_pdf_pages.SUBPROCESS_TIMEOUT_S) own theirs; neither
+#: `run_gate`, `render_pdf` nor `render_pages` accepts a timeout argument.
+FETCH_TIMEOUT_SECONDS = 10
+RESERVE_MINUTES = 8
+FETCH_STOP_MINUTES = 20
+DEGRADE_MINUTES = 15
+ONLINE_CAP_MINUTES = 4
+EXCERPT_CHARS = 60
+MIN_EXTRACT_CHARS = 20
+MIN_SEGMENT_CHARS = 8
+MAX_WINDOW_CHARS = 300
+
+DEGRADE_INSTRUCTION = (
+    "remaining <= 15 min: stop fixing, run `alx issue --deliver`, then `alx render`."
+)
+
+
+def remedy(key, **values):
+    """Return one pinned remedy string from the registry."""
+    return REMEDY_TEMPLATES[key].format(**values)
+
+
+Finding = gate_severity.Finding
+render_grouped = gate_severity.render_grouped
+
+
+def finding_class(family, severity, *, online=False):
+    """Class F unless the family is listed as availability/tooling."""
+    if severity == "warn":
+        return "A"
+    if online and family in ONLINE_CLASS_A_FAMILIES:
+        return "A"
+    return "A" if family in CLASS_A_FAMILIES else "F"
+
+
+def finding(family, message, *, severity="hard", ids=(), fix="", remove=""):
+    return Finding(
+        family=family,
+        severity=severity,
+        klass=finding_class(family, severity),
+        ids=list(ids),
+        message=message,
+        fix=fix,
+        remove=remove,
+    )
+
+
+def hard_findings(findings):
+    return [item for item in findings if item.severity != "warn"]
+
+
+def class_f_findings(findings):
+    return [item for item in hard_findings(findings) if item.klass == "F"]
+
+
+_ID_RE = {"C": re.compile(r"^C\d+$"), "S": re.compile(r"^S\d+$")}
+_URL_IN_MESSAGE = re.compile(r"https?://[^\s;,)]+")
+
+
+def _pick_id(item, prefix):
+    for value in item.ids or ():
+        if _ID_RE[prefix].match(str(value)):
+            return str(value)
+    match = re.search(rf"\b{prefix}\d+\b", str(item.message))
+    return match.group(0) if match else None
+
+
+def _keyword(text):
+    word = re.split(r"\s+", str(text).strip())[0] if str(text).strip() else ""
+    word = re.sub(r"[^\w,.\-一-鿿]", "", word)
+    return word or "keyword"
+
+
+def _drop_or_refresh(item):
+    claim_id = _pick_id(item, "C")
+    if claim_id:
+        return remedy("claim-drop", claim_id=claim_id)
+    source_id = _pick_id(item, "S")
+    if source_id:
+        return remedy("fetch-refresh", source_id=source_id)
+    return ""
+
+
+#: family -> (fix, remove) builders. Every printed remedy passes through here so
+#: the parse test over this one registry covers everything `alx` can print (R6).
+def _remedies(item, *, paragraphs=0):
+    family = item.family
+    claim_id = _pick_id(item, "C")
+    source_id = _pick_id(item, "S")
+    restore = remedy("snapshot-restore")
+    if family in {
+        "integrity/control-chars",
+        "integrity/replacement-char",
+        "integrity/quotation-lost",
+        "integrity/encoding",
+        "rewild/fidelity",
+        "rewild/region",
+    }:
+        return restore, restore
+    if family == "integrity/length":
+        if item.severity == "warn":
+            return remedy("extend-report"), ""
+        return (
+            remedy("delete-paragraph", paragraph=max(paragraphs, 1)),
+            remedy("delete-paragraph", paragraph=max(paragraphs, 1)),
+        )
+    if family in {"integrity/structure", "integrity/date-line"}:
+        return remedy("check-fix"), ""
+    if family == "binding/link-not-in-ledger":
+        match = _URL_IN_MESSAGE.search(item.message)
+        url = match.group(0) if match else ""
+        return (remedy("fetch-url", url=url) if url else remedy("check-fix")), ""
+    if family in {"binding/claim-paragraph", "binding/paragraph"}:
+        candidate = re.search(r"candidates: (\d+)", item.message)
+        paragraph = int(candidate.group(1)) if candidate else 1
+        return (
+            remedy("claim-bind", claim_id=claim_id or "C1", paragraph=paragraph),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family == "binding/excerpt-missing":
+        return (
+            remedy("check-fix"),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family == "binding/leftover-prose":
+        number = re.search(r"paragraph (\d+)", item.message)
+        return (
+            remedy("delete-paragraph", paragraph=int(number.group(1)) if number else 1),
+            "",
+        )
+    if family == "binding/sources-section":
+        return remedy("check-fix"), ""
+    if family in {"fidelity/cache-missing", "fidelity/cache-detached"}:
+        refresh = remedy("fetch-refresh", source_id=source_id or "S1")
+        return refresh, refresh
+    if family in {"fidelity/mismatch", "fidelity/context-changed"}:
+        return (
+            remedy("find", source_id=source_id or "S1", keyword=_keyword(item.message)),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family in {"fidelity/short-segment", "ledger/extract-length"}:
+        return (
+            remedy("extend-quote", file="claims/*.json"),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family in ONLINE_CLASS_A_FAMILIES or family.startswith("tooling/"):
+        return remedy("issue-deliver"), _drop_or_refresh(item)
+    if family == "ledger/claim-input":
+        return (
+            remedy("set-field", field="claim-input", file="claims/*.json"),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family in {"ledger/person", "ledger/harm"}:
+        return (
+            remedy("ledger-merge", file="people.json"),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family in {
+        "ledger/provenance",
+        "ledger/key-claim",
+        "ledger/source-family",
+        "ledger/undated-reason",
+        "ledger/host-conflict",
+        "ledger/https",
+        "ledger/portfolio",
+    }:
+        return remedy("source-set", source_id=source_id or "S1"), _drop_or_refresh(item)
+    if family in {"ledger/coverage", "ledger/synthesis"}:
+        return remedy("ledger-merge", file="coverage.json"), _drop_or_refresh(item)
+    if family in {
+        "ledger/quantity",
+        "ledger/status",
+        "ledger/direction",
+        "ledger/derived",
+        "ledger/date-granularity",
+    }:
+        return (
+            remedy("find", source_id=source_id or "S1", keyword=_keyword(item.message)),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family == "ledger/excluded-supports":
+        return (
+            remedy("set-field", field="supports", file="claims/*.json"),
+            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+        )
+    if family.startswith("content/") or family.startswith("review/content"):
+        return remedy("review-iter", kind="content"), remedy(
+            "review-restore", kind="content"
+        )
+    if family.startswith("review/rewild"):
+        return remedy("review-iter", kind="rewild"), remedy(
+            "review-start", kind="rewild"
+        )
+    if family.startswith("rewild/"):
+        return remedy("issue-deliver"), restore
+    if family == "ledger/schema":
+        location, _, detail = item.message.partition(": ")
+        required = re.search(r"'([^']+)' is a required property", detail)
+        field = required.group(1) if required else location.rsplit(".", 1)[-1]
+        file = "claims/*.json" if location.startswith("claims.") else "ledger.json"
+        return (
+            remedy("set-field", field=field or "schema_version", file=file),
+            _drop_or_refresh(item),
+        )
+    return remedy("check-fix"), _drop_or_refresh(item)
+
+
+def is_finding(item):
+    """T1/T2 load `gate_severity` twice (top-level and as `scripts.`), so the
+    dataclass identity differs between modules; match on shape instead."""
+    return hasattr(item, "family") and hasattr(item, "severity")
+
+
+def adopt(findings, *, online=False, paragraphs=0):
+    """Re-class every finding and rewrite its remedies through the registry."""
+    adopted = []
+    seen = set()
+    for item in findings:
+        if not is_finding(item):
+            text = str(item)
+            item = finding(
+                "ledger/schema",
+                text.removeprefix(gate_severity.WARNING_PREFIX),
+                severity="warn" if gate_severity.is_warning(text) else "hard",
+            )
+        key = (item.family, tuple(item.ids or ()), item.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        fix, remove = _remedies(item, paragraphs=paragraphs)
+        adopted.append(
+            Finding(
+                family=item.family,
+                severity=item.severity,
+                klass=finding_class(item.family, item.severity, online=online),
+                ids=list(item.ids or []),
+                message=item.message,
+                fix=fix,
+                remove=remove,
+            )
+        )
+    return adopted
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sha256_text(text):
+    return hashlib.sha256(str(text).encode("utf-8")).hexdigest()
+
+
+def _read_json(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _write_json(path, payload):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+class Workspace:
+    """The report directory layout of spec §5."""
+
+    def __init__(self, directory):
+        self.dir = Path(directory).resolve()
+        self.report = self.dir / "report.md"
+        self.ledger_path = self.dir / "ledger.json"
+        self.sources = self.dir / "sources"
+        self.claims = self.dir / "claims"
+        self.reviews = self.dir / "reviews"
+        self.receipts = self.dir / "receipts"
+        self.alx = self.dir / ".alx"
+        self.state_path = self.alx / "state.json"
+        self.worklog = self.dir / "worklog.md"
+
+    def load_state(self):
+        return _read_json(self.state_path)
+
+    def save_state(self, state):
+        _write_json(self.state_path, state)
+
+    def load_ledger(self):
+        return _read_json(self.ledger_path)
+
+    def save_ledger(self, ledger):
+        _write_json(self.ledger_path, ledger)
+
+    def report_text(self):
+        return self.report.read_bytes().decode("utf-8")
+
+    def cache_paths(self, source_id):
+        return (
+            self.sources / f"{source_id}.txt",
+            self.sources / f"{source_id}.meta.json",
+        )
+
+    def snapshots(self):
+        base = self.dir / "report.pre-rewild.md"
+        found = [base] if base.exists() else []
+        iterations = sorted(
+            self.dir.glob("report.pre-rewild.iter*.md"),
+            key=lambda path: int(re.search(r"iter(\d+)", path.name).group(1)),
+        )
+        return found + iterations
+
+    def latest_snapshot(self):
+        snapshots = self.snapshots()
+        return snapshots[-1] if snapshots else None
+
+    def review_dir(self, kind, iteration):
+        return self.alx / "reviews" / kind / str(iteration)
+
+
+def _minutes(state):
+    start = datetime.fromisoformat(state["start_time"])
+    deadline = datetime.fromisoformat(state["deadline"])
+    now = _now()
+    elapsed = max(0, int((now - start).total_seconds() // 60))
+    remaining = int((deadline - now).total_seconds() // 60)
+    return elapsed, remaining
+
+
+def _emit(ws, state, command, summary, lines):
+    """Print the command output, append the worklog line, print the footer."""
+    for line in lines:
+        print(line)
+    elapsed, remaining = _minutes(state)
+    stamp = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    with ws.worklog.open("a", encoding="utf-8") as handle:
+        handle.write(f"{stamp} {command} {summary}\n")
+    if remaining <= DEGRADE_MINUTES:
+        print(DEGRADE_INSTRUCTION)
+    print(f"elapsed {max(elapsed, 0)} min, remaining {max(remaining, 0)} min")
+
+
+def _open(args):
+    """Return (workspace, state, ledger) for an initialized directory."""
+    ws = Workspace(args.dir)
+    if not ws.state_path.exists():
+        raise SystemExit(
+            f"No Alexandria workspace in {ws.dir}. Run `alx init {ws.dir} "
+            "--lang en --subject subject.txt` first."
+        )
+    return ws, ws.load_state(), ws.load_ledger()
+
+
+# --------------------------------------------------------------------------
+# text helpers
+# --------------------------------------------------------------------------
+
+_QUOTED_SPAN_RE = re.compile(
+    r"「([^」]{4,}?)」|『([^』]{4,}?)』|“([^”]{4,}?)”|‘([^’]{4,}?)’|\"([^\"\n]{4,}?)\""
+)
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def normalize_url(value):
+    """lowercase scheme/host, strip fragment, utm_*, trailing slash (spec §6.7c)."""
+    parts = urlsplit(str(value or "").strip())
+    query = "&".join(
+        item
+        for item in parts.query.split("&")
+        if item and not item.casefold().startswith("utm_")
+    )
+    path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme.casefold(), parts.netloc.casefold(), path, query, ""))
+
+
+def quoted_spans(text):
+    spans = []
+    for match in _QUOTED_SPAN_RE.finditer(str(text or "")):
+        span = next(group for group in match.groups() if group is not None)
+        spans.append(span.strip())
+    return [span for span in spans if len(span) >= 4]
+
+
+def _blocks(text):
+    """Return (start, end, text) for every blank-line separated block."""
+    blocks = []
+    start = 0
+    for match in re.finditer(r"\n[ \t]*\n", text + "\n\n"):
+        end = min(match.start(), len(text))
+        if text[start:end].strip():
+            blocks.append((start, end, text[start:end]))
+        start = match.end()
+        if start >= len(text):
+            break
+    return blocks
+
+
+def sources_heading_offset(text):
+    offset = None
+    for match in re.finditer(r"^##\s+(.+)$", text, re.MULTILINE):
+        if match.group(1).strip().casefold() in validate_report.SOURCE_HEADINGS:
+            offset = match.start()
+    return offset
+
+
+def body_paragraphs(text):
+    """Numbered body paragraphs: (number, start, end, text)."""
+    limit = sources_heading_offset(text)
+    body = text[:limit] if limit is not None else text
+    masked = _FENCE_RE.sub(lambda match: " " * len(match.group(0)), body)
+    numbered = []
+    number = 0
+    for start, end, block in _blocks(masked):
+        first = block.lstrip().splitlines()[0]
+        if first.startswith(("#", ">", "```", "|")):
+            continue
+        number += 1
+        numbered.append((number, start, end, body[start:end]))
+    return numbered
+
+
+def markdown_links(text):
+    return [(match.group(1), match.group(2)) for match in _LINK_RE.finditer(text)]
+
+
+def masked_prose(text):
+    """Link-stripped, whitespace-folded prose used by the freshness diff."""
+    stripped = _LINK_RE.sub(lambda match: match.group(1), text)
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def sentence_window(text, start, length, context):
+    """Sentence-bounded verbatim window, no ellipsis, <= 300 chars."""
+    left = max(0, start - context)
+    right = min(len(text), start + length + context)
+    boundaries = "。！？!?；;\n"
+    head = start
+    while head > left and text[head - 1] not in boundaries:
+        head -= 1
+    tail = start + length
+    while tail < right and text[tail - 1] not in boundaries:
+        tail += 1
+    window = text[head:tail].strip()
+    if len(window) > MAX_WINDOW_CHARS:
+        window = window[:MAX_WINDOW_CHARS].strip()
+    return window
+
+
+# --------------------------------------------------------------------------
+# fetch and cache
+# --------------------------------------------------------------------------
+
+
+def _deadline_epoch(state):
+    """T1 compares `deadline` against `time.time()`, so hand it a POSIX stamp."""
+    return datetime.fromisoformat(state["deadline"]).timestamp()
+
+
+def cached(ws, source_id):
+    """`source_fidelity.read_cache` over the workspace cache directory."""
+    return source_fidelity.read_cache(ws.sources, source_id)
+
+
+def cache_matches(text, meta):
+    """`write_cache` appends at most one newline to the hashed visible text."""
+    digests = {_sha256_text(text)}
+    if text.endswith("\n"):
+        digests.add(_sha256_text(text[:-1]))
+    return meta.get("text_sha256") in digests
+
+
+def cache_urls(meta):
+    known = {
+        normalize_url(meta.get("url", "")),
+        normalize_url(meta.get("final_url", "")),
+    }
+    known.update(normalize_url(alias) for alias in meta.get("aliases") or [])
+    return {item for item in known if item}
+
+
+def _registrable_domain(url):
+    return validate_ledger._registrable_domain(url)
+
+
+def _next_id(items, prefix, key):
+    used = {
+        int(item[key][1:])
+        for item in items
+        if isinstance(item.get(key), str) and item[key][1:].isdigit()
+    }
+    number = 1
+    while number in used:
+        number += 1
+    return f"{prefix}{number}"
+
+
+def _source_by_url(ledger, url):
+    normalized = normalize_url(url)
+    for source in ledger.get("sources", []):
+        known = {normalize_url(source.get("url", ""))}
+        known.update(normalize_url(alias) for alias in source.get("aliases", []))
+        if normalized in known:
+            return source
+    return None
+
+
+# --------------------------------------------------------------------------
+# probes (T1 owns them; alx only supplies the (claim, source, text) triple)
+# --------------------------------------------------------------------------
+
+
+def claim_probe_findings(ws, ledger, claim):
+    """`source_fidelity.probe_findings` per (claim, source) pair, plus cache gaps."""
+    sources = {
+        source.get("source_id"): source
+        for source in ledger.get("sources", [])
+        if isinstance(source, dict)
+    }
+    claim_id = claim.get("claim_id", "")
+    findings = []
+    for record in claim.get("source_evidence") or []:
+        source_id = record.get("source_id", "")
+        entry = cached(ws, source_id)
+        if entry is None:
+            findings.append(
+                finding(
+                    "fidelity/cache-missing",
+                    f"{source_id} has no fetched cache; the extract cannot be probed.",
+                    ids=[claim_id, source_id],
+                )
+            )
+            continue
+        text, meta = entry
+        findings.extend(
+            source_fidelity.probe_findings(
+                claim, sources.get(source_id, {"source_id": source_id}), text,
+                cache_meta=meta,
+            )
+        )
+    return findings
+
+
+def record_probe_contexts(ws, claim):
+    """Ruling R1: bind the probe contexts of a freshly accepted claim."""
+    for record in claim.get("source_evidence") or []:
+        source_id = record.get("source_id", "")
+        if cached(ws, source_id) is None:
+            continue
+        source_fidelity.record_probe_contexts(
+            ws.sources,
+            source_id,
+            claim.get("claim_id", ""),
+            source_fidelity.probe_strings(record.get("extract_or_location", "")),
+        )
+
+
+# --------------------------------------------------------------------------
+# init
+# --------------------------------------------------------------------------
+
+
+def _skeleton_report(subject, lang, report_day):
+    date_line = report_contract.localized_date(lang, report_day)
+    if lang == "en":
+        standfirst = "Standfirst placeholder: one sentence on what this report decides."
+        sources = "## Sources"
+    else:
+        standfirst = "导语占位：一句话说明本报告要回答的问题。"
+        sources = "## 资料来源"
+    return f"# {subject}\n\n> {standfirst}\n> {date_line}\n\n{sources}\n"
+
+
+def _skeleton_ledger(args, subject, question, reader, report_day):
+    ledger = {
+        "schema_version": 4,
+        "subject": subject,
+        "research_question": question,
+        "brief": {
+            "intended_reader": reader,
+            "decision_or_use": question,
+            "archetype": args.archetype,
+            "report_language": args.lang,
+            "editorial_mode": "analytical",
+            "scope": {
+                "time_horizon": "Set in `alx ledger merge`.",
+                "geography": "Set in `alx ledger merge`.",
+                "inclusions": [],
+                "exclusions": [],
+            },
+        },
+        "people": [],
+        "report_date": report_day.isoformat(),
+        "coverage": [],
+        "sources": [],
+        "claims": [],
+        "excluded_claims": [],
+        "synthesis": {
+            "central_judgment_claim_ids": [],
+            "counterevidence_claim_ids": [],
+            "adversarial_tests": [],
+            "implications": [],
+            "decisions_or_takeaways": [],
+            "scenarios": [],
+            "limitations": "Set in `alx ledger merge`.",
+            "research_stop_reason": "Set in `alx ledger merge`.",
+        },
+        "unresolved_questions": [],
+    }
+    if args.archetype == "person":
+        ledger["people"].append(
+            {
+                "person_id": "P1",
+                "name": subject,
+                "aliases": [],
+                "living_status": args.subject_status,
+                "public_role": "public",
+                "relationship": "primary_subject",
+            }
+        )
+    return ledger
+
+
+def cmd_init(args):
+    ws = Workspace(args.directory)
+    if ws.ledger_path.exists() and not args.force:
+        print(
+            f"{ws.ledger_path} exists; `alx init` refuses to overwrite it. "
+            "Use --force to reset the workspace.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.archetype == "person" and not args.subject_status:
+        print(
+            "--subject-status {living,recently_deceased,deceased,unknown} is "
+            "required for the person archetype.",
+            file=sys.stderr,
+        )
+        return 1
+    subject_text = Path(args.subject).read_text(encoding="utf-8").strip()
+    lines = [line.strip() for line in subject_text.splitlines() if line.strip()]
+    subject = lines[0] if lines else "Untitled subject"
+    question = lines[1] if len(lines) > 1 else subject
+    reader = (
+        Path(args.reader).read_text(encoding="utf-8").strip()
+        if args.reader
+        else "Unspecified reader; set it with `alx ledger merge`."
+    )
+    for directory in (ws.dir, ws.sources, ws.claims, ws.reviews, ws.receipts, ws.alx):
+        directory.mkdir(parents=True, exist_ok=True)
+    report_day = date.today()
+    ws.save_ledger(_skeleton_ledger(args, subject, question, reader, report_day))
+    ws.report.write_text(
+        _skeleton_report(subject, args.lang, report_day), encoding="utf-8"
+    )
+    started = _now()
+    state = {
+        "start_time": started.isoformat(),
+        "deadline": (started + timedelta(minutes=args.budget_minutes)).isoformat(),
+        "lang": args.lang,
+        "archetype": args.archetype,
+        "counters": {"fetch": 0, "claims": 0, "check": 0, "issue": 0},
+        "reviews": {
+            kind: {"iteration": 0, "finished": False} for kind in REVIEW_KINDS
+        },
+        "bindings": {},
+        "mechanical_deletions": [],
+        "last_check": {},
+        "humanization": "pending",
+    }
+    ws.save_state(state)
+    ws.worklog.touch()
+    _emit(
+        ws,
+        state,
+        "init",
+        f"{args.lang} {args.archetype} workspace",
+        [
+            f"Workspace ready: {ws.dir}",
+            "Next: `alx fetch <url> ...` for 8-15 reachable sources.",
+        ],
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------
+# fetch / source set
+# --------------------------------------------------------------------------
+
+
+def _upsert_source(ledger, source_id, result, args, aliases):
+    domain = _registrable_domain(result.final_url) or ""
+    existing = next(
+        (
+            source
+            for source in ledger["sources"]
+            if source.get("source_id") == source_id
+        ),
+        None,
+    )
+    source = existing or {"source_id": source_id}
+    source.update(
+        {
+            "title": result.title or result.final_url,
+            "url": result.final_url,
+            "aliases": sorted(set(aliases) - {result.final_url}),
+            "publisher": domain.split(".")[0].title() or domain,
+            "accessed": date.today().isoformat(),
+            "source_family": domain,
+            "published": result.published or source.get("published"),
+        }
+    )
+    source.setdefault("author", None)
+    source["provenance"] = args.provenance or source.get("provenance", "unverified")
+    source["evidence_type"] = args.type or source.get("evidence_type", "news_report")
+    source["roles"] = args.role or source.get("roles", ["independent_analysis"])
+    source["accountability_basis"] = args.accountability or source.get(
+        "accountability_basis", "none"
+    )
+    if existing is None:
+        ledger["sources"].append(source)
+    return source
+
+
+def _fetch_one(ws, state, ledger, args, url, lines):
+    parsed = urlsplit(url)
+    if parsed.scheme.casefold() not in {"http", "https"}:
+        lines.append(f"{url} REJECTED (non-http scheme) — not added")
+        return False
+    aliases = [url]
+    target = url
+    if parsed.scheme.casefold() == "http":
+        target = urlunsplit(("https",) + tuple(parsed)[1:])
+    existing = _source_by_url(ledger, target) or _source_by_url(ledger, url)
+    if existing is not None:
+        lines.append(f"{existing['source_id']} already in the ledger: {existing['url']}")
+        return True
+    result = source_fidelity.fetch_document(
+        target,
+        cache_dir=ws.sources,
+        refresh=False,
+        timeout=FETCH_TIMEOUT_SECONDS,
+        deadline=_deadline_epoch(state),
+    )
+    source_id = _next_id(ledger["sources"], "S", "source_id")
+    if result.status == "unreachable":
+        lines.append(
+            f"{source_id} UNREACHABLE ({result.reason_class}: {result.reason})"
+            " — not added"
+        )
+        return False
+    if result.status != "ok":
+        lines.append(f"{source_id} UNDECODABLE ({result.reason_class}) — not added")
+        return False
+    aliases.extend(result.aliases)
+    aliases.append(target)
+    result.aliases = sorted(set(aliases))
+    source_fidelity.write_cache(ws.sources, source_id, result)
+    _upsert_source(ledger, source_id, result, args, result.aliases)
+    text, _meta = cached(ws, source_id)
+    lines.append(
+        f"{source_id} OK {len(text)} chars {result.charset} "
+        f'"{result.title}" {result.final_url}'
+    )
+    return True
+
+
+def _refresh_one(ws, state, ledger, args, source_id, lines):
+    source = next(
+        (item for item in ledger["sources"] if item.get("source_id") == source_id),
+        None,
+    )
+    if source is None:
+        lines.append(f"{source_id} is not in the ledger — nothing to refresh")
+        return False
+    entry = cached(ws, source_id)
+    previous = entry[1].get("text_sha256") if entry else None
+    result = source_fidelity.fetch_document(
+        source["url"],
+        cache_dir=ws.sources,
+        refresh=True,
+        timeout=FETCH_TIMEOUT_SECONDS,
+        deadline=_deadline_epoch(state),
+    )
+    if result.status != "ok":
+        lines.append(
+            f"{source_id} UNREACHABLE ({result.reason_class}: {result.reason}) "
+            "— cache kept"
+        )
+        return False
+    result.aliases = sorted(set(result.aliases) | set(source.get("aliases", [])))
+    source_fidelity.write_cache(ws.sources, source_id, result)
+    source["accessed"] = date.today().isoformat()
+    text, _meta = cached(ws, source_id)
+    lines.append(
+        f"{source_id} OK {len(text)} chars {result.charset} "
+        f'"{result.title}" {result.final_url}'
+    )
+    if previous and previous != result.text_sha256:
+        affected = [
+            claim["claim_id"]
+            for claim in ledger.get("claims", [])
+            if source_id in claim.get("source_ids", [])
+        ]
+        if affected:
+            lines.append(
+                f"{source_id} text changed; claims {','.join(affected)} need re-probe"
+            )
+        else:
+            lines.append(f"{source_id} text changed; no claims use it yet")
+    return True
+
+
+def cmd_fetch(args):
+    ws, state, ledger = _open(args)
+    lines = []
+    ok = True
+    if args.id:
+        if not args.refresh:
+            print("`alx fetch --id S<n>` requires --refresh.", file=sys.stderr)
+            return 1
+        ok = _refresh_one(ws, state, ledger, args, args.id, lines)
+    else:
+        if not args.urls:
+            print("`alx fetch` needs one or more URLs.", file=sys.stderr)
+            return 1
+        for url in args.urls:
+            _elapsed, remaining = _minutes(state)
+            if remaining < FETCH_STOP_MINUTES:
+                lines.append(
+                    f"remaining {remaining} min: fetch batch stopped; draft with "
+                    "the sources already in the ledger."
+                )
+                break
+            ok = _fetch_one(ws, state, ledger, args, url, lines) and ok
+    ws.save_ledger(ledger)
+    state["counters"]["fetch"] = state["counters"].get("fetch", 0) + 1
+    ws.save_state(state)
+    _emit(ws, state, "fetch", f"{len(ledger['sources'])} sources", lines)
+    return 0 if ok else 1
+
+
+def cmd_source_set(args):
+    ws, state, ledger = _open(args)
+    source = next(
+        (item for item in ledger["sources"] if item.get("source_id") == args.source_id),
+        None,
+    )
+    if source is None:
+        print(f"{args.source_id} is not in the ledger.", file=sys.stderr)
+        return 1
+    if args.provenance:
+        source["provenance"] = args.provenance
+    if args.type:
+        source["evidence_type"] = args.type
+    if args.role:
+        source["roles"] = args.role
+    if args.accountability:
+        source["accountability_basis"] = args.accountability
+    if args.published:
+        source["published"] = args.published
+    if args.undated_reason:
+        source["undated_reason"] = Path(args.undated_reason).read_text(
+            encoding="utf-8"
+        ).strip()
+    ws.save_ledger(ledger)
+    _emit(
+        ws,
+        state,
+        "source set",
+        f"{args.source_id} classification",
+        [f"{args.source_id} classification updated."],
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------
+# find / show
+# --------------------------------------------------------------------------
+
+
+def cmd_find(args):
+    ws, state, _ledger = _open(args)
+    entry = cached(ws, args.source_id)
+    if entry is None:
+        print(f"{args.source_id} has no cache; run `alx fetch`.", file=sys.stderr)
+        return 1
+    text = entry[0]
+    lines = []
+    for index, match in enumerate(
+        re.finditer(re.escape(args.keyword), text, re.IGNORECASE), start=1
+    ):
+        if index > args.max:
+            break
+        window = sentence_window(text, match.start(), len(args.keyword), args.context)
+        lines.append(f"{index}. {window}")
+    if not lines:
+        lines.append(f"{args.source_id} does not contain {args.keyword}.")
+    _emit(ws, state, "find", f"{args.source_id} {args.keyword}", lines)
+    return 0
+
+
+def cmd_show(args):
+    ws, state, _ledger = _open(args)
+    entry = cached(ws, args.source_id)
+    if entry is None:
+        print(f"{args.source_id} has no cache; run `alx fetch`.", file=sys.stderr)
+        return 1
+    text = entry[0]
+    end = args.end if args.end is not None else min(len(text), args.start + 1000)
+    lines = [
+        f"{args.source_id} chars {args.start}-{min(end, len(text))} of {len(text)}",
+        text[args.start : end],
+    ]
+    _emit(ws, state, "show", f"{args.source_id} window", lines)
+    return 0
+
+
+# --------------------------------------------------------------------------
+# claims
+# --------------------------------------------------------------------------
+
+
+#: Spec §6.4 names exactly which families run for one claim-input object; the
+#: ledger-wide rules (coverage, synthesis, portfolio, provenance) belong to
+#: §6.7(b) and cannot hold before `ledger merge` has run.
+CLAIM_ADD_FAMILIES = frozenset(
+    {
+        "ledger/claim-input",
+        "ledger/extract-length",
+        "ledger/quantity",
+        "ledger/status",
+        "ledger/direction",
+        "ledger/derived",
+        "ledger/date-granularity",
+        "ledger/person",
+        "ledger/harm",
+        "ledger/reference",
+        "ledger/excluded-supports",
+        "fidelity/mismatch",
+        "fidelity/short-segment",
+        "fidelity/context-changed",
+        "fidelity/cache-missing",
+    }
+)
+
+#: Ledger-schema claim fields that `references/claim-input.schema.json` does not
+#: list while `additionalProperties: false` rejects them. `alx` carries them
+#: around the claim-input validator and re-attaches them after expansion.
+CLAIM_INPUT_PASSTHROUGH = ("decision_relevance", "named_subjects")
+
+#: Ledger-schema keys a v4 claim must carry that `claim-input` never supplies.
+CLAIM_DEFAULTS = {
+    "as_of": None,
+    "confidence": "medium",
+    "status": "supported",
+    "supports": [],
+    "contradicts": [],
+    "person_ids": [],
+    "human_harm_review": None,
+    "reasoning": None,
+    "decision_relevance": None,
+    "what_would_change": None,
+    "resolution": None,
+    "limitations": None,
+    "verified_at": None,
+}
+
+
+
+def _batch_findings(ws, ledger, item, seen_ids):
+    """Only what `alx` owns: batch uniqueness and cache presence (spec §6.4)."""
+    findings = []
+    claim_id = item.get("claim_id")
+    if isinstance(claim_id, str) and claim_id in seen_ids:
+        findings.append(
+            finding(
+                "ledger/claim-input",
+                f"{claim_id} appears twice in this batch; ids are unique.",
+                ids=[claim_id],
+            )
+        )
+    known = {source.get("source_id") for source in ledger.get("sources", [])}
+    for record in item.get("source_evidence") or []:
+        if not isinstance(record, dict):
+            continue
+        source_id = record.get("source_id", "")
+        if source_id not in known:
+            findings.append(
+                finding(
+                    "ledger/claim-input",
+                    f"{source_id or '<missing>'} is not a fetched source.",
+                    ids=[claim_id or ""],
+                )
+            )
+        elif cached(ws, source_id) is None:
+            findings.append(
+                finding(
+                    "fidelity/cache-missing",
+                    f"{source_id} has no fetched cache; the extract cannot be probed.",
+                    ids=[claim_id or "", source_id],
+                )
+            )
+    return findings
+
+
+def claim_input_body(item):
+    """The claim-input object minus the fields its schema does not declare."""
+    return {
+        key: value
+        for key, value in item.items()
+        if key not in CLAIM_INPUT_PASSTHROUGH
+    }
+
+
+def expand_claim_input(ws, item, ledger):
+    """`validate_ledger.expand_claim_input` plus the ledger-schema defaults."""
+    source_ids = []
+    for record in item.get("source_evidence") or []:
+        source_id = record.get("source_id")
+        if source_id and source_id not in source_ids:
+            source_ids.append(source_id)
+    cache_meta = {}
+    for source_id in source_ids:
+        entry = cached(ws, source_id)
+        if entry is not None:
+            cache_meta[source_id] = entry[1]
+    claim = validate_ledger.expand_claim_input(
+        claim_input_body(item), ledger, cache_meta=cache_meta
+    )
+    claim.pop("report_paragraph", None)  # ruling R4: bindings live in state.json
+    for key in CLAIM_INPUT_PASSTHROUGH:
+        if key in item:
+            claim[key] = item[key]
+    for key, value in CLAIM_DEFAULTS.items():
+        claim.setdefault(key, value)
+    if isinstance(claim.get("verified_at"), str):
+        claim["verified_at"] = claim["verified_at"][:10]
+    if claim.get("as_of") is None:
+        # The cache stamp is UTC and `report_date` is local, so preferring
+        # verified_at keeps `verified_at >= as_of` across a date rollover.
+        claim["as_of"] = claim.get("verified_at") or ledger.get("report_date")
+    evidence = claim.get("source_evidence") or []
+    if evidence and not claim.get("extract_or_location"):
+        claim["extract_or_location"] = evidence[0].get("extract_or_location", "")
+    triangulation = claim.get("triangulation") or {}
+    if not triangulation.get("rationale"):
+        families = sorted(
+            {
+                source.get("source_family", "")
+                for source in ledger.get("sources", [])
+                if source.get("source_id") in source_ids and source.get("source_family")
+            }
+        )
+        triangulation["rationale"] = (
+            "Independent source families carry this claim: " + ", ".join(families) + "."
+            if len(families) >= 2
+            else "Only one source family carries this claim: "
+            + (families[0] if families else "none")
+            + "."
+        )
+        claim["triangulation"] = triangulation
+    return claim
+
+
+def cmd_claim_add(args):
+    ws, state, ledger = _open(args)
+    items = []
+    for path in args.files:
+        payload = _read_json(path)
+        items.extend(payload if isinstance(payload, list) else [payload])
+    lines = []
+    accepted = 0
+    failed = False
+    seen = set()
+    for item in items:
+        claim_id = item.get("claim_id") or "<no claim_id>"
+        findings = adopt(
+            _batch_findings(ws, ledger, item, seen)
+            + [
+                item_finding
+                for item_finding in validate_ledger.claim_findings(
+                    claim_input_body(item), ledger, cache_dir=ws.sources
+                )
+                if not is_finding(item_finding)
+                or item_finding.family in CLAIM_ADD_FAMILIES
+            ]
+        )
+        for item_finding in findings:
+            lines.append(
+                f"{claim_id} FAIL [{item_finding.family}] {item_finding.message}"
+                f" — fix: {item_finding.fix}"
+            )
+        if hard_findings(findings):
+            failed = True
+            continue
+        claim = expand_claim_input(ws, item, ledger)
+        claims = ledger.setdefault("claims", [])
+        replaced = False
+        for index, existing in enumerate(claims):
+            if existing.get("claim_id") == claim["claim_id"]:
+                claim["report_excerpts"] = existing.get("report_excerpts", [])
+                claims[index] = claim
+                replaced = True
+                break
+        if not replaced:
+            claims.append(claim)
+        if isinstance(item.get("report_paragraph"), int):
+            state.setdefault("bindings", {})[claim["claim_id"]] = item["report_paragraph"]
+        record_probe_contexts(ws, claim)
+        seen.add(claim["claim_id"])
+        accepted += 1
+        verb = "replaced" if replaced else "added"
+        lines.append(
+            f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
+        )
+    ws.save_ledger(ledger)
+    state["counters"]["claims"] = len(ledger["claims"])
+    ws.save_state(state)
+    _emit(ws, state, "claim add", f"{accepted} accepted", lines)
+    return 1 if failed else 0
+
+
+def _claim_paragraph(state, claim):
+    return state.get("bindings", {}).get(claim.get("claim_id"))
+
+
+def cmd_claim_bind(args):
+    ws, state, ledger = _open(args)
+    ids = {claim.get("claim_id") for claim in ledger.get("claims", [])}
+    if args.claim_id not in ids:
+        print(f"{args.claim_id} is not in the ledger.", file=sys.stderr)
+        return 1
+    state.setdefault("bindings", {})[args.claim_id] = args.paragraph
+    ws.save_state(state)
+    _emit(
+        ws,
+        state,
+        "claim bind",
+        f"{args.claim_id} -> paragraph {args.paragraph}",
+        [f"{args.claim_id} is bound to paragraph {args.paragraph}."],
+    )
+    return 0
+
+
+def _drop_plan(ws, state, ledger, claim_id):
+    text = ws.report_text()
+    mapping, _mapping_findings = paragraph_mapping(ws, state, ledger, text)
+    paragraph = mapping.get(claim_id)
+    co_mapped = [
+        other
+        for other, number in mapping.items()
+        if number == paragraph and other != claim_id and paragraph is not None
+    ]
+    dropped = [claim_id, *co_mapped]
+    dependents = [
+        claim.get("claim_id")
+        for claim in ledger.get("claims", [])
+        if claim.get("claim_id") not in dropped
+        and set(claim.get("supports", [])) & set(dropped)
+    ]
+    return paragraph, co_mapped, dependents
+
+
+def apply_drop(ws, state, ledger, claim_id, reason):
+    """The §6.8 mechanical scope drop; returns the lines it would print."""
+    paragraph, co_mapped, dependents = _drop_plan(ws, state, ledger, claim_id)
+    lines = [
+        f"{claim_id} maps to paragraph {paragraph if paragraph else '<unmapped>'}."
+    ]
+    if co_mapped:
+        lines.append(f"Also dropped (same paragraph): {', '.join(co_mapped)}")
+    if dependents:
+        lines.append(
+            "HARD until re-pointed — claims that support a dropped claim: "
+            + ", ".join(dependents)
+        )
+    dropped = [claim_id, *co_mapped]
+    text = ws.report_text()
+    if paragraph is not None:
+        for number, start, end, block in body_paragraphs(text):
+            if number == paragraph:
+                state.setdefault("mechanical_deletions", []).append(
+                    _sha256_text(masked_prose(block))
+                )
+                text = text[:start] + text[end:]
+                text = re.sub(r"\n{3,}", "\n\n", text)
+                break
+        ws.report.write_text(text, encoding="utf-8")
+        lines.append(f"Deleted paragraph {paragraph} of report.md.")
+    stamp = _now().isoformat()
+    remaining = []
+    ledger.setdefault("excluded_claims", [])
+    for claim in ledger.get("claims", []):
+        if claim.get("claim_id") in dropped:
+            excluded = dict(claim)
+            excluded["reason"] = reason
+            excluded["dropped_at"] = stamp
+            ledger["excluded_claims"].append(excluded)
+        else:
+            remaining.append(claim)
+    ledger["claims"] = remaining
+    for item in ledger.get("coverage", []):
+        item["claim_ids"] = [
+            value for value in item.get("claim_ids", []) if value not in dropped
+        ]
+    ledger["synthesis"] = strip_synthesis(ledger.get("synthesis", {}), dropped)
+    drops = state.setdefault("mechanical_drops", [])
+    for value in dropped:
+        state.get("bindings", {}).pop(value, None)
+        if value not in drops:
+            drops.append(value)
+    ws.save_ledger(ledger)
+    ws.save_state(state)
+    _regenerate_sources(ws, ledger)
+    lines.append(f"Excluded: {', '.join(dropped)}")
+    return lines
+
+
+def cmd_claim_drop(args):
+    ws, state, ledger = _open(args)
+    claim_id = args.claim_id
+    if claim_id not in {claim.get("claim_id") for claim in ledger.get("claims", [])}:
+        print(f"{claim_id} is not in the ledger.", file=sys.stderr)
+        return 1
+    if not args.apply:
+        paragraph, co_mapped, dependents = _drop_plan(ws, state, ledger, claim_id)
+        lines = [
+            f"{claim_id} maps to paragraph {paragraph if paragraph else '<unmapped>'}."
+        ]
+        if co_mapped:
+            lines.append(f"Also dropped (same paragraph): {', '.join(co_mapped)}")
+        if dependents:
+            lines.append(
+                "HARD until re-pointed — claims that support a dropped claim: "
+                + ", ".join(dependents)
+            )
+        lines.append(f"Apply with `{remedy('claim-drop', claim_id=claim_id)}`.")
+        _emit(ws, state, "claim drop", f"{claim_id} plan", lines)
+        return 0
+    lines = apply_drop(
+        ws,
+        state,
+        ledger,
+        claim_id,
+        args.reason or "Class-F finding; scope dropped.",
+    )
+    _emit(ws, state, "claim drop", f"{claim_id} excluded", lines)
+    return 0
+
+
+# --------------------------------------------------------------------------
+# ledger merge
+# --------------------------------------------------------------------------
+
+
+def _deep_merge(target, patch):
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _deep_merge(target[key], value)
+        else:
+            target[key] = value
+    return target
+
+
+def cmd_ledger_merge(args):
+    ws, state, ledger = _open(args)
+    patch = _read_json(args.patch)
+    forbidden = [key for key in ("claims", "sources") if key in patch]
+    if forbidden:
+        print(
+            "sources only via fetch/source set; claims only via claim add "
+            f"(patch carried: {', '.join(forbidden)}).",
+            file=sys.stderr,
+        )
+        return 1
+    for key, value in patch.items():
+        if isinstance(value, list):
+            ledger[key] = value
+        elif isinstance(value, dict):
+            _deep_merge(ledger.setdefault(key, {}), value)
+        else:
+            ledger[key] = value
+    ws.save_ledger(ledger)
+    findings = adopt(_ledger_findings(ws, ledger))
+    lines = [render_grouped(findings)] if findings else ["Ledger merged; no findings."]
+    _emit(ws, state, "ledger merge", ", ".join(patch), lines)
+    return 1 if hard_findings(findings) else 0
+
+
+# --------------------------------------------------------------------------
+# snapshot
+# --------------------------------------------------------------------------
+
+
+def cmd_snapshot(args):
+    ws, state, _ledger = _open(args)
+    if args.restore:
+        latest = ws.latest_snapshot()
+        if latest is None:
+            print("No snapshot to restore; run `alx snapshot` first.", file=sys.stderr)
+            return 1
+        shutil.copyfile(latest, ws.report)
+        _emit(
+            ws,
+            state,
+            "snapshot",
+            f"restored {latest.name}",
+            [f"report.md restored from {latest.name}."],
+        )
+        return 0
+    base = ws.dir / "report.pre-rewild.md"
+    if not base.exists():
+        target = base
+    elif args.iter:
+        iteration = len(ws.snapshots())
+        target = ws.dir / f"report.pre-rewild.iter{iteration}.md"
+    else:
+        print(
+            f"{base.name} exists (write-once). Use `alx snapshot --iter` for the "
+            "next humanization round.",
+            file=sys.stderr,
+        )
+        return 1
+    shutil.copyfile(ws.report, target)
+    state["humanization"] = "snapshot"
+    ws.save_state(state)
+    _emit(ws, state, "snapshot", target.name, [f"Snapshot written: {target.name}"])
+    return 0
+
+
+# --------------------------------------------------------------------------
+# check
+# --------------------------------------------------------------------------
+
+
+def _snapshot_text(ws):
+    snapshot = ws.latest_snapshot()
+    return snapshot.read_text(encoding="utf-8") if snapshot is not None else None
+
+
+def _integrity_findings(ws, state, ledger):
+    """Section (a): `validate_report.integrity_findings` plus the UTF-8 guard."""
+    raw = ws.report.read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return [finding("integrity/encoding", f"report.md is not UTF-8: {exc}.")]
+    return list(
+        validate_report.integrity_findings(
+            text,
+            ledger,
+            snapshot_text=_snapshot_text(ws),
+            lang=state.get("lang", "en"),
+        )
+    )
+
+
+def _metadata_lines(text):
+    lines = []
+    found_h1 = False
+    collecting = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# ") and not found_h1:
+            found_h1 = True
+            continue
+        if found_h1 and stripped.startswith(">"):
+            collecting = True
+            lines.append(stripped.lstrip(">").strip())
+            continue
+        if collecting and stripped:
+            break
+        if found_h1 and stripped and not collecting:
+            break
+    return lines
+
+
+def _ledger_findings(ws, ledger):
+    """Section (b): T2's grouped rules plus the §6.7(b) cache binding."""
+    findings = list(
+        validate_ledger.collect_findings(
+            ledger,
+            schema_path=validate_ledger.DEFAULT_SCHEMA,
+            cache_dir=ws.sources,
+        )
+    )
+    key_source_ids = set()
+    central = set(ledger.get("synthesis", {}).get("central_judgment_claim_ids", []))
+    for claim in ledger.get("claims", []):
+        if claim.get("importance") == "key" or claim.get("claim_id") in central:
+            key_source_ids.update(claim.get("source_ids", []))
+    for source in ledger.get("sources", []):
+        source_id = source.get("source_id", "")
+        entry = cached(ws, source_id)
+        if entry is None:
+            findings.append(
+                finding(
+                    "fidelity/cache-missing",
+                    f"{source_id} has no `sources/{source_id}.txt` + meta pair.",
+                    ids=[source_id],
+                )
+            )
+            continue
+        text, meta = entry
+        if normalize_url(source.get("url", "")) not in cache_urls(meta):
+            findings.append(
+                finding(
+                    "fidelity/cache-detached",
+                    f"{source_id} cache url {meta.get('url')} != ledger url "
+                    f"{source.get('url')}.",
+                    ids=[source_id],
+                )
+            )
+        elif not cache_matches(text, meta):
+            findings.append(
+                finding(
+                    "fidelity/cache-detached",
+                    f"{source_id} cache text sha256 does not match its meta record.",
+                    ids=[source_id],
+                )
+            )
+        if source.get("provenance") == "unverified" and source_id in key_source_ids:
+            findings.append(
+                finding(
+                    "ledger/provenance",
+                    f"{source_id} carries a key or central claim while provenance is "
+                    "`unverified` (treated as interested).",
+                    ids=[source_id],
+                )
+            )
+    return findings
+
+
+def paragraph_mapping(ws, state, ledger, text):
+    """{claim_id: paragraph} for every reported claim (spec §6.7c)."""
+    paragraphs = body_paragraphs(text)
+    urls_by_paragraph = {
+        number: {normalize_url(url) for _label, url in markdown_links(block)}
+        for number, _start, _end, block in paragraphs
+    }
+    mapping = {}
+    for claim in ledger.get("claims", []):
+        if not claim.get("include_in_report", True):
+            continue
+        claim_id = claim.get("claim_id", "")
+        explicit = _claim_paragraph(state, claim)
+        if explicit:
+            mapping[claim_id] = explicit
+            continue
+        claim_urls = set()
+        for source in ledger.get("sources", []):
+            if source.get("source_id") in claim.get("source_ids", []):
+                claim_urls.add(normalize_url(source.get("url", "")))
+                claim_urls.update(
+                    normalize_url(alias) for alias in source.get("aliases", [])
+                )
+        candidates = [
+            number for number, urls in urls_by_paragraph.items() if urls & claim_urls
+        ]
+        if len(candidates) == 1:
+            mapping[claim_id] = candidates[0]
+    return mapping, []
+
+
+def _bound_ledger(state, ledger):
+    """T4 reads `report_paragraph` off the claim; ruling R4 keeps it in state."""
+    bindings = state.get("bindings", {})
+    if not bindings:
+        return ledger
+    shadow = dict(ledger)
+    shadow["claims"] = [
+        dict(claim, report_paragraph=bindings[claim["claim_id"]])
+        if claim.get("claim_id") in bindings
+        else claim
+        for claim in ledger.get("claims", [])
+    ]
+    return shadow
+
+
+def _cited_sources(ledger, text):
+    limit = sources_heading_offset(text)
+    body = text[:limit] if limit is not None else text
+    by_url = {}
+    for source in ledger.get("sources", []):
+        by_url[normalize_url(source.get("url", ""))] = source
+        for alias in source.get("aliases", []):
+            by_url[normalize_url(alias)] = source
+    ordered = []
+    for _label, url in markdown_links(body):
+        source = by_url.get(normalize_url(url))
+        if source is not None and source not in ordered:
+            ordered.append(source)
+    return ordered
+
+
+def _regenerate_sources(ws, ledger):
+    text = ws.report_text()
+    offset = sources_heading_offset(text)
+    if offset is None:
+        return False
+    heading_end = text.index("\n", offset) if "\n" in text[offset:] else len(text)
+    heading = text[offset:heading_end]
+    listing = "\n".join(
+        f"- [{source.get('title', source.get('url'))}]({source.get('url')})"
+        for source in _cited_sources(ledger, text)
+    )
+    ws.report.write_text(
+        text[:offset] + heading + "\n\n" + listing + "\n", encoding="utf-8"
+    )
+    return True
+
+
+def _binding_findings(ws, state, ledger, *, fix=False):
+    """Section (c): T4's binding rules, excerpt binding and leftover prose."""
+    text = ws.report_text()
+    mapping, _unused = paragraph_mapping(ws, state, ledger, text)
+    paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
+    if fix:
+        for claim in ledger.get("claims", []):
+            number = mapping.get(claim.get("claim_id"))
+            block = paragraphs.get(number)
+            if block and not claim.get("report_excerpts"):
+                excerpt = re.sub(r"\s+", " ", masked_prose(block))[:EXCERPT_CHARS]
+                claim["report_excerpts"] = [excerpt]
+        ws.save_ledger(ledger)
+        _regenerate_sources(ws, ledger)
+        text = ws.report_text()
+        mapping, _unused = paragraph_mapping(ws, state, ledger, text)
+    findings = list(validate_report.binding_findings(text, _bound_ledger(state, ledger)))
+    # Ruling R3: the schema no longer demands report_excerpts; `check`(c) does.
+    for claim in ledger.get("claims", []):
+        if claim.get("include_in_report") is not True:
+            continue
+        if claim.get("report_excerpts"):
+            continue
+        claim_id = claim.get("claim_id", "")
+        findings.append(
+            finding(
+                "binding/excerpt-missing",
+                f"{claim_id} is included in the report with no report_excerpts; "
+                "bind it to a paragraph, then `alx check --fix` writes the excerpt.",
+                ids=[claim_id],
+            )
+        )
+    deleted = set(state.get("mechanical_deletions", []))
+    for number, _start, _end, block in body_paragraphs(text):
+        if _sha256_text(masked_prose(block)) in deleted:
+            findings.append(
+                finding(
+                    "binding/leftover-prose",
+                    f"paragraph {number} was dropped with its claim but is still in "
+                    "report.md.",
+                )
+            )
+    return findings, mapping
+
+
+def _fidelity_findings(ws, ledger):
+    """Section (d): T1's offline full-coverage probe over the cache."""
+    result = source_fidelity.check_source_fidelity(
+        ledger,
+        sample_size=0,
+        online=False,
+        cache_dir=ws.sources,
+    )
+    return [
+        item for item in (result.get("findings") or []) if isinstance(item, Finding)
+    ]
+
+
+def _rewild_findings(ws, state):
+    """Section (e): the one seam T3 has not landed yet."""
+    snapshot = ws.latest_snapshot()
+    if snapshot is None:
+        return []
+    run_check = getattr(rewild_gate, "run_check", None)
+    if run_check is None:
+        return [
+            finding(
+                "review/rewild-missing",
+                "rewild evaluator unavailable: `rewild_gate.run_check` is missing, "
+                "so section (e) did not run.",
+            )
+        ]
+    note = ws.reviews / "rewild.json"
+    return list(
+        run_check(
+            ws.report,
+            snapshot,
+            lang=state.get("lang", "en"),
+            review_note_path=note if note.exists() else None,
+        )
+    )
+
+
+def _note_completeness(ws, state, ledger, kind):
+    """Offline completeness of one review note (spec §6.7f)."""
+    path = ws.reviews / f"{kind}.json"
+    if not path.exists():
+        return [f"reviews/{kind}.json is missing"]
+    note = _read_json(path)
+    missing = []
+    if note.get("status") != "completed":
+        missing.append("status=completed")
+    if kind == "rewild":
+        checks = note.get("fidelity_checks") or {}
+        missing.extend(
+            f"fidelity_checks.{name}"
+            for name in sorted(rewild_gate.REQUIRED_FIDELITY_CHECKS)
+            if checks.get(name) is not True
+        )
+        for index, item in enumerate(note.get("findings") or [], start=1):
+            if item.get("disposition") not in {"resolved", "rejected"}:
+                missing.append(f"findings[{index}].disposition")
+            if item.get("category") in {"region", "fidelity"} and (
+                item.get("disposition") != "resolved"
+            ):
+                missing.append(f"findings[{index}] unresolved {item.get('category')}")
+        return missing
+    scores = note.get("scores") or {}
+    for name in CONTENT_SCORE_KEYS:
+        entry = scores.get(name) or {}
+        if not isinstance(entry.get("score"), int):
+            missing.append(f"scores.{name}")
+        elif entry["score"] < 4:
+            missing.append(f"scores.{name}={entry['score']} below 4")
+    checks = note.get("checks") or {}
+    missing.extend(
+        f"checks.{name}" for name in CONTENT_CHECK_KEYS if checks.get(name) is not True
+    )
+    if not note.get("section_reviews"):
+        missing.append("section_reviews")
+    if not note.get("completion_note"):
+        missing.append("completion_note")
+    for index, item in enumerate(note.get("findings") or [], start=1):
+        if item.get("severity") == "critical" and item.get("disposition") != "fixed":
+            missing.append(f"findings[{index}] critical not fixed")
+        excerpt = item.get("report_disclosure_excerpt")
+        if excerpt and excerpt not in ws.report_text():
+            missing.append(f"findings[{index}].report_disclosure_excerpt not located")
+    # Spec §6.7(f): one disposition per retained claim->paragraph mapping.
+    dispositions = {
+        entry.get("claim_id"): entry.get("disposition")
+        for entry in note.get("claim_support") or []
+        if isinstance(entry, dict)
+    }
+    mapping, _unused = paragraph_mapping(ws, state, ledger, ws.report_text())
+    for claim_id in sorted(mapping):
+        if not dispositions.get(claim_id):
+            missing.append(f"claim_support[{claim_id}].disposition")
+    return missing
+
+
+def _paragraph_set(text, state):
+    limit = sources_heading_offset(text)
+    body = text[:limit] if limit is not None else text
+    prefix = tuple(VERIFICATION_NOTE_PREFIX.values())
+    blocks = []
+    for _start, _end, block in _blocks(body):
+        prose = masked_prose(block)
+        if prose.startswith(prefix):
+            continue
+        blocks.append(prose)
+    return blocks
+
+
+def _without_ids(values, dropped):
+    return [value for value in values or [] if value not in dropped]
+
+
+SYNTHESIS_BUCKETS = ("adversarial_tests", "implications", "decisions_or_takeaways")
+SYNTHESIS_ID_KEYS = ("claim_ids", "rationale_claim_ids")
+
+
+def strip_synthesis(synthesis, dropped):
+    """Spec §6.4: a drop removes synthesis references, entries included."""
+    synthesis = dict(synthesis)
+    for key in ("central_judgment_claim_ids", "counterevidence_claim_ids"):
+        synthesis[key] = _without_ids(synthesis.get(key), dropped)
+    for bucket in SYNTHESIS_BUCKETS:
+        kept = []
+        for entry in synthesis.get(bucket, []):
+            if isinstance(entry, dict):
+                entry = dict(entry)
+                emptied = False
+                for key in SYNTHESIS_ID_KEYS:
+                    if key in entry:
+                        entry[key] = _without_ids(entry[key], dropped)
+                        emptied = emptied or not entry[key]
+                if emptied:
+                    continue
+            kept.append(entry)
+        synthesis[bucket] = kept
+    return synthesis
+
+
+def _mechanical_ledger(ledger, state):
+    """The ledger reduced to what a review must see again (spec §6.8)."""
+    dropped = set(state.get("mechanical_drops", []))
+    stripped = {
+        key: value
+        for key, value in ledger.items()
+        if key not in {"claims", "sources", "excluded_claims", "coverage", "synthesis"}
+    }
+    stripped["claims"] = [
+        {
+            key: value
+            for key, value in claim.items()
+            if key not in {"report_excerpts", "verified_at"}
+        }
+        for claim in ledger.get("claims", [])
+        if claim.get("claim_id") not in dropped
+    ]
+    stripped["sources"] = [
+        {
+            key: value
+            for key, value in source.items()
+            if key not in {"accessed", "aliases"}
+        }
+        for source in ledger.get("sources", [])
+    ]
+    stripped["coverage"] = [
+        dict(item, claim_ids=_without_ids(item.get("claim_ids"), dropped))
+        for item in ledger.get("coverage", [])
+    ]
+    stripped["synthesis"] = strip_synthesis(ledger.get("synthesis", {}), dropped)
+    return json.dumps(stripped, ensure_ascii=False, sort_keys=True)
+
+
+def freshness_findings(ws, state, ledger, kind):
+    """Spec §6.8: current inputs must equal the reviewed copy up to mechanics."""
+    record = state.get("reviews", {}).get(kind, {})
+    family = f"review/{kind}"
+    if not record.get("finished"):
+        return [finding(f"review/{kind}-missing", f"the {kind} review is missing.")]
+    reviewed = ws.review_dir(kind, record["iteration"])
+    current = _paragraph_set(ws.report_text(), state)
+    previous = _paragraph_set(
+        (reviewed / "report.md").read_text(encoding="utf-8"), state
+    )
+    allowed = set(state.get("mechanical_deletions", []))
+    changed = [block for block in current if block not in previous]
+    removed = [
+        block
+        for block in previous
+        if block not in current and _sha256_text(block) not in allowed
+    ]
+    findings = []
+    if changed or removed:
+        findings.append(
+            finding(
+                f"{family}-stale",
+                f"re-review required: {len(changed)} paragraph(s) added or changed and "
+                f"{len(removed)} removed since the {kind} review.",
+            )
+        )
+    if kind == "content":
+        reviewed_ledger = _read_json(reviewed / "ledger.json")
+        if _mechanical_ledger(reviewed_ledger, state) != _mechanical_ledger(
+            ledger, state
+        ):
+            findings.append(
+                finding(
+                    f"{family}-stale",
+                    "re-review required: the ledger changed beyond accessed/"
+                    "verified_at/report_excerpts since the content review.",
+                )
+            )
+    return findings
+
+
+def _review_findings(ws, state, ledger):
+    """Section (f): both notes' gate checks plus §6.8 freshness."""
+    findings = []
+    if (ws.reviews / "content.json").exists():
+        findings.extend(
+            content_gate.run_check(
+                ws.report,
+                ws.ledger_path,
+                ws.reviews / "content.json",
+            )
+        )
+    for kind in REVIEW_KINDS:
+        note_missing = _note_completeness(ws, state, ledger, kind)
+        record = state.get("reviews", {}).get(kind, {})
+        if record.get("finished") and note_missing:
+            findings.append(
+                finding(
+                    f"review/{kind}-stale",
+                    f"the {kind} review note is incomplete: "
+                    f"{', '.join(note_missing[:3])}.",
+                )
+            )
+            continue
+        findings.extend(freshness_findings(ws, state, ledger, kind))
+    return findings
+
+
+def mechanical_fixes(ws, state, ledger):
+    """`check --fix`: derivations and refreshes only, never claim text or prose."""
+    for source in ledger.get("sources", []):
+        entry = cached(ws, source.get("source_id", ""))
+        if entry is None:
+            continue
+        meta = entry[1]
+        source["accessed"] = (meta.get("fetched_at") or "")[:10] or source.get(
+            "accessed"
+        )
+        domain = _registrable_domain(source.get("url", "")) or ""
+        if domain and not source.get("family_justification"):
+            source["source_family"] = domain
+    meta_by_source = {
+        source.get("source_id"): (cached(ws, source.get("source_id", "")) or (None, {}))[1]
+        for source in ledger.get("sources", [])
+    }
+    for claim in ledger.get("claims", []):
+        derived = []
+        for record in claim.get("source_evidence", []):
+            source_id = record.get("source_id")
+            if source_id and source_id not in derived:
+                derived.append(source_id)
+        if derived:
+            claim["source_ids"] = derived
+        stamps = sorted(
+            (
+                meta_by_source.get(source_id, {}).get("fetched_at", "")[:10]
+                for source_id in claim.get("source_ids", [])
+            ),
+            reverse=True,
+        )
+        if stamps and stamps[0]:
+            claim["verified_at"] = stamps[0]
+    _fix_date_line(ws, state, ledger)
+    ws.save_ledger(ledger)
+
+
+def _fix_date_line(ws, state, ledger):
+    """Spec §6.7 `--fix`: date-line whitespace, never the date itself."""
+    try:
+        expected = report_contract.localized_date(
+            state.get("lang", "en"), date.fromisoformat(ledger.get("report_date", ""))
+        )
+    except (TypeError, ValueError):
+        return
+    text = ws.report_text()
+    if expected in _metadata_lines(text):
+        return
+    folded = re.sub(r"\s+", "", expected)
+    replaced = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if (
+            stripped.startswith(">")
+            and re.sub(r"\s+", "", stripped.lstrip(">")) == folded
+        ):
+            replaced.append(f"> {expected}")
+        else:
+            replaced.append(line)
+    updated = "\n".join(replaced) + ("\n" if text.endswith("\n") else "")
+    if updated != text:
+        ws.report.write_text(updated, encoding="utf-8")
+
+
+def run_check(ws, state, ledger, *, fix=False, mapping_out=None):
+    """Sections (a)-(f) of spec §6.7; every evaluator runs offline, every time."""
+    if fix:
+        mechanical_fixes(ws, state, ledger)
+    findings = []
+    findings.extend(_integrity_findings(ws, state, ledger))
+    findings.extend(_ledger_findings(ws, ledger))
+    binding, mapping = _binding_findings(ws, state, ledger, fix=fix)
+    if mapping_out is not None:
+        mapping_out.update(mapping)
+    findings.extend(binding)
+    findings.extend(_fidelity_findings(ws, ledger))
+    findings.extend(_rewild_findings(ws, state))
+    findings.extend(_review_findings(ws, state, ledger))
+    return adopt(findings, paragraphs=len(body_paragraphs(ws.report_text())))
+
+
+def _status_line(state, findings, remaining):
+    hard = len(hard_findings(findings))
+    elapsed, _remaining = _minutes(state)
+    next_step = "`alx issue`" if not hard else "fix HARD then `alx check`"
+    tail = (
+        " At remaining <= 15 min apply every \"Remove:\" remedy and run "
+        "`alx issue --deliver`."
+    )
+    return (
+        f"=== STATUS: check #{state['counters']['check']}, elapsed {elapsed} min, "
+        f"remaining {max(remaining, 0)} min. Next: {next_step}.{tail} ==="
+    )
+
+
+def cmd_check(args):
+    ws, state, ledger = _open(args)
+    state["counters"]["check"] = state["counters"].get("check", 0) + 1
+    mapping = {}
+    findings = run_check(ws, state, ledger, fix=args.fix, mapping_out=mapping)
+    ledger = ws.load_ledger()
+    _elapsed, remaining = _minutes(state)
+    table = ", ".join(
+        f"{claim_id}={paragraph}" for claim_id, paragraph in sorted(mapping.items())
+    )
+    lines = [
+        f"claim->paragraph: {table or 'none bound'}",
+        render_grouped(findings),
+        _status_line(state, findings, remaining),
+    ]
+    state["last_check"] = {
+        "at": _now().isoformat(),
+        "hard": len(hard_findings(findings)),
+        "class_f": len(class_f_findings(findings)),
+        "families": sorted({item.family for item in findings}),
+    }
+    ws.save_state(state)
+    _emit(
+        ws,
+        state,
+        "check",
+        f"{len(hard_findings(findings))} hard",
+        lines,
+    )
+    return 1 if hard_findings(findings) else 0
+
+
+# --------------------------------------------------------------------------
+# review lifecycle
+# --------------------------------------------------------------------------
+
+
+def _note_skeleton(ws, state, kind, ledger):
+    lang = state.get("lang", "en")
+    if kind == "rewild":
+        snapshot = ws.latest_snapshot()
+        return {
+            "schema_version": 1,
+            "status": "draft",
+            "report_sha256": file_sha256(ws.report),
+            "source_sha256": file_sha256(snapshot) if snapshot else "",
+            "report_lang": lang,
+            "profile": rewild_gate.PROFILES[lang][0],
+            "fidelity_checks": {
+                name: False for name in sorted(rewild_gate.REQUIRED_FIDELITY_CHECKS)
+            },
+            "findings": [],
+        }
+    return {
+        "schema_version": 2,
+        "status": "draft",
+        "report_path": str(ws.report),
+        "report_sha256": file_sha256(ws.report),
+        "ledger_path": str(ws.ledger_path),
+        "ledger_sha256": file_sha256(ws.ledger_path),
+        "report_lang": lang,
+        "reviewed_at": date.today().isoformat(),
+        "reviewer_mode": "fresh_eyes",
+        "scores": {},
+        "checks": {},
+        "section_reviews": [],
+        "visual_assets": [],
+        "findings": [],
+        "evidence_limitations": [],
+        "completion_note": "",
+        "claim_support": [],
+    }
+
+
+def cmd_review_start(args):
+    ws, state, ledger = _open(args)
+    kind = args.kind
+    record = state["reviews"].setdefault(kind, {"iteration": 0, "finished": False})
+    iteration = record["iteration"] + 1 if (args.iter or not record["iteration"]) else record["iteration"]
+    target = ws.review_dir(kind, iteration)
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ws.report, target / "report.md")
+    if kind == "content":
+        shutil.copyfile(ws.ledger_path, target / "ledger.json")
+    lines = []
+    if args.iter and record["iteration"]:
+        previous = ws.review_dir(kind, record["iteration"]) / "report.md"
+        diff = [
+            block
+            for block in _paragraph_set(ws.report_text(), state)
+            if block not in _paragraph_set(previous.read_text(encoding="utf-8"), state)
+        ]
+        lines.append(f"{len(diff)} paragraph(s) changed since iteration {record['iteration']}:")
+        lines.extend(f"  - {block[:80]}" for block in diff[:5])
+    record.update(
+        {
+            "iteration": iteration,
+            "finished": False,
+            "report_sha256": file_sha256(ws.report),
+            "ledger_sha256": file_sha256(ws.ledger_path),
+        }
+    )
+    ws.reviews.mkdir(parents=True, exist_ok=True)
+    _write_json(ws.reviews / f"{kind}.json", _note_skeleton(ws, state, kind, ledger))
+    ws.save_state(state)
+    protocol = (
+        "references/rewild-gate.md blind-review protocol"
+        if kind == "rewild"
+        else "references/content-quality.md §13 review protocol"
+    )
+    lines.extend(
+        [
+            f"Review copy: {target}",
+            f"Fill reviews/{kind}.json per {protocol}, then run "
+            f"`alx review finish {kind}`.",
+        ]
+    )
+    _emit(ws, state, f"review start {kind}", f"iteration {iteration}", lines)
+    return 0
+
+
+def cmd_review_finish(args):
+    ws, state, ledger = _open(args)
+    kind = args.kind
+    record = state["reviews"].get(kind, {})
+    if not record.get("iteration"):
+        print(f"Run `alx review start {kind}` first.", file=sys.stderr)
+        return 1
+    missing = _note_completeness(ws, state, ledger, kind)
+    note = _read_json(ws.reviews / f"{kind}.json")
+    if note.get("report_sha256") != record.get("report_sha256"):
+        missing.append("report_sha256 no longer matches the reviewed copy")
+    if missing:
+        print(
+            f"reviews/{kind}.json is incomplete: {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        return 1
+    record["finished"] = True
+    ws.save_state(state)
+    _emit(
+        ws,
+        state,
+        f"review finish {kind}",
+        f"iteration {record['iteration']}",
+        [f"{kind} review {record['iteration']} finished."],
+    )
+    return 0
+
+
+def cmd_review_restore(args):
+    ws, state, _ledger = _open(args)
+    kind = args.kind
+    record = state["reviews"].get(kind, {})
+    if not record.get("finished"):
+        print(f"No finished {kind} review to restore.", file=sys.stderr)
+        return 1
+    reviewed = ws.review_dir(kind, record["iteration"])
+    shutil.copyfile(reviewed / "report.md", ws.report)
+    if kind == "content":
+        shutil.copyfile(reviewed / "ledger.json", ws.ledger_path)
+    _emit(
+        ws,
+        state,
+        f"review restore {kind}",
+        f"iteration {record['iteration']}",
+        [f"report.md restored from the {kind} review copy."],
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------
+# issue
+# --------------------------------------------------------------------------
+
+
+def _verification_note(lang, notes):
+    prefix = VERIFICATION_NOTE_PREFIX[lang]
+    joiner = "; " if lang == "en" else "；"
+    return f"{prefix} {joiner.join(notes)}"
+
+
+def _insert_verification_note(ws, lang, notes):
+    text = ws.report_text()
+    prefixes = tuple(VERIFICATION_NOTE_PREFIX.values())
+    cleaned = []
+    for _start, _end, block in _blocks(text):
+        if block.strip().startswith(prefixes):
+            cleaned.append(block)
+    for block in cleaned:
+        text = text.replace(block + "\n\n", "")
+    offset = sources_heading_offset(text)
+    note = _verification_note(lang, notes)
+    if offset is None:
+        text = text.rstrip("\n") + "\n\n" + note + "\n"
+    else:
+        text = text[:offset] + note + "\n\n" + text[offset:]
+    ws.report.write_text(text, encoding="utf-8")
+    return note
+
+
+def _auto_remedies(ws, state, ledger, findings, lines):
+    """Spec §6.9.1: `--deliver` drops scope, it never waives Class F."""
+    restore = [
+        item
+        for item in class_f_findings(findings)
+        if item.family
+        in {
+            "integrity/quotation-lost",
+            "integrity/control-chars",
+            "integrity/replacement-char",
+            "integrity/encoding",
+        }
+    ]
+    if restore and ws.latest_snapshot() is not None:
+        shutil.copyfile(ws.latest_snapshot(), ws.report)
+        lines.append("auto-remedy: report.md restored from the latest snapshot.")
+    claim_ids = []
+    for item in class_f_findings(findings):
+        for value in item.ids:
+            if re.fullmatch(r"C\d+", str(value)) and value not in claim_ids:
+                claim_ids.append(value)
+    for claim_id in claim_ids:
+        if claim_id not in {claim.get("claim_id") for claim in ledger.get("claims", [])}:
+            continue
+        apply_drop(ws, state, ledger, claim_id, "Class-F finding at issue.")
+        lines.append(f"auto-remedy: `{remedy('claim-drop', claim_id=claim_id)}`.")
+    return ws.load_state(), ws.load_ledger()
+
+
+def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
+    """Step 2: deadline-bound live fidelity, then re-probe refreshed sources."""
+    _elapsed, remaining = _minutes(state)
+    if remaining < RESERVE_MINUTES:
+        delivery_notes.append(
+            f"online source fidelity skipped: {remaining} min left, reserve is "
+            f"{RESERVE_MINUTES} min"
+        )
+        return [], True
+    receipt_path = ws.receipts / "source-fidelity.json"
+    cap = min(ONLINE_CAP_MINUTES, max(remaining - RESERVE_MINUTES, 1))
+    try:
+        result = source_fidelity.issue_source_fidelity_receipt(
+            ws.ledger_path,
+            receipt_path,
+            sample_size=args.sample_size,
+            timeout=min(FETCH_TIMEOUT_SECONDS, cap * 60),
+            cache_dir=ws.sources,
+            deadline=_deadline_epoch(state),
+            force=True,
+        )
+    except Exception as exc:  # availability failures are Class A
+        delivery_notes.append(f"online source fidelity failed: {exc}")
+        return [], False
+    _write_json(ws.alx / "fidelity-result.json", result or {})
+    refreshed = list((result or {}).get("refreshed_source_ids", []))
+    findings = [
+        item for item in (result or {}).get("findings") or [] if isinstance(item, Finding)
+    ]
+    if refreshed:
+        for claim in ledger.get("claims", []):
+            if set(claim.get("source_ids", [])) & set(refreshed):
+                findings.extend(claim_probe_findings(ws, ledger, claim))
+    disclosure = list((result or {}).get("disclosure_required", []))
+    if disclosure:
+        disclosures.append(
+            "central-judgment evidence not re-read live: " + ", ".join(disclosure)
+        )
+    lines.append(
+        f"source fidelity: {(result or {}).get('status', 'unknown')}, "
+        f"{len(refreshed)} source(s) refreshed."
+    )
+    return adopt(findings, online=True), True
+
+
+#: T1 binds the source-fidelity receipt to the ledger alone (no report hash);
+#: T4's `--fast` hash check demands one from every receipt. Known seam defect.
+RECEIPT_ARTIFACT = "source-fidelity receipt does not record report_sha256"
+
+
+def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
+    """Spec §6.9.4: validate_report `--fast --final-once`; never a second fetch."""
+    if not {"rewild", "content"} <= set(receipts):
+        return
+    argv = [
+        str(ws.report),
+        "--ledger",
+        str(ws.ledger_path),
+        "--rewild-receipt",
+        str(receipts["rewild"]),
+        "--content-receipt",
+        str(receipts["content"]),
+        "--source-fidelity-receipt",
+        str(ws.receipts / "source-fidelity.json"),
+        "--expected-lang",
+        state.get("lang", "en"),
+        "--fast",
+    ]
+    result_path = ws.alx / "fidelity-result.json"
+    if result_path.exists():
+        argv.extend(["--final-once", str(result_path)])
+    captured = io.StringIO()
+    with redirect_stdout(captured), redirect_stderr(captured):
+        validate_report.main(argv)
+    errors = [
+        line.removeprefix("[FAIL] ")
+        for line in captured.getvalue().splitlines()
+        if line.startswith("[FAIL] ") and RECEIPT_ARTIFACT not in line
+    ]
+    if errors:
+        delivery_notes.append(
+            "validate_report --fast --final-once failed: " + " | ".join(errors[:3])
+        )
+
+
+def _receipt_phase(ws, state, ledger, lines, delivery_notes):
+    """Step 4 receipts; the rule tiers were already classified by `check`."""
+    snapshot = ws.latest_snapshot()
+    receipts = {}
+    for kind in REVIEW_KINDS:
+        note_path = ws.reviews / f"{kind}.json"
+        if not note_path.exists():
+            continue
+        note = _read_json(note_path)
+        note["report_sha256"] = file_sha256(ws.report)
+        if kind == "rewild" and snapshot is not None:
+            note["source_sha256"] = file_sha256(snapshot)
+        if kind == "content":
+            note["ledger_sha256"] = file_sha256(ws.ledger_path)
+        _write_json(note_path, note)
+    rewild_receipt = ws.receipts / "rewild.json"
+    errors = rewild_gate.run_gate(
+        ws.report,
+        snapshot,
+        report_lang=state.get("lang", "en"),
+        review_note_path=ws.reviews / "rewild.json",
+        receipt_path=rewild_receipt,
+        force=True,
+    )
+    if errors:
+        delivery_notes.append(f"rewild receipt not issued: {errors[0]}")
+    else:
+        receipts["rewild"] = rewild_receipt
+    content_receipt = ws.receipts / "content.json"
+    errors = content_gate.run_content_gate(
+        ws.report,
+        ws.ledger_path,
+        ws.reviews / "content.json",
+        content_receipt,
+        source_fidelity_receipt_path=ws.receipts / "source-fidelity.json",
+        force=True,
+    )
+    if errors:
+        delivery_notes.append(f"content receipt not issued: {errors[0]}")
+    else:
+        receipts["content"] = content_receipt
+    _verify_receipts_in_process(ws, state, receipts, delivery_notes)
+    lines.append(f"receipts written: {', '.join(sorted(receipts)) or 'none'}")
+    return receipts
+
+
+def cmd_issue(args):
+    ws, state, ledger = _open(args)
+    lines = []
+    delivery_notes = []
+    disclosures = []
+    if ws.latest_snapshot() is None:
+        shutil.copyfile(ws.report, ws.dir / "report.pre-rewild.md")
+        state["humanization"] = "none"
+        ws.save_state(state)
+        disclosures.append("humanization: none (issue created the snapshot)")
+    findings = run_check(ws, state, ledger, fix=False)
+    blocking = class_f_findings(findings)
+    if blocking and args.deliver:
+        state, ledger = _auto_remedies(ws, state, ledger, blocking, lines)
+        findings = run_check(ws, state, ledger, fix=False)
+        blocking = class_f_findings(findings)
+    if blocking:
+        lines.append(render_grouped(blocking))
+        lines.append("issue refused: Class F findings are never waivable.")
+        _emit(ws, state, "issue", f"{len(blocking)} class-F", lines)
+        return 1
+    online_findings, ok = _online_phase(
+        ws, state, ledger, args, lines, delivery_notes, disclosures
+    )
+    if online_findings:
+        if args.deliver:
+            state, ledger = _auto_remedies(ws, state, ledger, online_findings, lines)
+        else:
+            lines.append(render_grouped(online_findings))
+            lines.append("issue refused: live fidelity found Class F findings.")
+            _emit(ws, state, "issue", "online class-F", lines)
+            return 1
+    note_items = delivery_notes + disclosures
+    if note_items:
+        note = _insert_verification_note(ws, state.get("lang", "en"), note_items)
+        lines.append(f"verification note: {note[:60]}")
+    receipts = _receipt_phase(ws, state, ledger, lines, delivery_notes)
+    if delivery_notes and not args.deliver:
+        lines.append(render_grouped([_class_a_finding(note) for note in delivery_notes]))
+        lines.append(
+            "issue aborted before the receipt: rerun with `alx issue --deliver` to "
+            "deliver with recorded limitations."
+        )
+        _emit(ws, state, "issue", "class-A abort", lines)
+        return 1
+    if delivery_notes:
+        _write_json(
+            ws.receipts / "delivery-notes.json",
+            {"written_at": _now().isoformat(), "notes": delivery_notes},
+        )
+    receipt = {
+        "schema_version": 1,
+        "issued_at": _now().isoformat(),
+        "report_sha256": file_sha256(ws.report),
+        "ledger_sha256": file_sha256(ws.ledger_path),
+        "receipts": {
+            name: file_sha256(path) for name, path in sorted(receipts.items())
+        },
+        "notes": {
+            kind: file_sha256(ws.reviews / f"{kind}.json")
+            for kind in REVIEW_KINDS
+            if (ws.reviews / f"{kind}.json").exists()
+        },
+        "checkers": {
+            "alx": "09-14-01",
+            "rewild_gate": getattr(rewild_gate, "SCHEMA_VERSION", 1),
+        },
+        "delivery_notes": delivery_notes,
+    }
+    if (ws.receipts / "source-fidelity.json").exists():
+        receipt["receipts"]["source-fidelity"] = file_sha256(
+            ws.receipts / "source-fidelity.json"
+        )
+    _write_json(ws.receipts / "issue.json", receipt)
+    state["counters"]["issue"] = state["counters"].get("issue", 0) + 1
+    ws.save_state(state)
+    lines.append(f"receipts/issue.json written; next: `{remedy('render')}`.")
+    _emit(ws, state, "issue", "issued", lines)
+    return 0 if ok or args.deliver else 1
+
+
+def _class_a_finding(message):
+    return finding(
+        "tooling/receipt",
+        message,
+        fix=remedy("issue-deliver"),
+    )
+
+
+# --------------------------------------------------------------------------
+# render
+# --------------------------------------------------------------------------
+
+
+def cmd_render(args):
+    ws, state, ledger = _open(args)
+    receipt_path = ws.receipts / "issue.json"
+    refusal = f"run `{remedy('issue')}` (or `{remedy('issue-deliver')}`)"
+    if not receipt_path.exists():
+        print(f"receipts/issue.json is missing; {refusal}.", file=sys.stderr)
+        return 1
+    receipt = _read_json(receipt_path)
+    if receipt.get("report_sha256") != file_sha256(ws.report) or receipt.get(
+        "ledger_sha256"
+    ) != file_sha256(ws.ledger_path):
+        print(
+            f"receipts/issue.json does not match report.md and ledger.json; {refusal}.",
+            file=sys.stderr,
+        )
+        return 1
+    from scripts import md_to_pdf, render_pdf_pages  # heavy import, render only
+
+    subject = f"{ledger.get('subject', '')} {ledger.get('research_question', '')}"
+    templates = (
+        [args.template]
+        if args.template
+        else ["executive", md_to_pdf.select_adaptive_companion(subject)]
+    )
+    lines = []
+    for template in templates:
+        output = ws.dir / f"report-{template}.pdf"
+        kwargs = {
+            "template": template,
+            "lang": state.get("lang", "en"),
+            "ledger": str(ws.ledger_path),
+            "force": True,
+        }
+        for name, path in (
+            ("rewild_receipt", ws.receipts / "rewild.json"),
+            ("content_receipt", ws.receipts / "content.json"),
+            ("source_fidelity_receipt", ws.receipts / "source-fidelity.json"),
+        ):
+            if path.exists():
+                kwargs[name] = str(path)
+        kwargs["issue_receipt"] = str(receipt_path)
+        md_to_pdf.render_pdf(str(ws.report), str(output), **kwargs)
+        pages = ws.dir / f"pages-{template}"
+        render_pdf_pages.render_pages(str(output), str(pages))
+        lines.append(f"{template}: {output}")
+        lines.append(f"{template} contact sheet: {pages}")
+    _emit(ws, state, "render", f"{len(templates)} PDFs", lines)
+    return 0
+
+
+# --------------------------------------------------------------------------
+# status
+# --------------------------------------------------------------------------
+
+
+def cmd_status(args):
+    ws, state, ledger = _open(args)
+    last = state.get("last_check") or {}
+    reviews = state.get("reviews", {})
+    lines = [
+        f"sources {len(ledger.get('sources', []))}",
+        f"claims {len(ledger.get('claims', []))}",
+        f"snapshot {'yes' if ws.latest_snapshot() else 'no'}",
+        "reviews "
+        + ", ".join(
+            f"{kind}={'finished' if reviews.get(kind, {}).get('finished') else 'pending'}"
+            for kind in REVIEW_KINDS
+        ),
+        f"receipts {'issued' if (ws.receipts / 'issue.json').exists() else 'none'}",
+        f"PDFs {len(list(ws.dir.glob('report-*.pdf')))}",
+        "last check "
+        + (
+            f"#{state['counters'].get('check', 0)} with {last.get('hard', 0)} hard "
+            f"({last.get('class_f', 0)} Class F)"
+            if last
+            else "not run"
+        ),
+        f"Next: {_next_command(ws, state, ledger)}",
+    ]
+    _emit(ws, state, "status", "phase checklist", lines)
+    return 0
+
+
+def _next_command(ws, state, ledger):
+    if not ledger.get("sources"):
+        return "`alx fetch <url>`"
+    if not ledger.get("claims"):
+        return "`alx claim add claims/batch.json`"
+    if not state.get("last_check"):
+        return f"`{remedy('check-fix')}`"
+    if ws.latest_snapshot() is None:
+        return "`alx snapshot`"
+    if not all(
+        state.get("reviews", {}).get(kind, {}).get("finished") for kind in REVIEW_KINDS
+    ):
+        return f"`{remedy('review-start', kind='rewild')}`"
+    if not (ws.receipts / "issue.json").exists():
+        return f"`{remedy('issue')}`"
+    return f"`{remedy('render')}`"
+
+
+# --------------------------------------------------------------------------
+# parser
+# --------------------------------------------------------------------------
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="alx", description="Alexandria research workspace commands"
+    )
+    parser.add_argument(
+        "--dir", default=".", help="report workspace directory (default: .)"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init = subparsers.add_parser("init", help="create the workspace")
+    init.add_argument("directory")
+    init.add_argument("--lang", choices=LANGUAGES, required=True)
+    init.add_argument("--subject", required=True, help="file holding the subject")
+    init.add_argument("--archetype", choices=ARCHETYPES, default="hybrid")
+    init.add_argument("--subject-status", choices=LIVING_STATUSES)
+    init.add_argument("--reader", help="file holding the intended reader")
+    init.add_argument("--budget-minutes", type=int, default=60)
+    init.add_argument("--force", action="store_true")
+    init.set_defaults(handler=cmd_init)
+
+    fetch = subparsers.add_parser("fetch", help="fetch sources into the cache")
+    fetch.add_argument("urls", nargs="*")
+    fetch.add_argument("--id", dest="id", help="ledger source id to refresh")
+    fetch.add_argument("--refresh", action="store_true")
+    fetch.add_argument("--provenance", choices=PROVENANCES)
+    fetch.add_argument("--type", choices=EVIDENCE_TYPES)
+    fetch.add_argument("--role", action="append", choices=SOURCE_ROLES)
+    fetch.add_argument("--accountability", choices=ACCOUNTABILITY_BASES)
+    fetch.set_defaults(handler=cmd_fetch)
+
+    source = subparsers.add_parser("source", help="source classification")
+    source_sub = source.add_subparsers(dest="source_command", required=True)
+    source_set = source_sub.add_parser("set")
+    source_set.add_argument("source_id")
+    source_set.add_argument("--provenance", choices=PROVENANCES)
+    source_set.add_argument("--type", choices=EVIDENCE_TYPES)
+    source_set.add_argument("--role", action="append", choices=SOURCE_ROLES)
+    source_set.add_argument("--accountability", choices=ACCOUNTABILITY_BASES)
+    source_set.add_argument("--published")
+    source_set.add_argument("--undated-reason", dest="undated_reason")
+    source_set.set_defaults(handler=cmd_source_set)
+
+    find = subparsers.add_parser("find", help="verbatim windows from the cache")
+    find.add_argument("source_id")
+    find.add_argument("keyword")
+    find.add_argument("--context", type=int, default=160)
+    find.add_argument("--max", type=int, default=5)
+    find.set_defaults(handler=cmd_find)
+
+    show = subparsers.add_parser("show", help="a cache window")
+    show.add_argument("source_id")
+    show.add_argument("--start", type=int, default=0)
+    show.add_argument("--end", type=int)
+    show.set_defaults(handler=cmd_show)
+
+    claim = subparsers.add_parser("claim", help="claim lifecycle")
+    claim_sub = claim.add_subparsers(dest="claim_command", required=True)
+    claim_add = claim_sub.add_parser("add")
+    claim_add.add_argument("files", nargs="+")
+    claim_add.set_defaults(handler=cmd_claim_add)
+    claim_drop = claim_sub.add_parser("drop")
+    claim_drop.add_argument("claim_id")
+    claim_drop.add_argument("--apply", action="store_true")
+    claim_drop.add_argument("--reason")
+    claim_drop.set_defaults(handler=cmd_claim_drop)
+    claim_bind = claim_sub.add_parser("bind")
+    claim_bind.add_argument("claim_id")
+    claim_bind.add_argument("--paragraph", type=int, required=True)
+    claim_bind.set_defaults(handler=cmd_claim_bind)
+
+    ledger = subparsers.add_parser("ledger", help="ledger edits")
+    ledger_sub = ledger.add_subparsers(dest="ledger_command", required=True)
+    ledger_merge = ledger_sub.add_parser("merge")
+    ledger_merge.add_argument("patch")
+    ledger_merge.set_defaults(handler=cmd_ledger_merge)
+
+    snapshot = subparsers.add_parser("snapshot", help="pre-humanization snapshot")
+    snapshot.add_argument("--iter", action="store_true")
+    snapshot.add_argument("--restore", action="store_true")
+    snapshot.set_defaults(handler=cmd_snapshot)
+
+    check = subparsers.add_parser("check", help="every offline evaluator, grouped")
+    check.add_argument("--fix", action="store_true")
+    check.set_defaults(handler=cmd_check)
+
+    review = subparsers.add_parser("review", help="review lifecycle")
+    review_sub = review.add_subparsers(dest="review_command", required=True)
+    review_start = review_sub.add_parser("start")
+    review_start.add_argument("kind", choices=REVIEW_KINDS)
+    review_start.add_argument("--iter", action="store_true")
+    review_start.set_defaults(handler=cmd_review_start)
+    review_finish = review_sub.add_parser("finish")
+    review_finish.add_argument("kind", choices=REVIEW_KINDS)
+    review_finish.set_defaults(handler=cmd_review_finish)
+    review_restore = review_sub.add_parser("restore")
+    review_restore.add_argument("kind", choices=REVIEW_KINDS)
+    review_restore.set_defaults(handler=cmd_review_restore)
+
+    issue = subparsers.add_parser("issue", help="receipts, once, at the end")
+    issue.add_argument("--deliver", action="store_true")
+    issue.add_argument("--sample-size", type=int, default=8)
+    issue.set_defaults(handler=cmd_issue)
+
+    render = subparsers.add_parser("render", help="PDFs from a passed issue")
+    render.add_argument("--template")
+    render.set_defaults(handler=cmd_render)
+
+    status = subparsers.add_parser("status", help="elapsed, phase, next command")
+    status.set_defaults(handler=cmd_status)
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.handler(args)
+    except SystemExit as exc:
+        if isinstance(exc.code, str):
+            print(exc.code, file=sys.stderr)
+            return 1
+        raise
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

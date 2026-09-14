@@ -889,23 +889,6 @@
         {
           "if": {
             "properties": {
-              "include_in_report": {
-                "const": true
-              }
-            },
-            "required": ["include_in_report"]
-          },
-          "then": {
-            "properties": {
-              "report_excerpts": {
-                "minItems": 1
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
               "person_ids": {
                 "minItems": 1
               }

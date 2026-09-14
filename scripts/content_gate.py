@@ -482,7 +482,9 @@ def run_check(
 
     ``include_ledger_checks=False`` drops the ledger-error re-emission:
     validate_ledger owns those families, and `alx check` already prints them,
-    so repeating them here would double every ledger finding.
+    so repeating them here would double every ledger finding. The report-against-
+    ledger checks (spec §7.4's per-claim binding checks) are never dropped —
+    nothing else emits them.
     """
     findings = []
     report_path = Path(report_path)
@@ -506,12 +508,13 @@ def run_check(
             findings.append(_finding("content/check", error))
         review = review or {}
     claim_support = _claim_support_map(review)
-    if isinstance(ledger, dict) and include_ledger_checks:
-        for error in validate_references(ledger):
-            findings.append(_finding("content/check", error))
+    if isinstance(ledger, dict):
         for error in validate_report_against_ledger(report_text, ledger):
             findings.append(_finding("content/check", error))
-        findings.extend(binding_findings(report_text, ledger))
+        if include_ledger_checks:
+            for error in validate_references(ledger):
+                findings.append(_finding("content/check", error))
+            findings.extend(binding_findings(report_text, ledger))
     if isinstance(review, dict) and review:
         for error in _schema_errors(
             review, CONTENT_REVIEW_SCHEMA, "Content review:"

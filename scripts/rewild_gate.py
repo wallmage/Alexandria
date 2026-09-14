@@ -2,6 +2,7 @@
 """Run Alexandria's bundled Rewild checker and issue a file-bound receipt."""
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -20,6 +21,21 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from artifact_safety import artifact_collision_errors, publish_temp_file  # noqa: E402
 from gate_severity import emit_findings, warning  # noqa: E402
+
+try:  # MERGE NOTE: gate_severity owns Finding; this stands in until it lands.
+    from gate_severity import Finding
+except ImportError:
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class Finding:
+        family: str
+        severity: str
+        klass: str
+        ids: list = field(default_factory=list)
+        message: str = ""
+        fix: str = ""
+        remove: str = ""
 
 ROOT = Path(__file__).resolve().parents[1]
 FIDELITY_NOTES_SCHEMA = ROOT / "references" / "rewild-fidelity-notes.schema.json"
@@ -567,13 +583,18 @@ def _causal_phrases(text, report_lang):
 
 @lru_cache(maxsize=4096)
 def _clauses(text, report_lang):
+    """Split prose into sentences.
+
+    Commas, semicolons and subordinators used to split here too, which made a
+    clause shorter than one assertion: inserting a citation whose link text
+    contains a comma turned one sentence into two clauses and shifted every
+    index after it. A sentence is the smallest unit that carries a whole
+    claim, so sentence terminators are the only cut.
+    """
     if report_lang == "en":
-        parts = re.split(
-            r"[.!?;,\n]+|\b(?:while|whereas|but)\b",
-            text.casefold(),
-        )
+        parts = re.split(r"[.!?…\n]+", text.casefold())
     else:
-        parts = re.split(r"[。！？；，、,\n]+", text)
+        parts = re.split(r"[。！？!?…\n]+", text)
     return [re.sub(r"\s+", " ", part).strip() for part in parts if part.strip()]
 
 
@@ -669,85 +690,88 @@ def _carrier_predicate_tokens(clause, report_lang):
     return _raw_tokens(chars, report_lang), set()
 
 
-def _aligned_clauses(source, report, report_lang):
-    source_clauses = _clauses(source, report_lang)
-    report_clauses = _clauses(report, report_lang)
+@lru_cache(maxsize=8192)
+def _clause_key(clause, report_lang):
+    """The token set that identifies one clause across an edit.
 
-    # First pair clauses that survived editing byte-identically. Without this
-    # pre-pass, an inserted or split sentence shifts clause indices and the
-    # fuzzy matcher cross-pairs unchanged neighbours, producing false
-    # negation/association findings on text the editor never touched.
-    unmatched_report = {}
-    for index, clause in enumerate(report_clauses):
-        unmatched_report.setdefault(clause, []).append(index)
-    identical = []
-    leftover_source = []
-    for source_index, source_clause in enumerate(source_clauses):
-        positions = unmatched_report.get(source_clause)
-        if positions:
-            report_index = positions.pop(0)
-            identical.append((source_index, report_index))
-        else:
-            leftover_source.append(source_index)
-    matched_report = {report_index for _, report_index in identical}
+    The carrier — what the clause is about, before its direction, negation or
+    causal marker — is what an edit preserves; the predicate is what an edit
+    changes and what the semantic checks then compare.
+    """
+    carrier, _ = _carrier_predicate_tokens(clause, report_lang)
+    return frozenset(carrier or _anchor_tokens(clause, report_lang))
 
-    candidates = []
-    report_count = max(1, len(report_clauses))
-    source_count = max(1, len(source_clauses))
-    for source_index in leftover_source:
-        source_clause = source_clauses[source_index]
-        source_carrier, _ = _carrier_predicate_tokens(
-            source_clause, report_lang
-        )
-        source_tokens = source_carrier or _anchor_tokens(
-            source_clause, report_lang
-        )
-        expected_index = round(source_index * report_count / source_count)
-        nearby = range(
-            max(0, expected_index - 6),
-            min(report_count, expected_index + 7),
-        )
-        for report_index in nearby:
-            if report_index in matched_report:
-                continue
-            report_clause = report_clauses[report_index]
-            report_carrier, _ = _carrier_predicate_tokens(
-                report_clause, report_lang
-            )
-            report_tokens = report_carrier or _anchor_tokens(
-                report_clause, report_lang
-            )
-            if not source_tokens or not report_tokens:
+
+def _in_order_pairs(
+    source_clauses, report_clauses, report_lang, source_offset, report_offset
+):
+    """Pair one rewritten run of clauses without ever crossing a pair."""
+    pairs = []
+    next_report = 0
+    for offset, source_clause in enumerate(source_clauses):
+        source_tokens = _clause_key(source_clause, report_lang)
+        if not source_tokens:
+            continue
+        best = None
+        for index in range(next_report, len(report_clauses)):
+            report_tokens = _clause_key(report_clauses[index], report_lang)
+            if not report_tokens:
                 continue
             overlap = len(source_tokens & report_tokens) / min(
                 len(source_tokens), len(report_tokens)
             )
-            distance_penalty = abs(source_index - report_index) * 0.02
-            candidates.append(
-                (
-                    overlap - distance_penalty,
-                    source_index,
-                    report_index,
-                    source_clause,
-                    report_clause,
-                )
+            score = overlap - abs(offset - index) * 0.02
+            if best is None or score > best[0]:
+                best = (score, index, overlap)
+        if best is None or best[2] < 0.34:
+            continue
+        next_report = best[1] + 1
+        pairs.append((source_offset + offset, report_offset + best[1]))
+    return pairs
+
+
+def _aligned_clauses(source, report, report_lang):
+    """Pair source and report clauses monotonically, in reading order.
+
+    The previous aligner looked for a partner inside a ±6 index window around
+    a proportionally scaled position, then took the globally best-scoring
+    pairs in any order. Both halves broke on ordinary edits: the window drifts
+    as soon as one side gains clauses, and unordered pairing let a clause
+    align with a neighbour that precedes its own predecessor's partner.
+    ``difflib.SequenceMatcher`` over the clause token sets anchors the
+    surviving clauses instead, and each rewritten run between two anchors is
+    paired in order, so an insertion shifts nothing after it.
+    """
+    source_clauses = _clauses(source, report_lang)
+    report_clauses = _clauses(report, report_lang)
+    matcher = difflib.SequenceMatcher(
+        None,
+        [_clause_key(clause, report_lang) for clause in source_clauses],
+        [_clause_key(clause, report_lang) for clause in report_clauses],
+        autojunk=False,
+    )
+    aligned = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            pairs = list(zip(range(i1, i2), range(j1, j2), strict=True))
+        elif tag == "replace":
+            pairs = _in_order_pairs(
+                source_clauses[i1:i2],
+                report_clauses[j1:j2],
+                report_lang,
+                i1,
+                j1,
             )
-    aligned = [
-        (source_clauses[source_index], report_clauses[report_index], report_index)
-        for source_index, report_index in identical
-    ]
-    used_source = set()
-    used_report = set()
-    for score, source_index, report_index, source_clause, report_clause in sorted(
-        candidates, reverse=True
-    ):
-        if score < 0.34:
+        else:
             continue
-        if source_index in used_source or report_index in used_report:
-            continue
-        used_source.add(source_index)
-        used_report.add(report_index)
-        aligned.append((source_clause, report_clause, report_index))
+        aligned.extend(
+            (
+                source_clauses[source_index],
+                report_clauses[report_index],
+                report_index,
+            )
+            for source_index, report_index in pairs
+        )
     return aligned
 
 
@@ -895,6 +919,116 @@ def _fidelity_prose(text):
     marked = _CITATION_GROUP.sub("", "".join(pieces))
     text = _LINK_SENTINEL.sub(lambda match: labels[int(match.group(1))], marked)
     return _checker_prose(text)
+
+
+#: Spans whose words belong to a source, not to the writer: CJK and curly
+#: quotation marks, plus straight double quotes around at least four
+#: characters, which is short enough to catch a real quotation and long enough
+#: to skip inch marks and stray pairs.
+_QUOTED_SPAN = re.compile(
+    "「[^」\n]*」|『[^』\n]*』|“[^”\n]*”|‘[^’\n]*’|\"[^\"\n]{4,}\""
+)
+
+
+def _mask_quoted_spans(text):
+    return _QUOTED_SPAN.sub(" ", text)
+
+
+def _style_prose(text):
+    """Checker prose for the style tiers, with borrowed words masked.
+
+    Style tells measure how the writer writes. Quoted spans, blockquotes,
+    link text and headings are either someone else's words or labels, so
+    counting AI vocabulary, punctuation, rhythm or openers in them measures
+    the wrong author and punishes a report for quoting its sources.
+    """
+    try:
+        from .report_blocks import mask_bibliography, visible_report_blocks
+    except ImportError:
+        from report_blocks import mask_bibliography, visible_report_blocks
+
+    masked = mask_bibliography(text)
+    pieces = []
+    cursor = 0
+    for start, end, _label in _markdown_link_spans(masked):
+        pieces.append(masked[cursor:start])
+        cursor = end
+    pieces.append(masked[cursor:])
+    without_links = "".join(pieces)
+    return _mask_quoted_spans(
+        "\n\n".join(
+            block.text
+            for block in visible_report_blocks(without_links)
+            if block.kind not in {"heading", "blockquote"}
+        )
+    )
+
+
+#: C0 controls other than tab, newline and carriage return, plus the Unicode
+#: replacement character. Either one means bytes were lost or mangled.
+_CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f�]")
+#: Restoring the pre-Rewild snapshot is the only remedy for corrupted prose.
+_RESTORE = "alx snapshot --restore"
+
+
+def _control_char_findings(label, text):
+    counts = {}
+    for match in _CONTROL_CHARS.finditer(text):
+        counts[match.group(0)] = counts.get(match.group(0), 0) + 1
+    if not counts:
+        return []
+    listed = ", ".join(
+        f"U+{ord(character):04X} ×{count}"
+        for character, count in sorted(counts.items())
+    )
+    return [
+        Finding(
+            family="integrity/control-chars",
+            severity="hard",
+            klass="F",
+            ids=[],
+            message=(
+                f"{label} contains {sum(counts.values())} control or "
+                f"replacement character(s); the limit is 0: {listed}."
+            ),
+            fix=_RESTORE,
+            remove=_RESTORE,
+        )
+    ]
+
+
+def _quotation_findings(source_text, report_text):
+    """Every quoted span of the pre-Rewild source must survive verbatim.
+
+    A humanization pass may rewrite the writer's own sentences; it may never
+    edit, paraphrase or lose a quotation. This is the check that would have
+    caught the escape-sequence accident that silently wiped 110 quotations
+    from a finished report.
+    """
+    return [
+        Finding(
+            family="fidelity/quotation-lost",
+            severity="hard",
+            klass="F",
+            ids=[],
+            message=(
+                "Quoted span of the pre-Rewild source is missing from the "
+                f"report; the limit is 0 lost quotations: {span}"
+            ),
+            fix=_RESTORE,
+            remove=_RESTORE,
+        )
+        for span in dict.fromkeys(_QUOTED_SPAN.findall(source_text))
+        if span not in report_text
+    ]
+
+
+def _integrity_findings(report_text, source_text):
+    """Integrity runs before every other tier; corrupt prose is not style."""
+    findings = _control_char_findings("The report", report_text)
+    findings.extend(_control_char_findings("The pre-Rewild source", source_text))
+    findings.extend(_quotation_findings(source_text, report_text))
+    return findings
 
 
 def _causal_relation(clause, report_lang):
@@ -1300,6 +1434,270 @@ def _length_errors(text, report_lang):
     return errors
 
 
+def _checker_path(report_lang):
+    profile, _ = PROFILES[report_lang]
+    return (
+        ROOT / "references" / "rewild" / profile / "scripts" / "naturalness-check.py"
+    )
+
+
+def _run_rewild_checker(report_text, source_text, report_lang):
+    """Run the bundled checker on masked prose; return (result, errors)."""
+    _, checker_lang = PROFILES[report_lang]
+    report_prose = _style_prose(report_text)
+    source_prose = _style_prose(source_text)
+    if not report_prose.strip() or not source_prose.strip():
+        # Everything the style tiers measure was quoted, quoted-block or
+        # heading text. There is no prose of the writer's own to screen; the
+        # length floor is what rejects a report made only of other people's
+        # sentences.
+        return {"warnings": [], "sections": []}, []
+    with tempfile.TemporaryDirectory(prefix="alexandria-rewild-") as directory:
+        checker_report = Path(directory) / "report-body.txt"
+        checker_source = Path(directory) / "pre-rewild-body.txt"
+        checker_report.write_text(report_prose, encoding="utf-8")
+        checker_source.write_text(source_prose, encoding="utf-8")
+        command = [
+            sys.executable,
+            str(_checker_path(report_lang)),
+            str(checker_report),
+            "--source",
+            str(checker_source),
+            "--lang",
+            checker_lang,
+            "--json",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            return None, ["Rewild checker timed out after 300 seconds."]
+    try:
+        result = _checker_result(completed.stdout)
+    except (ValueError, json.JSONDecodeError) as exc:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        return None, [f"Rewild checker failed: {exc}. {detail}"]
+
+    warnings = result.get("warnings", [])
+    # The checker exits 0 with a clean report and 1 when it raised warnings;
+    # anything else means it stopped early, crashed, or was killed, and its
+    # JSON describes a partial analysis. Trusting an empty warning list from
+    # such a run would pass the gate on work that never finished.
+    expected_returncode = 1 if warnings else 0
+    if completed.returncode != expected_returncode:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        return None, [
+            f"Rewild checker exited with status {completed.returncode} after "
+            f"reporting {len(warnings)} warning(s); its analysis is "
+            f"incomplete. {detail}".strip()
+        ]
+    return result, []
+
+
+def _hard_checker_warnings(result, report_lang):
+    """Return the checker warnings that can never be waived."""
+    return [
+        item
+        for item in result.get("warnings", [])
+        if str(item.get("section", "")).startswith(HARD_WARNING_SECTIONS)
+        or (
+            report_lang == "zh-HK"
+            and str(item.get("section", "")).startswith("Hong Kong flavor")
+        )
+    ]
+
+
+def _hard_checker_errors(result, report_lang):
+    """Render the unwaivable checker warnings as gate messages."""
+    errors = [
+        f"Hard Rewild warning remains: {item.get('section')}: {item.get('message')}"
+        for item in _hard_checker_warnings(result, report_lang)
+    ]
+    if report_lang != "zh-HK":
+        return errors
+    hk_lines = [
+        line
+        for section in result.get("sections", [])
+        if str(section.get("title", "")).startswith("Hong Kong flavor")
+        for line in section.get("lines", [])
+    ]
+    for line in hk_lines:
+        message = str(line.get("message", ""))
+        if "register reads as " in message and "書面語 (" not in message:
+            errors.append(
+                "Hard Rewild warning remains: Hong Kong report register "
+                f"is not standard written Chinese: {message}"
+            )
+        if message.startswith("Cantonese potential complements"):
+            errors.append(
+                "Hard Rewild warning remains: Cantonese syntax in a "
+                f"professional Hong Kong report: {message}"
+            )
+    return errors
+
+
+def _receipt_is_stale(receipt_path, report_path, source_path):
+    """Is an existing receipt this gate's own output for older inputs?
+
+    A stale receipt is bookkeeping the gate itself wrote and must replace, so
+    it is overwritten without ``--force``. Anything that is not a receipt for
+    these files stays protected: an unrelated file, or a receipt that still
+    describes the current report, needs the flag.
+    """
+    try:
+        data = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(data, dict) or "report_sha256" not in data:
+        return False
+    return data["report_sha256"] != file_sha256(report_path) or data.get(
+        "source_sha256"
+    ) != file_sha256(source_path)
+
+
+#: Finding families for the tiers `run_check` reports, with the spec's
+#: fabrication (F) versus availability (A) class per family (spec 6.10).
+_CHECK_CLASSES = {
+    "integrity/control-chars": "F",
+    "fidelity/quotation-lost": "F",
+    "fidelity/semantic": "F",
+    "fidelity/rewild": "F",
+    "rewild/region": "F",
+    "rewild/ai-vocabulary": "A",
+    "rewild/style": "A",
+    "rewild/length": "A",
+    "rewild/checker": "A",
+    "review/rewild": "A",
+}
+
+
+def _finding(family, message, *, severity="hard", fix=_RESTORE):
+    klass = _CHECK_CLASSES[family]
+    return Finding(
+        family=family,
+        severity=severity,
+        klass=klass,
+        ids=[],
+        message=message,
+        fix=fix,
+        remove=_RESTORE if klass == "F" else "",
+    )
+
+
+def _checker_warning_family(section):
+    if section.startswith("AI vocabulary"):
+        return "rewild/ai-vocabulary"
+    if section.startswith("Fidelity"):
+        return "fidelity/rewild"
+    return "rewild/region"
+
+
+def run_check(report_path, source_path, *, lang, review_note_path=None):
+    """Return every tier as findings and write nothing.
+
+    Unlike :func:`run_gate` this never returns early. A missing review note
+    or an unreadable checker is one more finding, not a reason to hide the
+    integrity, fidelity and style tiers the agent still has to act on: one
+    check, all findings, is the whole point of the mode.
+    """
+    findings = []
+    if lang not in PROFILES:
+        return [
+            _finding(
+                "rewild/checker",
+                f"Unsupported report language: {lang}",
+                fix="alx check",
+            )
+        ]
+    texts = {}
+    for label, path in (
+        ("report", Path(report_path)),
+        ("pre-Rewild source", Path(source_path)),
+    ):
+        try:
+            texts[label] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            findings.append(
+                _finding(
+                    "rewild/checker",
+                    f"{label} file must be readable UTF-8 text: {exc}",
+                    fix="alx check",
+                )
+            )
+    if review_note_path is not None:
+        _, review_errors = _load_review_note(
+            review_note_path,
+            report_path=report_path,
+            source_path=source_path,
+            report_lang=lang,
+        )
+        findings.extend(
+            _finding(
+                "review/rewild",
+                message,
+                fix="alx review start rewild --iter",
+            )
+            for message in review_errors
+        )
+    if len(texts) < 2:
+        return findings
+    report_text = texts["report"]
+    source_text = texts["pre-Rewild source"]
+
+    findings.extend(_integrity_findings(report_text, source_text))
+    findings.extend(
+        _finding("fidelity/semantic", message)
+        for message in _semantic_fidelity_errors(
+            _fidelity_prose(source_text), _fidelity_prose(report_text), lang
+        )
+    )
+    findings.extend(
+        _finding("rewild/length", message, fix="alx check")
+        for message in _length_errors(report_text, lang)
+    )
+    result, checker_errors = _run_rewild_checker(report_text, source_text, lang)
+    findings.extend(
+        _finding("rewild/checker", message, fix="alx check")
+        for message in checker_errors
+    )
+    if result is None:
+        return findings
+    hard_warnings = _hard_checker_warnings(result, lang)
+    findings.extend(
+        _finding(
+            _checker_warning_family(str(item.get("section", ""))),
+            f"Hard Rewild warning remains: {item.get('section')}: "
+            f"{item.get('message')}",
+        )
+        for item in hard_warnings
+    )
+    findings.extend(
+        _finding("rewild/region", message)
+        for message in _hard_checker_errors(result, lang)
+        if not any(
+            message.endswith(f"{item.get('section')}: {item.get('message')}")
+            for item in hard_warnings
+        )
+    )
+    findings.extend(
+        _finding(
+            "rewild/style",
+            f"Unresolved style warning: {item.get('section')}: "
+            f"{item.get('message')}",
+            severity="warn",
+            fix=_RESTORE,
+        )
+        for item in result.get("warnings", [])
+        if item not in hard_warnings
+    )
+    return findings
+
+
 def run_gate(
     report_path,
     source_path,
@@ -1328,11 +1726,6 @@ def run_gate(
     )
     if errors:
         return errors
-    if receipt_path.exists() and not force:
-        return [
-            f"Rewild receipt already exists: {receipt_path}. "
-            "Use --force to replace it."
-        ]
     if report_lang not in PROFILES:
         return [f"Unsupported report language: {report_lang}"]
     for label, path in (
@@ -1344,6 +1737,15 @@ def run_gate(
             errors.append(f"{label} file is missing: {path}")
     if errors:
         return errors
+    overwrite = force or (
+        receipt_path.exists()
+        and _receipt_is_stale(receipt_path, report_path, source_path)
+    )
+    if receipt_path.exists() and not overwrite:
+        return [
+            f"Rewild receipt already exists: {receipt_path}. "
+            "Use --force to replace it."
+        ]
     texts = {}
     for label, path in (
         ("report", report_path),
@@ -1359,6 +1761,11 @@ def run_gate(
         return errors
     report_text = texts["report"]
     source_text = texts["pre-Rewild source"]
+    # Integrity first: corrupted prose is not a style judgment, and every
+    # later tier would be measuring mangled text.
+    integrity = _integrity_findings(report_text, source_text)
+    if integrity:
+        return [finding.message for finding in integrity]
     review_note, review_errors = _load_review_note(
         review_note_path,
         report_path=report_path,
@@ -1439,95 +1846,16 @@ def run_gate(
     )
     errors.extend(_length_errors(report_text, report_lang))
 
-    profile, checker_lang = PROFILES[report_lang]
-    checker = (
-        ROOT
-        / "references"
-        / "rewild"
-        / profile
-        / "scripts"
-        / "naturalness-check.py"
+    checker = _checker_path(report_lang)
+    checker_lang = PROFILES[report_lang][1]
+    result, checker_errors = _run_rewild_checker(
+        report_text, source_text, report_lang
     )
-    with tempfile.TemporaryDirectory(prefix="alexandria-rewild-") as directory:
-        checker_report = Path(directory) / "report-body.txt"
-        checker_source = Path(directory) / "pre-rewild-body.txt"
-        checker_report.write_text(_checker_prose(report_text), encoding="utf-8")
-        checker_source.write_text(_checker_prose(source_text), encoding="utf-8")
-        command = [
-            sys.executable,
-            str(checker),
-            str(checker_report),
-            "--source",
-            str(checker_source),
-            "--lang",
-            checker_lang,
-            "--json",
-        ]
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=300,
-            )
-        except subprocess.TimeoutExpired:
-            return ["Rewild checker timed out after 300 seconds."]
-    try:
-        result = _checker_result(completed.stdout)
-    except (ValueError, json.JSONDecodeError) as exc:
-        detail = completed.stderr.strip() or completed.stdout.strip()
-        return [f"Rewild checker failed: {exc}. {detail}"]
-
+    if checker_errors:
+        return checker_errors
     warnings = result.get("warnings", [])
-    # The checker exits 0 with a clean report and 1 when it raised warnings;
-    # anything else means it stopped early, crashed, or was killed, and its
-    # JSON describes a partial analysis. Trusting an empty warning list from
-    # such a run would pass the gate on work that never finished.
-    expected_returncode = 1 if warnings else 0
-    if completed.returncode != expected_returncode:
-        detail = completed.stderr.strip() or completed.stdout.strip()
-        return [
-            f"Rewild checker exited with status {completed.returncode} after "
-            f"reporting {len(warnings)} warning(s); its analysis is "
-            f"incomplete. {detail}".strip()
-        ]
-    hard_warnings = [
-        warning
-        for warning in warnings
-        if str(warning.get("section", "")).startswith(HARD_WARNING_SECTIONS)
-        or (
-            report_lang == "zh-HK"
-            and str(warning.get("section", "")).startswith("Hong Kong flavor")
-        )
-    ]
-    if hard_warnings:
-        errors.extend(
-            [
-            "Hard Rewild warning remains: "
-            f"{warning.get('section')}: {warning.get('message')}"
-            for warning in hard_warnings
-            ]
-        )
-    if report_lang == "zh-HK":
-        hk_lines = [
-            line
-            for section in result.get("sections", [])
-            if str(section.get("title", "")).startswith("Hong Kong flavor")
-            for line in section.get("lines", [])
-        ]
-        for line in hk_lines:
-            message = str(line.get("message", ""))
-            if "register reads as " in message and "書面語 (" not in message:
-                errors.append(
-                    "Hard Rewild warning remains: Hong Kong report register "
-                    f"is not standard written Chinese: {message}"
-                )
-            if message.startswith("Cantonese potential complements"):
-                errors.append(
-                    "Hard Rewild warning remains: Cantonese syntax in a "
-                    f"professional Hong Kong report: {message}"
-                )
+    hard_warnings = _hard_checker_warnings(result, report_lang)
+    errors.extend(_hard_checker_errors(result, report_lang))
     if errors:
         return errors
 
@@ -1615,7 +1943,7 @@ def run_gate(
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        publish_temp_file(temp_name, receipt_path, force=force)
+        publish_temp_file(temp_name, receipt_path, force=overwrite)
     except FileExistsError:
         return [
             f"Rewild receipt already exists: {receipt_path}. "
@@ -1635,7 +1963,6 @@ def build_parser():
     parser.add_argument("--lang", required=True, choices=PROFILES)
     parser.add_argument(
         "--review-note",
-        required=True,
         help="blind-review findings and dispositions",
     )
     parser.add_argument("--style-waivers", help="JSON reasons for retained warnings")
@@ -1643,7 +1970,12 @@ def build_parser():
         "--fidelity-notes",
         help="JSON acknowledgments for review-mandated intentional edits",
     )
-    parser.add_argument("--receipt", required=True, help="gate receipt JSON to write")
+    parser.add_argument("--receipt", help="gate receipt JSON to write")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="print every tier and write no receipt",
+    )
     parser.add_argument(
         "--force",
         action="store_true",
@@ -1653,7 +1985,28 @@ def build_parser():
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.check:
+        findings = run_check(
+            args.report,
+            args.source,
+            lang=args.lang,
+            review_note_path=args.review_note,
+        )
+        return emit_findings(
+            [
+                finding.message
+                if finding.severity == "hard"
+                else warning(finding.message)
+                for finding in findings
+            ],
+            ok_message="[OK] Rewild check found no hard finding.",
+            transform=_console_safe,
+        )
+    for name, value in (("--review-note", args.review_note), ("--receipt", args.receipt)):
+        if not value:
+            parser.error(f"{name} is required unless --check is used")
     errors = run_gate(
         args.report,
         args.source,

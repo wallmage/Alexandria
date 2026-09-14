@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -86,10 +87,16 @@ class RewildReceiptTests(unittest.TestCase):
         )
 
     def test_document_level_direction_words_do_not_reject_a_faithful_rewrite(self):
-        source = "Costs are above the average across every plant we reviewed."
+        # Updated for sentence-level clauses: the contrasting direction word
+        # now has to live in its own sentence, because a clause is a sentence
+        # and one sentence carrying both terms is a reversal, not a contrast.
+        source = (
+            "Costs are above the average across every plant we reviewed. "
+            "None fell below it."
+        )
         report = (
-            "Across every plant we reviewed, costs remain above the average; "
-            "none fell below it."
+            "Across every plant we reviewed, costs remain above the average. "
+            "None fell below it."
         )
         self.assertEqual([], _semantic_fidelity_errors(source, report, "en"))
 
@@ -337,9 +344,11 @@ class RewildReceiptTests(unittest.TestCase):
         self.assertIn("direction", " ".join(errors).lower())
 
     def test_negation_relocation_and_removal_are_blocked(self):
+        # Updated for sentence-level clauses: the two claims are two
+        # sentences, so the relocated negation still lands on its own claim.
         errors = _semantic_fidelity_errors(
-            "The team did not approve A; it approved B.",
-            "The team approved A; it did not approve B.",
+            "The team did not approve A. It approved B.",
+            "The team approved A. It did not approve B.",
             "en",
         )
         self.assertIn("negation", " ".join(errors).lower())
@@ -705,9 +714,11 @@ class RewildReceiptTests(unittest.TestCase):
             )
             self.assertIn("traditional", " ".join(errors).lower())
 
+        # Updated for sentence-level clauses: one sentence per claim, so the
+        # swapped subject is still a swap between two claims.
         errors = _semantic_fidelity_errors(
-            "系统并非安全，数据可靠。",
-            "数据并非安全，系统可靠。",
+            "系统并非安全。数据可靠。",
+            "数据并非安全。系统可靠。",
             "zh-CN",
         )
         self.assertIn("semantic", " ".join(errors).lower())
@@ -739,7 +750,10 @@ class RewildReceiptTests(unittest.TestCase):
             "Delay originated in configuration; outage originated in weather.",
             "en",
         )
-        self.assertIn("semantic", " ".join(errors).lower())
+        # Updated: sentence-level clauses keep the semicolon inside one clause,
+        # so the swap now reads as a causal substitution rather than a moved
+        # predicate association. Same tier, same severity.
+        self.assertIn("causal", " ".join(errors).lower())
 
         errors = _semantic_fidelity_errors(
             "The delay originated in configuration.",
@@ -756,8 +770,9 @@ class RewildReceiptTests(unittest.TestCase):
         self.assertIn("causal", " ".join(errors).lower())
 
         errors = _semantic_fidelity_errors(
-            "服务中断是配置错误所致，数据丢失是人为操作所致。",
-            "数据丢失是配置错误所致，服务中断是人为操作所致。",
+            # Updated for sentence-level clauses: one claim per sentence.
+            "服务中断是配置错误所致。数据丢失是人为操作所致。",
+            "数据丢失是配置错误所致。服务中断是人为操作所致。",
             "zh-CN",
         )
         self.assertIn("semantic", " ".join(errors).lower())
@@ -1215,11 +1230,14 @@ class GateFailClosedTests(unittest.TestCase):
             "india",
         )
         self.assertGreater(len(names), MAX_HEURISTIC_EXEMPTIONS)
+        # Updated for sentence-level clauses: a split remnant is now a new
+        # sentence, so each exemption comes from a real sentence split.
         splits_source = " ".join(
-            f"The {name} rollout was blocked not by the vendor." for name in names
+            f"The {name} rollout was blocked, not by the vendor."
+            for name in names
         )
         splits_report = " ".join(
-            f"The {name} rollout was blocked, not by the vendor."
+            f"The {name} rollout was blocked. Not by the vendor."
             for name in names
         )
         source_text = (
@@ -1276,3 +1294,231 @@ class GateFailClosedTests(unittest.TestCase):
                 errors,
             )
             self.assertFalse(receipt.exists())
+
+
+class IntegrityTierTests(unittest.TestCase):
+    """Integrity runs before style: control chars and lost quotations."""
+
+    def build(self, work, *, report_body=None, source_body=None):
+        def document(body):
+            return (
+                "# Report\n\n## First finding\n\n"
+                f"{body}{FILLER_ONE}.\n\n"
+                f"## Second finding\n\n{FILLER_TWO}.\n\n"
+                "## Sources\n\n[Source](https://example.com)"
+            )
+
+        report = work / "report.md"
+        source = work / "pre-rewild.md"
+        review = work / "review.json"
+        source.write_text(document(source_body or ""), encoding="utf-8")
+        report.write_text(document(report_body or ""), encoding="utf-8")
+        write_review(review, report=report, source=source)
+        return report, source, review, work / "receipt.json"
+
+    def run_gate_on(self, work, **kwargs):
+        report, source, review, receipt = self.build(work, **kwargs)
+        errors = run_gate(
+            report,
+            source,
+            report_lang="en",
+            review_note_path=review,
+            receipt_path=receipt,
+        )
+        return errors, receipt
+
+    def test_control_characters_block_the_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            errors, receipt = self.run_gate_on(
+                work, report_body="The committee met\x01 in March. "
+            )
+            self.assertTrue(
+                any("control or replacement character" in e for e in errors),
+                errors,
+            )
+            self.assertTrue(any("U+0001" in e for e in errors), errors)
+            self.assertFalse(receipt.exists())
+
+    def test_replacement_character_blocks_the_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            errors, receipt = self.run_gate_on(
+                work, report_body="The committee met� in March. "
+            )
+            self.assertTrue(any("U+FFFD" in e for e in errors), errors)
+            self.assertFalse(receipt.exists())
+
+    def test_a_lost_quotation_blocks_the_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            errors, receipt = self.run_gate_on(
+                work,
+                source_body='The minister said "the bridge will open". ',
+                report_body="The minister said the bridge would open. ",
+            )
+            self.assertTrue(
+                any("Quoted span of the pre-Rewild source" in e for e in errors),
+                errors,
+            )
+            self.assertFalse(receipt.exists())
+
+    def test_a_preserved_quotation_does_not_block_the_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            errors, receipt = self.run_gate_on(
+                work,
+                source_body=(
+                    'The minister said "the bridge will open". '
+                    "The works began promptly. "
+                ),
+                report_body=(
+                    'The minister said "the bridge will open". '
+                    "The works began quickly. "
+                ),
+            )
+            self.assertEqual([], errors)
+            self.assertTrue(receipt.is_file())
+
+    def test_stale_receipt_is_replaced_without_force(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source, review, receipt = self.build(work)
+            self.assertEqual(
+                [],
+                run_gate(
+                    report,
+                    source,
+                    report_lang="en",
+                    review_note_path=review,
+                    receipt_path=receipt,
+                ),
+            )
+            stale = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual([], run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+                force=True,
+            ))
+
+            report.write_text(
+                report.read_text(encoding="utf-8") + "\n\nOne more sentence.\n",
+                encoding="utf-8",
+            )
+            write_review(review, report=report, source=source)
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+            self.assertEqual([], errors)
+            fresh = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertNotEqual(stale["report_sha256"], fresh["report_sha256"])
+            self.assertEqual(file_sha256(report), fresh["report_sha256"])
+
+    def test_a_current_receipt_still_needs_force(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source, review, receipt = self.build(work)
+            run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+            errors = run_gate(
+                report,
+                source,
+                report_lang="en",
+                review_note_path=review,
+                receipt_path=receipt,
+            )
+            self.assertTrue(any("already exists" in e for e in errors), errors)
+
+
+class CheckModeTests(unittest.TestCase):
+    """--check reports every tier at once and writes nothing."""
+
+    def build(self, work, report_body):
+        source_text = (
+            "# Report\n\n## First finding\n\n"
+            f'The minister said "the bridge will open". {FILLER_ONE}.\n\n'
+            f"## Second finding\n\n{FILLER_TWO}.\n\n"
+            "## Sources\n\n[Source](https://example.com)"
+        )
+        report_text = source_text.replace(
+            'The minister said "the bridge will open". ', report_body
+        )
+        report = work / "report.md"
+        source = work / "pre-rewild.md"
+        source.write_text(source_text, encoding="utf-8")
+        report.write_text(report_text, encoding="utf-8")
+        return report, source
+
+    def test_every_tier_is_reported_and_no_receipt_is_written(self):
+        from scripts.rewild_gate import run_check
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source = self.build(
+                work, "The minister said the bridge\x01 would open. "
+            )
+            findings = run_check(report, source, lang="en")
+            families = {finding.family for finding in findings}
+            self.assertIn("integrity/control-chars", families)
+            self.assertIn("fidelity/quotation-lost", families)
+            self.assertEqual([], list(work.glob("*.json")))
+            for finding in findings:
+                if finding.klass == "F":
+                    self.assertEqual("alx snapshot --restore", finding.remove)
+
+    def test_bookkeeping_errors_are_collected_not_returned_early(self):
+        from scripts.rewild_gate import run_check
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source = self.build(
+                work, "The minister said the bridge would open. "
+            )
+            missing = work / "absent-review.json"
+            findings = run_check(
+                report, source, lang="en", review_note_path=missing
+            )
+            families = {finding.family for finding in findings}
+            self.assertIn("review/rewild", families)
+            self.assertIn("fidelity/quotation-lost", families)
+
+    def test_cli_check_mode_exits_nonzero_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report, source = self.build(
+                work, "The minister said the bridge would open. "
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        Path(__file__).resolve().parents[1]
+                        / "scripts"
+                        / "rewild_gate.py"
+                    ),
+                    str(report),
+                    "--source",
+                    str(source),
+                    "--lang",
+                    "en",
+                    "--check",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertIn("Quoted span of the pre-Rewild source", result.stderr)
+            self.assertEqual([], list(work.glob("*.json")))

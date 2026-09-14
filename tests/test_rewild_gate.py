@@ -122,10 +122,13 @@ class AlignmentRobustnessTests(unittest.TestCase):
             "The survey measures trial rather than commitment. "
             "Costs sat above the industry average across every plant."
         )
+        # Updated: "trial, not commitment" introduces a negation the source
+        # never carried, which is a real finding now that a clause is a whole
+        # sentence. The punctuation edit this test is about is the first one.
         report = (
             "The evidence is genuinely uneven, not because one vendor is "
             "weaker but because one question could not be answered. "
-            "The survey measures trial, not commitment. "
+            "The survey measures trial rather than commitment. "
             "Costs sat above the industry average across every plant."
         )
         self.assertEqual([], _semantic_fidelity_errors(source, report, "en"))
@@ -133,20 +136,46 @@ class AlignmentRobustnessTests(unittest.TestCase):
     def test_identical_clauses_pair_before_fuzzy_alignment(self):
         from scripts.rewild_gate import _aligned_clauses
 
-        source = "The desktop app, the web client, the CLI, and the cloud runner."
+        # Updated for sentence-level clauses: an inserted opening sentence
+        # must not drag the surviving sentence out of its pairing.
+        source = (
+            "The desktop app, the web client, the CLI, and the cloud runner. "
+            "The registry stores every build."
+        )
         report = (
             "One new opening clause arrives first. "
-            "The desktop app, the web client, the CLI, and the cloud runner."
+            "The desktop app, the web client, the CLI, and the cloud runner. "
+            "The registry stores every build."
         )
         aligned = _aligned_clauses(source, report, "en")
         for source_clause, report_clause, _ in aligned:
-            if source_clause in {
-                "the desktop app",
-                "the web client",
-                "the cli",
-                "and the cloud runner",
-            }:
-                self.assertEqual(source_clause, report_clause)
+            self.assertEqual(source_clause, report_clause)
+        self.assertEqual(2, len(aligned))
+
+    def test_citation_with_a_comma_does_not_desynchronize_alignment(self):
+        from scripts.rewild_gate import _fidelity_prose, _semantic_fidelity_errors
+
+        # A citation inserted at a sentence end used to cut the sentence into
+        # extra clauses — its link text carries a comma — and every clause
+        # after it paired with the wrong partner.
+        body = (
+            "Output rose through the quarter. "
+            "The regulator opened an inquiry in March. "
+            "Costs stayed above the plan across every plant."
+        )
+        cited = body.replace(
+            "in March.",
+            "in March, as [Output fell in March, regulator says]"
+            "(https://example.com/a) reported.",
+        )
+        source = f"# T\n\n## Body\n\n{body}\n"
+        report = f"# T\n\n## Body\n\n{cited}\n"
+        self.assertEqual(
+            [],
+            _semantic_fidelity_errors(
+                _fidelity_prose(source), _fidelity_prose(report), "en"
+            ),
+        )
 
     def test_citation_groups_are_stripped_from_fidelity_prose(self):
         from scripts.rewild_gate import _fidelity_prose
@@ -393,16 +422,18 @@ class FidelityNoteAbuseTests(unittest.TestCase):
 
 
 class HeuristicExemptionAuditTests(unittest.TestCase):
+    """Every fixture here splits a SENTENCE, the clause unit the gate now uses."""
+
     def test_split_exemptions_are_reported_not_silent(self):
         from scripts.rewild_gate import _semantic_fidelity_errors
 
         source = (
-            "The evidence is genuinely uneven — not because one vendor is "
-            "weaker, but because one question could not be answered."
+            "The evidence is genuinely uneven, not because one vendor is "
+            "weaker."
         )
         report = (
-            "The evidence is genuinely uneven, not because one vendor is "
-            "weaker but because one question could not be answered."
+            "The evidence is genuinely uneven. Not because one vendor is "
+            "weaker."
         )
         exemptions = []
         errors = _semantic_fidelity_errors(source, report, "en", exemptions=exemptions)
@@ -417,8 +448,8 @@ class HeuristicExemptionAuditTests(unittest.TestCase):
 
         source = "The costs were not above the benefits this quarter."
         report = (
-            "The costs were above the benefits this quarter, "
-            "the benefits were not above the costs this quarter."
+            "The costs were above the benefits this quarter. "
+            "The benefits were not above the costs this quarter."
         )
         errors = _semantic_fidelity_errors(source, report, "en")
         self.assertTrue(
@@ -431,7 +462,7 @@ class HeuristicExemptionAuditTests(unittest.TestCase):
         source = "The migration path is not safe for production workloads."
         report = (
             "The migration path is safe and recommended for production "
-            "workloads, is not safe."
+            "workloads. It is not safe."
         )
         errors = _semantic_fidelity_errors(source, report, "en")
         self.assertTrue(
@@ -443,8 +474,8 @@ class HeuristicExemptionAuditTests(unittest.TestCase):
 
         source = "Not every regression test failed during the release window."
         report = (
-            "Every regression test failed during the release window, "
-            "not every regression test."
+            "Every regression test failed during the release window. "
+            "Not every regression test."
         )
         errors = _semantic_fidelity_errors(source, report, "en")
         self.assertTrue(
@@ -454,10 +485,9 @@ class HeuristicExemptionAuditTests(unittest.TestCase):
     def test_remnant_placed_before_the_prefix_is_not_excused(self):
         from scripts.rewild_gate import _semantic_fidelity_errors
 
-        source = "The rollout was not approved by the security review board."
+        source = "The rollout was approved for every region, not for the pilot."
         report = (
-            "Not approved by the security review board, the rollout was "
-            "shipped to every region."
+            "Not for the pilot. The rollout was approved for every region."
         )
         errors = _semantic_fidelity_errors(source, report, "en")
         self.assertTrue(
@@ -471,10 +501,13 @@ class HeuristicExemptionAuditTests(unittest.TestCase):
         # appears verbatim in the report — but before the prefix, not after
         # it. Only the reading-order rule rejects this; a window or
         # substring test would excuse it.
-        source = "The fix was not verified by the review board this cycle."
+        source = (
+            "The fix was verified by the review board this cycle, not by the "
+            "vendor."
+        )
         report = (
-            "Not verified by the review board this cycle, the fix was. "
-            "The deployment continued afterward without further checks."
+            "Not by the vendor. The fix was verified by the review board this "
+            "cycle."
         )
         errors = _semantic_fidelity_errors(source, report, "en")
         self.assertTrue(
@@ -500,8 +533,9 @@ class AssociationExemptionRigorTests(unittest.TestCase):
         return errors, exemptions
 
     def test_adjacent_split_remnant_is_still_excused(self):
+        # Updated for sentence-level clauses: the remnant is its own sentence.
         errors, exemptions = self._run(
-            "The deployment pipeline validates artifacts, before publishing. "
+            "The deployment pipeline validates artifacts. Before publishing. "
             "The registry stores artifacts."
         )
         self.assertEqual([], errors)
@@ -526,7 +560,7 @@ class AssociationExemptionRigorTests(unittest.TestCase):
 
     def test_remnant_reattached_to_another_carrier_is_rejected(self):
         errors, exemptions = self._run(
-            "The deployment pipeline validates artifacts, and the registry "
+            "The deployment pipeline validates artifacts. The registry "
             "retains them before publishing."
         )
         self.assertEqual([], exemptions)
@@ -537,7 +571,8 @@ class AssociationExemptionRigorTests(unittest.TestCase):
 
     def test_reworded_residual_is_rejected(self):
         errors, exemptions = self._run(
-            "The deployment pipeline validates artifacts, prior to publishing."
+            "The deployment pipeline validates artifacts. Prior to publishing. "
+            "The registry stores artifacts."
         )
         self.assertEqual([], exemptions)
         self.assertTrue(
@@ -672,10 +707,16 @@ class DocumentFallbackCoverageTests(unittest.TestCase):
     def test_broadly_aligned_documents_skip_the_fallback(self):
         from scripts.rewild_gate import _semantic_fidelity_errors
 
-        source = "Costs are above the average across every plant we reviewed."
+        # Updated for sentence-level clauses: the contrast sentence is its own
+        # sentence, because one clause carrying both direction terms now reads
+        # as a reversal.
+        source = (
+            "Costs are above the average across every plant we reviewed. "
+            "None fell below it."
+        )
         report = (
-            "Across every plant we reviewed, costs remain above the average; "
-            "none fell below it."
+            "Across every plant we reviewed, costs remain above the average. "
+            "None fell below it."
         )
         self.assertEqual([], _semantic_fidelity_errors(source, report, "en"))
 
@@ -893,3 +934,66 @@ class ConsoleEncodingTests(unittest.TestCase):
 
         safe = _console_safe("报告 → report", self._LegacyStream())
         safe.encode("cp1252")
+
+
+class StyleMaskingTests(unittest.TestCase):
+    """Style counts measure the writer's prose, not the words it quotes."""
+
+    def test_quoted_semicolons_and_halfwidth_punctuation_are_not_counted(self):
+        body = "本节说明制度如何运作以及资金怎样流动。" * 8
+        quoted = "「原文写道:数据由三家机构提供;结论并未改变,亦无补充说明。」"
+        result = run_checker(body + quoted, report_lang="zh-CN")
+        self.assertNotIn("half-width mark(s) inside Chinese text", result.stdout)
+        self.assertNotIn("AI overuses", result.stdout)
+
+    def test_ai_vocabulary_inside_a_quotation_is_not_charged_to_the_writer(self):
+        quoted = (
+            '"This groundbreaking and seamless platform is a testament to '
+            'our comprehensive, cutting-edge vision."'
+        )
+        plain = (
+            "The committee published the record in March. "
+            "Two members dissented and filed a separate note. "
+            "The vote was recorded in the minutes. "
+        )
+        flagged = run_checker(plain + quoted.strip('"'), report_lang="en")
+        masked = run_checker(plain + quoted, report_lang="en")
+        self.assertIn("catalog hits", flagged.stdout)
+        self.assertIn("no catalog vocabulary found", masked.stdout)
+
+    def test_blockquotes_headings_and_link_text_are_masked(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "naturalness_check",
+            REWILD_ROOT / "rewild" / "scripts" / "naturalness-check.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        text, stats = module.strip_markdown(
+            "## A groundbreaking heading\n\n"
+            "> A seamless quoted paragraph.\n\n"
+            "The committee met and voted, see "
+            "[the comprehensive record](https://example.com/a).\n"
+        )
+        self.assertNotIn("groundbreaking", text)
+        self.assertNotIn("seamless", text)
+        self.assertNotIn("comprehensive", text)
+        self.assertIn("The committee met and voted", text)
+        self.assertEqual(1, stats["heading"])
+        self.assertEqual(1, stats["quote"])
+        self.assertEqual(1, stats["link"])
+
+    def test_ai_vocabulary_budget_scales_with_length(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "naturalness_check",
+            REWILD_ROOT / "rewild" / "scripts" / "naturalness-check.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        short = " ".join(f"word{index}" for index in range(100))
+        long = " ".join(f"word{index}" for index in range(4000))
+        self.assertEqual(1, module.vocabulary_budget(short, "en"))
+        self.assertEqual(8, module.vocabulary_budget(long, "en"))

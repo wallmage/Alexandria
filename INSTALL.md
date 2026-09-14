@@ -57,7 +57,9 @@ without network or local execution cannot perform this installation.
 
 The runtime lives in `~/.alexandria/runtime`, outside the user's projects. It is
 not included in ZIP releases. `ALEXANDRIA_RUNTIME_DIR` can select another
-user-owned location when the host already supplies one.
+user-owned location when the host already supplies one. The manifest lives at
+`RUNTIME/.runtime.json` (a copy is also written next to `SKILL.md`); `alx`
+relocates itself to it.
 
 For **every Python command** in SKILL.md and the references, use the argument
 array in `.runtime.json` as the command prefix, followed by the script path and

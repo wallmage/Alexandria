@@ -9,11 +9,14 @@ appends one worklog line and prints the elapsed/remaining footer last.
 import argparse
 import glob
 import hashlib
+import importlib.util
 import io
 import json
+import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import date, datetime, timedelta, timezone
@@ -23,6 +26,72 @@ from urllib.parse import urlsplit, urlunsplit
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+#: The host can start `alx` with a bare interpreter that has none of the
+#: rendering or validation packages. Discovery and relocation use stdlib only
+#: and run before any of them is needed.
+RUNTIME_PACKAGES = ("jsonschema", "weasyprint", "pypdf", "pypdfium2", "markdown", "PIL")
+RUNTIME_MISSING = (
+    "RUNTIME MISSING — install it: sh {root}/scripts/install.sh"
+    "   (Windows: & '{root}\\scripts\\install.ps1'), then rerun this command. "
+    "Never pip-install into a host interpreter."
+)
+
+
+def runtime_directory():
+    """$ALEXANDRIA_RUNTIME_DIR, else ~/.alexandria/runtime."""
+    return Path(os.environ.get("ALEXANDRIA_RUNTIME_DIR") or Path.home() / ".alexandria/runtime")
+
+
+def runtime_command():
+    """The managed interpreter invocation, or None when no runtime is installed.
+
+    The manifest install_runtime.py writes lives in the runtime first and next
+    to SKILL.md second: refreshing the installed skill copy deletes the latter.
+    """
+    runtime = runtime_directory()
+    for manifest in (runtime / ".runtime.json", ROOT / ".runtime.json"):
+        if manifest.is_file():
+            command = json.loads(manifest.read_text(encoding="utf-8"))["command"]
+            return [str(item) for item in command]
+    windows = sys.platform == "win32"
+    mamba = runtime / ("Library/bin/micromamba.exe" if windows else "bin/micromamba")
+    if mamba.is_file():
+        return [str(mamba), "--no-rc", "run", "--prefix", str(runtime / "env"), "python"]
+    python = runtime / ("env/python.exe" if windows else "env/bin/python")
+    if python.is_file():
+        return [str(python)]
+    return None
+
+
+def runtime_packages_present():
+    return all(importlib.util.find_spec(name) is not None for name in RUNTIME_PACKAGES)
+
+
+def relocate(argv):
+    """Re-run this command under the managed runtime; None means run here."""
+    if os.environ.get("ALEXANDRIA_REEXEC") == "1":
+        return None
+    if sys.version_info >= (3, 10) and runtime_packages_present():
+        return None
+    command = runtime_command()
+    if command is None:
+        print(RUNTIME_MISSING.format(root=ROOT), file=sys.stderr)
+        return 2
+    print(f"alx: relocating to managed runtime {command[0]}", file=sys.stderr)
+    return subprocess.run(
+        command + [str(Path(__file__).resolve()), *argv],
+        env={**os.environ, "ALEXANDRIA_REEXEC": "1"},
+        check=False,
+    ).returncode
+
+
+# Before importing skill modules: a host interpreter older than 3.10 cannot
+# even import them, so relocation must happen here, not in main().
+if __name__ == "__main__":
+    _code = relocate(sys.argv[1:])
+    if _code is not None:
+        sys.exit(_code)
 
 from scripts import (  # noqa: E402
     content_gate,
@@ -3619,6 +3688,8 @@ def cmd_render(args):
 
 
 def cmd_status(args):
+    managed = "managed" if runtime_packages_present() else "host — relocation failed"
+    print(f"runtime: {sys.executable} ({managed})")
     ws, state, ledger = _open(args)
     last = state.get("last_check") or {}
     reviews = state.get("reviews", {})
@@ -3812,8 +3883,12 @@ def missing_file_arguments(args):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else [str(item) for item in argv]
     parser = build_parser()
     args = parser.parse_args(argv)
+    code = relocate(argv)
+    if code is not None:
+        return code
     missing = missing_file_arguments(args)
     for flag in missing:
         print(

@@ -3883,8 +3883,9 @@ def validate_schema(data, schema):
         from jsonschema import Draft202012Validator, FormatChecker
     except ModuleNotFoundError:
         return [
-            "Ledger validation needs jsonschema. Install dependencies with "
-            "'python3 -m pip install -r requirements.txt'."
+            f"jsonschema is not importable from {sys.executable}. Run alx through "
+            "the managed runtime (it relocates itself; if it printed RUNTIME MISSING, "
+            "run scripts/install.sh / install.ps1)."
         ]
 
     Draft202012Validator.check_schema(schema)

@@ -236,6 +236,7 @@ class RenderPagesCommandTests(unittest.TestCase):
                     render_pdf_pages, "render_with_poppler", side_effect=succeed
                 ),
                 mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
+                mock.patch.object(render_pdf_pages.sys, "platform", "darwin"),
             ):
                 render_pdf_pages.render_pages(pdf, output, backend="auto")
 
@@ -319,6 +320,7 @@ class RenderPagesCommandTests(unittest.TestCase):
                     render_pdf_pages, "render_with_pdfium", side_effect=succeed
                 ),
                 mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
+                mock.patch.object(render_pdf_pages.sys, "platform", "darwin"),
             ):
                 render_pdf_pages.render_pages(pdf, output, backend="auto")
         self.assertEqual(["pdfkit", "pdfium"], order)

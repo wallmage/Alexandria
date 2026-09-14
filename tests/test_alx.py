@@ -126,6 +126,7 @@ REMEDY_SAMPLE = {
 CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+$"),
     re.compile(r"^extend the quote in \S+$"),
+    re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
 )
 
@@ -399,6 +400,30 @@ class FetchTests(AlxTestCase):
         self.assertEqual("https://example.org/study", source["url"])
 
 
+    def test_fetch_passes_cache_dir_refresh_and_deadline_to_t1(self):
+        self.init()
+        seen = []
+        real = alx.source_fidelity.fetch_document
+
+        def spy(url, **kwargs):
+            seen.append(kwargs)
+            return real(url, **kwargs)
+
+        with mock.patch.object(
+            alx.source_fidelity, "fetch_document", side_effect=spy
+        ), mock_production_transport(responses()):
+            code, out = self.run_in("fetch", "https://example.org/study")
+            self.assertEqual(0, code, out)
+            code, out = self.run_in("fetch", "--id", "S1", "--refresh")
+            self.assertEqual(0, code, out)
+        workspace = alx.Workspace(self.dir)
+        deadline = datetime.fromisoformat(self.state()["deadline"]).timestamp()
+        self.assertEqual([False, True], [call["refresh"] for call in seen])
+        for call in seen:
+            self.assertEqual(workspace.sources, call["cache_dir"])
+            self.assertEqual(alx.FETCH_TIMEOUT_SECONDS, call["timeout"])
+            self.assertAlmostEqual(deadline, call["deadline"], places=3)
+
     def test_fetch_batch_stops_near_the_deadline(self):
         self.init()
         self.set_remaining(10)
@@ -458,7 +483,8 @@ class FindShowTests(AlxTestCase):
         self.fetch("https://example.org/study")
         code, out = self.run_in("show", "S1", "--start", "0", "--end", "60")
         self.assertEqual(0, code, out)
-        self.assertIn("Ledger Study", out)
+        # T1 stores the case-folded visible text, so the window is folded too.
+        self.assertIn("ledger study", out)
 
 
 class ClaimTests(AlxTestCase):
@@ -608,6 +634,87 @@ class ClaimTests(AlxTestCase):
         self.assertIn("C1", out)
         self.assertIn("excluded", out)
 
+    def test_claim_add_upserts_by_claim_id(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.write_json("claims.json", [CLAIM_ONE])
+        self.assertEqual(0, self.run_in("claim", "add", batch)[0])
+        corrected = dict(CLAIM_ONE)
+        corrected["claim"] = "Retention rose to 88 percent after the second round."
+        corrected["source_evidence"] = [
+            {
+                "source_id": "S1",
+                "extract_or_location": (
+                    "Retention rose to 88 percent after the second review round, "
+                    "the registry reported."
+                ),
+            }
+        ]
+        batch = self.write_json("corrected.json", [corrected])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertIn("C1 replaced", out)
+        claims = self.ledger()["claims"]
+        self.assertEqual(1, len(claims))
+        self.assertEqual(corrected["claim"], claims[0]["claim"])
+
+    def test_one_claim_reports_every_family_without_short_circuit(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        broken = {
+            "claim_id": "C5",
+            "claim": "The court ordered the immediate publication of the archive.",
+            "kind": "analysis",
+            "importance": "supporting",
+            "source_evidence": [
+                {
+                    "source_id": "S1",
+                    "extract_or_location": (
+                        "The archive released 1,204 documents in March 2026 "
+                        "after a court ordered their immediate publication."
+                    ),
+                }
+            ],
+        }
+        batch = self.write_json("broken.json", [broken])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(1, code)
+        self.assertIn("ledger/claim-input", out)
+        self.assertIn("reasoning", out)
+        self.assertIn("fidelity/mismatch", out)
+        self.assertEqual([], self.ledger()["claims"])
+
+    def test_drop_cascade_drops_both_claims_mapped_to_one_paragraph(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        co_mapped = {
+            "claim_id": "C4",
+            "claim": "Retention rose to 88 percent after the second review round.",
+            "kind": "fact",
+            "importance": "supporting",
+            "source_evidence": [
+                {
+                    "source_id": "S1",
+                    "extract_or_location": (
+                        "Retention rose to 88 percent after the second review round, "
+                        "the registry reported."
+                    ),
+                }
+            ],
+        }
+        batch = self.write_json("co.json", [co_mapped])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        code, plan = self.run_in("claim", "drop", "C1")
+        self.assertEqual(0, code, plan)
+        self.assertIn("Also dropped (same paragraph): C4", plan)
+        code, out = self.run_in("claim", "drop", "C1", "--apply")
+        self.assertEqual(0, code, out)
+        excluded = {claim["claim_id"] for claim in self.ledger()["excluded_claims"]}
+        self.assertEqual({"C1", "C4"}, excluded)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertNotIn("a release [recorded in the study]", report)
+
     def test_claim_bind_sets_the_paragraph_mapping(self):
         self.bootstrap()
         code, out = self.run_in("claim", "bind", "C1", "--paragraph", "1")
@@ -708,6 +815,20 @@ class CheckTests(AlxTestCase):
         self.assertIn("C1=1", out)
         self.assertIn("C2=2", out)
 
+    def test_unbound_excerpts_are_hard_and_fix_writes_them(self):
+        """Ruling R3: the schema clause is gone; §6.7(c) reports the gap."""
+        self.bootstrap()
+        code, out = self.run_in("check")
+        self.assertEqual(1, code)
+        self.assertIn("binding/excerpt-missing", out)
+        self.assertNotIn("[ledger/schema]", out)
+        _code, out = self.run_in("check", "--fix")
+        self.assertNotIn("binding/excerpt-missing", out)
+        claim = next(
+            claim for claim in self.ledger()["claims"] if claim["claim_id"] == "C1"
+        )
+        self.assertTrue(claim["report_excerpts"])
+
     def test_check_prints_grouped_output_and_status_line(self):
         self.bootstrap()
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
@@ -717,6 +838,28 @@ class CheckTests(AlxTestCase):
         self.assertRegex(out, r"=== STATUS: check #1, elapsed \d+ min, remaining \d+ min")
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
         self.assertIn("last_check", json.dumps(self.state()))
+
+    def test_fix_normalizes_the_date_line_whitespace(self):
+        self.bootstrap()
+        expected = alx.report_contract.localized_date("en", None)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        damaged = report.replace(f"> {expected}", f">   {expected.replace(' ', '  ')}")
+        (self.dir / "report.md").write_text(damaged, encoding="utf-8")
+        _code, out = self.run_in("check")
+        self.assertIn("integrity/date-line", out)
+        _code, out = self.run_in("check", "--fix")
+        self.assertNotIn("integrity/date-line", out)
+        self.assertIn(
+            f"> {expected}", (self.dir / "report.md").read_text(encoding="utf-8")
+        )
+
+    def test_missing_rewild_evaluator_is_a_class_a_finding(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("snapshot")
+        with mock.patch.object(alx.rewild_gate, "run_check", None, create=True):
+            _code, out = self.run_in("check")
+        self.assertIn("rewild evaluator unavailable", out)
 
     def test_degradation_instruction_printed_near_the_deadline(self):
         self.bootstrap()
@@ -769,6 +912,21 @@ class ReviewTests(AlxTestCase):
             note["visual_assets"] = []
             note["evidence_limitations"] = []
             note["completion_note"] = "Reviewed against the ledger."
+            mapping = alx.paragraph_mapping(
+                alx.Workspace(self.dir),
+                self.state(),
+                self.ledger(),
+                (self.dir / "report.md").read_text(encoding="utf-8"),
+            )[0]
+            note["claim_support"] = [
+                {
+                    "claim_id": claim_id,
+                    "paragraph": paragraph,
+                    "disposition": "supported",
+                    "note": "The paragraph cites the claim's own source.",
+                }
+                for claim_id, paragraph in sorted(mapping.items())
+            ]
         path.write_text(json.dumps(note, ensure_ascii=False), encoding="utf-8")
 
     def test_start_copies_report_and_binds_hashes(self):
@@ -794,6 +952,21 @@ class ReviewTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(1, code)
         self.assertIn("scores", out)
+
+    def test_content_note_needs_a_disposition_per_mapped_claim(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("review", "start", "content")
+        self.fill_note("content")
+        path = self.dir / "reviews" / "content.json"
+        note = json.loads(path.read_text(encoding="utf-8"))
+        note["claim_support"] = [
+            dict(entry, disposition="") for entry in note["claim_support"]
+        ]
+        path.write_text(json.dumps(note, ensure_ascii=False), encoding="utf-8")
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(1, code)
+        self.assertIn("claim_support[C1].disposition", out)
 
     def test_mechanical_delta_keeps_the_review_fresh(self):
         self.bootstrap()
@@ -874,11 +1047,24 @@ class IssueTests(AlxTestCase):
     def stub_gates(self, stack, *, online=None):
         calls = {"online": 0, "rewild": 0, "content": 0, "network": 0}
 
+        def bound(payload):
+            """Receipts carry the hashes validate_report --fast re-checks."""
+            payload = dict(payload)
+            payload["report_sha256"] = alx.file_sha256(self.dir / "report.md")
+            payload["ledger_sha256"] = alx.file_sha256(self.dir / "ledger.json")
+            return json.dumps(payload)
+
         def fake_online(ledger_path, receipt_path, **kwargs):
             calls["online"] += 1
             Path(receipt_path).parent.mkdir(parents=True, exist_ok=True)
             Path(receipt_path).write_text(
-                json.dumps({"status": "passed", "policy": "weighted-source-evidence-v2"}),
+                json.dumps(
+                    {
+                        "status": "passed",
+                        "policy": "weighted-source-evidence-v2",
+                        "ledger_sha256": alx.file_sha256(self.dir / "ledger.json"),
+                    }
+                ),
                 encoding="utf-8",
             )
             return online or {
@@ -891,15 +1077,13 @@ class IssueTests(AlxTestCase):
         def fake_rewild(*args, **kwargs):
             calls["rewild"] += 1
             Path(kwargs["receipt_path"]).write_text(
-                json.dumps({"status": "passed"}), encoding="utf-8"
+                bound({"status": "passed"}), encoding="utf-8"
             )
             return []
 
         def fake_content(report_path, ledger_path, review_note_path, receipt_path, **kwargs):
             calls["content"] += 1
-            Path(receipt_path).write_text(
-                json.dumps({"status": "passed"}), encoding="utf-8"
-            )
+            Path(receipt_path).write_text(bound({"status": "passed"}), encoding="utf-8")
             return []
 
         def fake_fetch(*args, **kwargs):
@@ -979,9 +1163,9 @@ class IssueTests(AlxTestCase):
         self.set_remaining(10)
         ledger = self.ledger()
         for claim in ledger["claims"]:
-            if claim["claim_id"] == "C1":
+            if claim["claim_id"] == "C2":
                 claim["source_evidence"][0]["extract_or_location"] = (
-                    "The archive released 4,000 documents in March 2026 "
+                    "The registry logged 4,000 documents in March 2026 "
                     "under a sealed court order."
                 )
         (self.dir / "ledger.json").write_text(
@@ -993,13 +1177,17 @@ class IssueTests(AlxTestCase):
         )
         with ExitStack() as stack:
             self.stub_gates(stack)
-            _code, _out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver")
         final = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertIn("「原始日記」", final)
-        self.assertNotIn("a release [recorded in the study]", final)
+        self.assertNotIn("as the [registry note]", final)
         surviving = {claim["claim_id"] for claim in self.ledger()["claims"]}
-        self.assertNotIn("C1", surviving)
-        self.assertIn("C1", {c["claim_id"] for c in self.ledger()["excluded_claims"]})
+        self.assertNotIn("C2", surviving)
+        self.assertIn("C2", {c["claim_id"] for c in self.ledger()["excluded_claims"]})
+        # Spec §6.8: the drop and its paragraph deletion are mechanical, so a
+        # review finished before the drop stays fresh and delivery completes.
+        self.assertEqual(0, code, out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists(), out)
 
     def test_deliver_records_class_a_failures_in_delivery_notes(self):
         from contextlib import ExitStack
@@ -1145,6 +1333,52 @@ class RemedyTests(AlxTestCase):
                         any(pattern.match(text) for pattern in CLOSED_IMPERATIVES),
                         text,
                     )
+
+
+    def test_every_family_remedy_parses(self):
+        """Ruling R6: every remedy `alx` can print, for every known family."""
+        parser = alx.build_parser()
+        self.assertTrue(alx.FAMILIES)
+        for family in alx.FAMILIES:
+            for severity in ("hard", "warn"):
+                item = alx.Finding(
+                    family=family,
+                    severity=severity,
+                    klass="F",
+                    ids=["C8", "S16"],
+                    message=(
+                        "C8: claim asserts n:1918; S16 offered d:1918-01 only; "
+                        "candidates: 12; https://example.org/study "
+                        "'decision_relevance' is a required property"
+                    ),
+                    fix="",
+                    remove="",
+                )
+                for text in alx._remedies(item, paragraphs=7):
+                    if not text:
+                        continue
+                    with self.subTest(family=family, severity=severity, remedy=text):
+                        if text.startswith("alx "):
+                            parser.parse_args(shlex.split(text)[1:])
+                        else:
+                            self.assertTrue(
+                                any(
+                                    pattern.match(text)
+                                    for pattern in CLOSED_IMPERATIVES
+                                ),
+                                text,
+                            )
+
+    def test_printed_remedies_of_a_failing_check_parse(self):
+        parser = alx.build_parser()
+        self.bootstrap()
+        (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
+        _code, out = self.run_in("check")
+        printed = re.findall(r"(?:Fix|Remove): `?(alx [^`.\n]+)", out)
+        self.assertTrue(printed, out)
+        for text in printed:
+            with self.subTest(remedy=text):
+                parser.parse_args(shlex.split(text.strip())[1:])
 
 
 if __name__ == "__main__":

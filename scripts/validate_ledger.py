@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -14,13 +15,93 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from gate_severity import emit_findings  # noqa: E402
-
-DEFAULT_SCHEMA = (
-    Path(__file__).resolve().parents[1]
-    / "references"
-    / "evidence-ledger.schema.json"
+from gate_severity import (  # noqa: E402, F401
+    Finding,
+    emit_findings,
+    hard_errors,
+    render_grouped,
+    warning,
 )
+
+REFERENCES = Path(__file__).resolve().parents[1] / "references"
+DEFAULT_SCHEMA = REFERENCES / "evidence-ledger.schema.json"
+CLAIM_INPUT_SCHEMA = REFERENCES / "claim-input.schema.json"
+FAMILIES = frozenset(
+    {
+        "ledger/quantity",
+        "ledger/status",
+        "ledger/direction",
+        "ledger/schema",
+        "ledger/source-ids",
+        "ledger/https",
+        "ledger/provenance",
+        "ledger/key-claim",
+        "ledger/portfolio",
+        "ledger/coverage",
+        "ledger/synthesis",
+        "ledger/source-family",
+        "ledger/derived",
+        "ledger/date-granularity",
+        "ledger/person",
+        "ledger/harm",
+        "ledger/excluded-supports",
+        "ledger/undated-reason",
+        "ledger/host-conflict",
+        "ledger/claim-input",
+        "ledger/extract-length",
+        "ledger/triangulation",
+        "ledger/freshness",
+        "ledger/reference",
+    }
+)
+
+
+def _ids_in(message):
+    return re.findall(r"\b[CSP]\d+\b", str(message))
+
+
+def _f(family, message, *, severity="hard", ids=None, fix="", remove=""):
+    return Finding(
+        family=family,
+        severity=severity,
+        klass="A" if severity == "warn" else "F",
+        ids=list(ids if ids is not None else _ids_in(message)),
+        message=message,
+        fix=fix,
+        remove=remove if severity == "hard" else "",
+    )
+
+
+def _ref(message, *, family="ledger/reference", severity="hard", ids=None, fix="", remove=""):
+    if isinstance(message, Finding):
+        return message
+    text = str(message)
+    if text.startswith("WARNING: "):
+        severity = "warn"
+        text = text[len("WARNING: "):]
+    return _f(family, text, severity=severity, ids=ids, fix=fix, remove=remove)
+
+
+def _as_legacy(items):
+    out = []
+    for item in items:
+        if isinstance(item, Finding):
+            out.append(warning(item.message) if item.severity == "warn" else item.message)
+        else:
+            out.append(item)
+    return out
+
+
+def _drop(claim_id):
+    return f"alx claim drop {claim_id} --apply" if claim_id else ""
+_CJK_SENTENCE_PUNCT = "，、！？：；。"
+_NUMERIC_OR_LEGAL_CARRIER = re.compile(
+    r"(?i)\d|percent|%|million|billion|thousand|dollar|usd|court|decree|"
+    r"lawsuit|settlement|agreement|judgment|verdict|indict|charge|fine|"
+    r"penalty|consent|判决|和解|协议|訴訟|诉讼|赔偿|賠償"
+)
+_CJK_PROSE_MIN = 20
+_LATIN_PROSE_MIN = 40
 
 #: Days a time-sensitive record may lag the report date before it is stale.
 FRESHNESS_WINDOW_DAYS = 30
@@ -325,7 +406,7 @@ _CJK_MIXED_NUMBER_RE = re.compile(
 #: trailing digits fill the places below the scale rather than the ones place,
 #: so "3萬5" is 35,000 (not 30,005) and "十八萬五" is 185,000. The reading is
 #: genuinely ambiguous in writing, so both are offered as acceptable forms
-#: (see _scaled_number_values). An explicit 零/〇 placeholder settles it the
+#: (see _scaled_number_values). An explicit 零/〇 placeholder settles it the  # noqa: RUF003
 #: other way ("十萬零一" is 100,001), so those are excluded from the tail.
 _CJK_ABBREVIATED_TAIL_RE = re.compile(
     "([" + _CJK_SCALE_CHARS + "])"
@@ -340,7 +421,7 @@ _CJK_ABBREVIATED_TAIL_RE = re.compile(
 #: context ("一起", "一些", "二手", "十分"): requiring a classifier keeps those
 #: silent without a stoplist. Deliberately narrow to 個/个, the classifier in
 #: both worked examples ("三個漏洞", "十八個月"); broadening it is deferred.
-_CJK_COUNT_CLASSIFIERS = frozenset({"個", "个"})
+_CJK_COUNT_CLASSIFIERS = frozenset("個个項项名家次種种款位條条篇卷册冊")
 
 #: Measure units whose figure is comparable across notations, each mapped to
 #: the (dimension, factor) that converts it to that dimension's base unit. A
@@ -812,6 +893,78 @@ def _normalize_dates(text):
     return _MONTH_NAME_DATE_RE.sub(month_name, text)
 
 
+def _prose_minimum(text):
+    value = _text(text)
+    if not value:
+        return _LATIN_PROSE_MIN
+    cjk = sum(1 for char in value if "\u3400" <= char <= "\u9fff")
+    return _CJK_PROSE_MIN if cjk * 2 >= len(value) else _LATIN_PROSE_MIN
+
+
+def _trigger_has_carrier(text, match):
+    window = text[max(0, match.start() - 48) : match.end() + 48]
+    return bool(_NUMERIC_OR_LEGAL_CARRIER.search(window))
+
+
+def _parse_date_form(form):
+    if not form.startswith("d:"):
+        return None
+    body = form[2:]
+    year = month = day = None
+    if body.startswith("*-*-"):
+        day = body[4:]
+    elif body.startswith("*-"):
+        rest = body[2:]
+        month, _, day = rest.partition("-")
+        day = day or None
+    else:
+        parts = body.split("-")
+        year = parts[0]
+        if len(parts) > 1:
+            month = parts[1]
+        if len(parts) > 2:
+            day = parts[2]
+    return year, month, day
+
+
+def _date_fragment_covered(claim_form, evidence_form):
+    claim = _parse_date_form(claim_form)
+    evidence = _parse_date_form(evidence_form)
+    if not claim or not evidence:
+        return False
+    cy, cm, cd = claim
+    ey, em, ed = evidence
+    if cy and ey != cy:
+        return False
+    if cm and (not em or int(em) != int(cm)):
+        return False
+    if cd and (not ed or int(ed) != int(cd)):
+        return False
+    if cy and not ey:
+        return False
+    if cm and not em:
+        return False
+    return not (cd and not ed)
+
+
+def _quantity_granularity_only(claim_forms, evidence_forms):
+    if any(form in evidence_forms for form in claim_forms):
+        return False
+    dates = [form for form in claim_forms if form.startswith("d:")]
+    if not dates:
+        return False
+    for form in dates:
+        parts = _parse_date_form(form)
+        if not parts or parts[1] or parts[2]:
+            return False
+        if not any(
+            other.startswith("d:") and _date_fragment_covered(form, other) and other != form
+            for other in evidence_forms
+        ):
+            return False
+    return True
+
+
 def _scan_quantities(text):
     """Yield (display, claim_forms, evidence_forms, is_word) for a string.
 
@@ -820,7 +973,10 @@ def _scan_quantities(text):
     their digit-equivalent forms; vague number-like words such as "dozens" do
     not create obligations.
     """
-    working = _URL_RE.sub(" ", str(text or ""))
+    working = unicodedata.normalize("NFKC", str(text or ""))
+    for mark in _CJK_SENTENCE_PUNCT:
+        working = working.replace(mark, " ")
+    working = _URL_RE.sub(" ", working)
     working = _LEDGER_ID_RE.sub(" ", working)
     working = _normalize_dates(working)
     tokens = []
@@ -1012,10 +1168,31 @@ def _scan_quantities(text):
         forms = {f"n:{_han_numeral_string(span)}"}
         return (span, forms, set(forms), False)
 
+    def cjk_month_day(match):
+        month, day = int(match.group(1)), int(match.group(2))
+        form = f"d:*-{month:02d}-{day:02d}"
+        return (match.group(0), {form}, {form}, False)
+
+    def cjk_year_only(match):
+        form = f"d:{match.group(1)}"
+        return (match.group(0), {form}, {form}, False)
+
+    def cjk_month_only(match):
+        form = f"d:*-{int(match.group(1)):02d}"
+        return (match.group(0), {form}, {form}, False)
+
+    def cjk_day_only(match):
+        form = f"d:*-*-{int(match.group(1)):02d}"
+        return (match.group(0), {form}, {form}, False)
+
     take(_IDENTIFIER_RE, identifier)
     take(_ISO_DATE_RE, iso_date)
     take(_ISO_MONTH_RE, iso_month)
     take(_VERSION_RE, version)
+    take(re.compile(r"([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*日"), cjk_month_day)
+    take(re.compile(r"([0-9]{4})\s*年"), cjk_year_only)
+    take(re.compile(r"([0-9]{1,2})\s*月"), cjk_month_only)
+    take(re.compile(r"([0-9]{1,2})\s*日"), cjk_day_only)
     take(_CJK_MIXED_NUMBER_RE, mixed_number)
     take(_NUMBER_RE, number)
     take(_WORD_NUMBER_RE, word_number)
@@ -1047,12 +1224,15 @@ def quantitative_evidence(*texts):
 
 def _quantity_is_covered(claim_forms, evidence_forms):
     for form in claim_forms:
+        if form.startswith("n:"):
+            if form in evidence_forms:
+                return True
+            continue
         if form in evidence_forms:
             return True
         if form.startswith("d:") and any(
-            other.startswith(form)
+            other.startswith("d:") and _date_fragment_covered(form, other)
             for other in evidence_forms
-            if other.startswith("d:")
         ):
             return True
     return False
@@ -1114,13 +1294,14 @@ def _derived_entries(claim):
     ) else []
 
 
-def derived_assertion_errors(claim):
+def _derived_findings(claim):
     """Keep the derived-assertion escape hatch from becoming a rubber stamp."""
     claim_id = claim.get("claim_id", "<unknown>")
     entries = _derived_entries(claim)
     if not entries:
         return []
     errors = []
+    fix = "set field derived_assertions"
     claim_text = _text(claim.get("claim")).casefold()
     extract = _claim_evidence_text(claim).casefold()
     seen = set()
@@ -1129,40 +1310,78 @@ def derived_assertion_errors(claim):
         derivation = _text(entry.get("derivation"))
         if not expression:
             errors.append(
-                f"{claim_id}: derived_assertions entry has no expression; "
-                "name the exact wording in claim that is derived."
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived_assertions entry has no expression; "
+                    "name the exact wording in claim that is derived.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
             )
             continue
         folded = expression.casefold()
         if not _exact_expression_in_text(expression, claim_text):
             errors.append(
-                f"{claim_id}: derived assertion '{expression}' does not appear "
-                "in claim; the expression must be quoted from the claim text."
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' does not appear "
+                    "in claim; the expression must be quoted from the claim text.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
             )
         if extract and folded in extract:
             errors.append(
-                f"{claim_id}: derived assertion '{expression}' already appears "
-                "in extract_or_location; it is quoted evidence, not a "
-                "derivation. Remove the derived_assertions entry."
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' already appears "
+                    "in extract_or_location; it is quoted evidence, not a "
+                    "derivation. Remove the derived_assertions entry.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
             )
         if folded in seen:
             errors.append(
-                f"{claim_id}: derived assertion '{expression}' is declared twice."
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' is declared twice.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
             )
         seen.add(folded)
-        if len(derivation) < 40:
+        needed = _prose_minimum(derivation) if derivation else _prose_minimum(
+            expression
+        )
+        if len(derivation) < needed:
             errors.append(
-                f"{claim_id}: derived assertion '{expression}' needs a "
-                "derivation of at least 40 characters stating how it was "
-                "computed or inferred."
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' needs a "
+                    f"derivation of at least {needed} characters stating how it "
+                    f"was computed or inferred (threshold: {needed}; actual: "
+                    f"{len(derivation)}).",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
             )
     if claim.get("kind") != "estimate" and len(entries) > 2:
         errors.append(
-            f"{claim_id}: {len(entries)} derived assertions on a "
-            f"{claim.get('kind')} claim. Split the claim, or record the "
-            "arithmetic as kind 'estimate' with assumptions."
+            _f(
+                "ledger/derived",
+                f"{claim_id}: {len(entries)} derived assertions on a "
+                f"{claim.get('kind')} claim. Split the claim, or record the "
+                "arithmetic as kind 'estimate' with assumptions.",
+                fix=fix,
+                remove=_drop(claim_id),
+            )
         )
     return errors
+
+
+def derived_assertion_errors(claim):
+    return _as_legacy(_derived_findings(claim))
 
 
 def _is_negated(text, index):
@@ -1350,7 +1569,7 @@ def _evidence_carries_assertion(
     return False
 
 
-def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
+def _evidence_coverage_findings(claim, dated_fields=(), inherited_evidence=""):
     """Require claim assertions to be covered by the recorded evidence.
 
     `dated_fields` carries the dates the ledger already records in its own
@@ -1375,14 +1594,24 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
         # An absent extract used to exempt the claim from every check below,
         # which made a blank field the cheapest way to assert anything.
         return [
-            f"{claim_id}: extract_or_location is empty, so nothing in the claim "
-            "is evidenced. Quote the source wording or its precise location."
+            _f(
+                "ledger/extract-length",
+                f"{claim_id}: extract_or_location is empty, so nothing in the claim "
+                "is evidenced. Quote the source wording or its precise location.",
+                fix="set field extract_or_location",
+                remove=_drop(claim_id),
+            )
         ]
     extract = " ".join(part for part in (extract, _text(inherited_evidence)) if part)
     if not extract:
         return [
-            f"{claim_id}: analysis rests on no recorded evidence. Quote its "
-            "reasoning basis, or link the claims it is derived from."
+            _f(
+                "ledger/extract-length",
+                f"{claim_id}: analysis rests on no recorded evidence. Quote its "
+                "reasoning basis, or link the claims it is derived from.",
+                fix="set field extract_or_location",
+                remove=_drop(claim_id),
+            )
         ]
     assumptions = claim.get("assumptions")
     assumption_text = (
@@ -1408,8 +1637,6 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
         derived_quantities.append((expression.casefold(), forms))
     used_expressions = set()
     for display, claim_forms in quantitative_obligations(claim_text):
-        if _quantity_is_covered(claim_forms, evidence_forms):
-            continue
         matching_expressions = [
             expression
             for expression, forms in derived_quantities
@@ -1418,10 +1645,58 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
         if matching_expressions:
             used_expressions.update(matching_expressions)
             continue
+        if _quantity_granularity_only(claim_forms, evidence_forms):
+            errors.append(
+                _f(
+                    "ledger/date-granularity",
+                    f"{claim_id}: quantity '{display}' is a bare year; "
+                    f"extracts offer month granularity "
+                    f"(claim {', '.join(sorted(claim_forms))}; offered "
+                    f"{', '.join(sorted(evidence_forms))}).",
+                    severity="warn",
+                    ids=_ids_in(claim_id),
+                    fix="set field claim",
+                )
+            )
+            continue
+        if _quantity_is_covered(claim_forms, evidence_forms):
+            continue
+        evidence_rows = claim.get("source_evidence")
+        offered = []
+        find_id = None
+        if isinstance(evidence_rows, list):
+            for entry in evidence_rows:
+                if not isinstance(entry, dict):
+                    continue
+                source_id = entry.get("source_id")
+                if source_id and find_id is None:
+                    find_id = source_id
+                forms = quantitative_evidence(entry.get("extract_or_location"))
+                offered.append(
+                    f"{source_id or '?'} extracts offer "
+                    f"{', '.join(sorted(forms)) or 'none'}"
+                )
+        if not find_id:
+            linked = claim.get("source_ids")
+            if isinstance(linked, list) and linked:
+                find_id = linked[0]
+        if not offered:
+            offered.append(
+                "extracts offer " + (", ".join(sorted(evidence_forms)) or "none")
+            )
+        fix = f"alx find {find_id} {display}" if find_id else "set field extract_or_location"
         errors.append(
-            f"{claim_id}: quantity '{display}' appears in claim but not in "
-            "extract_or_location. Quote the figure from the source, or record "
-            "it in derived_assertions with its derivation."
+            _f(
+                "ledger/quantity",
+                f"{claim_id}: quantity '{display}' appears in claim but not in "
+                f"extract_or_location (claim {', '.join(sorted(claim_forms))}; "
+                f"{'; '.join(offered)}). Quote the figure from the source via "
+                f"`{fix}`, or record it in derived_assertions with its "
+                f"derivation. Remove: `{_drop(claim_id)}`.",
+                ids=_ids_in(f"{claim_id} {find_id or ''}"),
+                fix=fix,
+                remove=_drop(claim_id),
+            )
         )
     folded_extract = extract.casefold()
     folded_claim = claim_text.casefold()
@@ -1430,6 +1705,7 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
             match
             for match in re.finditer(claim_pattern, folded_claim, re.IGNORECASE)
             if not _is_negated(folded_claim, match.start())
+            and (label != "below" or _trigger_has_carrier(folded_claim, match))
         ]
         if not asserted or (
             _has_affirmative_match(evidence_pattern, folded_extract)
@@ -1452,14 +1728,20 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
             used_expressions.update(matching_expressions)
             continue
         errors.append(
-            f"{claim_id}: claim asserts the {label!r} direction but the "
-            "recorded evidence does not."
+            _f(
+                "ledger/direction",
+                f"{claim_id}: claim asserts the {label!r} direction but the "
+                "recorded evidence does not.",
+                fix="set field claim",
+                remove=_drop(claim_id),
+            )
         )
     for label, claim_pattern, evidence_pattern in STATUS_ASSERTIONS:
         asserted = [
             match
             for match in re.finditer(claim_pattern, folded_claim, re.IGNORECASE)
             if not _is_negated(folded_claim, match.start())
+            and (label != "settled" or _trigger_has_carrier(folded_claim, match))
         ]
         if not asserted:
             # A denied status ("not open source") is not an appended status
@@ -1482,9 +1764,14 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
             used_expressions.update(matching_expressions)
             continue
         errors.append(
-            f"{claim_id}: claim asserts '{label}' but extract_or_location "
-            "records no evidence of it. Quote the source wording that "
-            "establishes the status, or declare it in derived_assertions."
+            _f(
+                "ledger/status",
+                f"{claim_id}: claim asserts '{label}' but extract_or_location "
+                "records no evidence of it. Quote the source wording that "
+                "establishes the status, or declare it in derived_assertions.",
+                fix="set field extract_or_location",
+                remove=_drop(claim_id),
+            )
         )
     for entry in derived_entries:
         expression = _text(entry.get("expression"))
@@ -1492,11 +1779,26 @@ def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
         if not expression or folded in used_expressions:
             continue
         errors.append(
-            f"{claim_id}: derived assertion '{expression}' excuses nothing; "
-            "the escape hatch is only for quantities or status assertions "
-            "that the extract does not carry."
+            _f(
+                "ledger/derived",
+                f"{claim_id}: derived assertion '{expression}' excuses nothing; "
+                "the escape hatch is only for quantities or status assertions "
+                "that the extract does not carry.",
+                severity="warn",
+                fix="set field derived_assertions",
+            )
         )
     return errors
+
+
+def evidence_coverage_errors(claim, dated_fields=(), inherited_evidence=""):
+    return _as_legacy(
+        _evidence_coverage_findings(
+            claim,
+            dated_fields=dated_fields,
+            inherited_evidence=inherited_evidence,
+        )
+    )
 
 
 def _as_date(value):
@@ -1645,7 +1947,7 @@ def _source_family_errors(sources_by_id):
     """Tie source_family and provenance to the publisher and the URL host."""
     errors = []
     independent = {"primary_independent", "secondary_independent"}
-    interested = {"primary_interested", "secondary_dependent"}
+    interested = {"primary_interested", "secondary_dependent", "unverified"}
     hosts = {}
     for source_id, source in sorted(sources_by_id.items()):
         try:
@@ -1673,14 +1975,24 @@ def _source_family_errors(sources_by_id):
             source_id
             for ids in labels.values()
             for source_id in ids
-            if len(_text(sources_by_id[source_id].get("family_justification"))) < 40
+            if len(_text(sources_by_id[source_id].get("family_justification")))
+            < _prose_minimum(sources_by_id[source_id].get("family_justification"))
         )
         if unjustified:
+            sid = unjustified[0]
             errors.append(
-                f"Domain {domain} is split across {len(labels)} source families "
-                f"({', '.join(sorted(labels))}): {', '.join(unjustified)}. "
-                "Use one family per domain, or record a family_justification of "
-                "at least 40 characters explaining the genuine independence."
+                _f(
+                    "ledger/source-family",
+                    f"Domain {domain} is split across {len(labels)} source families "
+                    f"({', '.join(sorted(labels))}): {', '.join(unjustified)}. "
+                    "Use one family per domain, or record a family_justification "
+                    f"of at least {_CJK_PROSE_MIN} characters (CJK) / "
+                    f"{_LATIN_PROSE_MIN} characters explaining the genuine "
+                    f"independence. Fix: `alx source set {sid}`.",
+                    severity="warn",
+                    ids=unjustified,
+                    fix=f"alx source set {sid}",
+                )
             )
     for host, source_ids in sorted(hosts.items()):
         if len(source_ids) < 2:
@@ -1698,15 +2010,28 @@ def _source_family_errors(sources_by_id):
             source_id
             for source_id in source_ids
             if len(_text(sources_by_id[source_id].get("family_justification")))
-            < 40
+            < _prose_minimum(
+                sources_by_id[source_id].get("family_justification")
+            )
         ]
+        provenances = ", ".join(
+            f"{source_id}={sources_by_id[source_id].get('provenance')}"
+            for source_id in source_ids
+        )
         if len(classes) > 1 and unjustified:
+            sid = unjustified[0]
             errors.append(
-                f"Sources on host {host} declare different independence "
-                f"classes ({', '.join(sorted(classes))}) without a "
-                "family_justification: "
-                f"{', '.join(sorted(unjustified))}. Pages on one host are one "
-                "interested party unless the difference is justified."
+                _f(
+                    "ledger/host-conflict",
+                    f"Sources on host {host} declare different independence "
+                    f"classes ({', '.join(sorted(classes))}) without a "
+                    f"family_justification ({', '.join(unjustified)}): "
+                    f"{provenances}. Pages on one host are one interested "
+                    "party unless the difference is justified.",
+                    ids=source_ids,
+                    fix=f"alx source set {sid}",
+                    remove="",
+                )
             )
     return errors
 
@@ -1737,7 +2062,7 @@ def _supports_cycles(claims_by_id):
     return sorted(cycles)
 
 
-def validate_references(data):
+def _reference_findings(data):
     """Check ID uniqueness and links that JSON Schema cannot express."""
     if not isinstance(data, dict):
         return []
@@ -1798,6 +2123,14 @@ def validate_references(data):
     interested_provenance = {
         "primary_interested",
         "secondary_dependent",
+        "unverified",
+    }
+    excluded_claims = data.get("excluded_claims")
+    excluded_claims = excluded_claims if isinstance(excluded_claims, list) else []
+    excluded_ids = {
+        item.get("claim_id")
+        for item in excluded_claims
+        if isinstance(item, dict) and item.get("claim_id")
     }
 
     if data.get("schema_version") in {3, 4} and sources_by_id and not any(
@@ -1805,8 +2138,13 @@ def validate_references(data):
         for source in sources_by_id.values()
     ):
         errors.append(
-            "Evidence portfolio has no independent source; record affected "
-            "coverage as a gap rather than supported."
+            _f(
+                "ledger/portfolio",
+                "Evidence portfolio has no independent source; unverified "
+                "counts as interested. Record affected coverage as a gap "
+                "rather than supported.",
+                fix="alx source set S1",
+            )
         )
 
     errors.extend(f"Duplicate source ID: {item}" for item in _duplicates(source_ids))
@@ -1849,14 +2187,24 @@ def validate_references(data):
             for claim_id in coverage_claims
         ):
             errors.append(
-                f"Coverage {area} is disputed but references no disputed claim."
+                _f(
+                    "ledger/coverage",
+                    f"Coverage {area} is disputed but references no disputed claim.",
+                    severity="warn",
+                    fix="alx check --fix",
+                )
             )
         if item.get("status") == "supported" and not any(
             claims_by_id.get(claim_id, {}).get("status") == "supported"
             for claim_id in coverage_claims
         ):
             errors.append(
-                f"Coverage {area} is supported but references no supported claim."
+                _f(
+                    "ledger/coverage",
+                    f"Coverage {area} is supported but references no supported claim.",
+                    severity="warn",
+                    fix="alx check --fix",
+                )
             )
 
     report_date_value = data.get("report_date")
@@ -1888,10 +2236,29 @@ def validate_references(data):
             errors.append(f"{source_id} is accessed after the report date.")
         if published and accessed and published > accessed:
             errors.append(f"{source_id} is published after it was accessed.")
+        url = _text(source.get("url"))
+        if url and not url.lower().startswith("https://"):
+            errors.append(
+                _f(
+                    "ledger/https",
+                    f"{source_id}: source.url must be https "
+                    f"(threshold: https; actual: {url}). "
+                    f"Fix: `alx fetch --id {source_id} --refresh`.",
+                    ids=[source_id],
+                    fix=f"alx fetch --id {source_id} --refresh",
+                )
+            )
 
     def direct_source_ids(claim_id):
         claim = claims_by_id.get(claim_id, {})
-        linked = claim.get("source_ids", [])
+        linked = claim.get("source_ids")
+        if linked is None:
+            evidence = claim.get("source_evidence")
+            linked = [
+                entry.get("source_id")
+                for entry in evidence
+                if isinstance(entry, dict) and entry.get("source_id")
+            ] if isinstance(evidence, list) else []
         linked = set(linked) if isinstance(linked, list) else set()
         return {source_id for source_id in linked if source_id in sources_by_id}
 
@@ -1945,9 +2312,13 @@ def validate_references(data):
             for source_id in linked_sources
         ):
             errors.append(
-                f"Supported coverage {item.get('area', '<unknown>')} relies "
-                "only on interested sources; mark it as a gap or add "
-                "independent evidence."
+                _f(
+                    "ledger/provenance",
+                    f"Supported coverage {item.get('area', '<unknown>')} relies "
+                    "only on interested sources; mark it as a gap or add "
+                    "independent evidence.",
+                    fix="alx source set S1",
+                )
             )
 
     for claim in claims:
@@ -1964,12 +2335,6 @@ def validate_references(data):
             claim_day = None
         if claim_day and report_day and claim_day > report_day:
             errors.append(f"{claim_id} is dated after the report date.")
-        source_links = claim.get("source_ids", [])
-        if not isinstance(source_links, list):
-            source_links = []
-        for source_id in source_links:
-            if source_id not in source_set:
-                errors.append(f"{claim_id} references unknown source {source_id}.")
         source_evidence = claim.get("source_evidence")
         source_evidence = (
             source_evidence if isinstance(source_evidence, list) else []
@@ -1979,6 +2344,27 @@ def validate_references(data):
             for entry in source_evidence
             if isinstance(entry, dict) and entry.get("source_id")
         ]
+        raw_source_ids = claim.get("source_ids")
+        if raw_source_ids is None:
+            source_links = list(dict.fromkeys(evidence_ids))
+            errors.append(
+                _f(
+                    "ledger/source-ids",
+                    f"{claim_id}: source_ids missing; derived {source_links} "
+                    f"from source_evidence (threshold: present; actual: absent). "
+                    "Fix: `alx check --fix`.",
+                    severity="warn",
+                    ids=_ids_in(claim_id),
+                    fix="alx check --fix",
+                )
+            )
+        elif not isinstance(raw_source_ids, list):
+            source_links = []
+        else:
+            source_links = list(raw_source_ids)
+        for source_id in source_links:
+            if source_id not in source_set:
+                errors.append(f"{claim_id} references unknown source {source_id}.")
         for source_id in _duplicates(evidence_ids):
             errors.append(
                 f"{claim_id}: duplicate source_evidence for {source_id}."
@@ -1989,19 +2375,35 @@ def validate_references(data):
                     f"{claim_id}: source_evidence references {source_id}, "
                     "which is not a direct source for the claim."
                 )
-        for source_id in source_links:
-            if source_id not in evidence_ids:
-                errors.append(
-                    f"{claim_id}: source_evidence is missing {source_id}; "
-                    "record the exact extract or location supplied by that "
-                    "individual source."
+        extras = [
+            source_id
+            for source_id in source_links
+            if source_id not in evidence_ids
+        ]
+        if extras:
+            errors.append(
+                _f(
+                    "ledger/source-ids",
+                    f"{claim_id}: extra source_ids {extras} not in "
+                    f"source_evidence (threshold: 0 extras; actual: {len(extras)}). "
+                    "Fix: `alx check --fix`.",
+                    ids=_ids_in(claim_id),
+                    fix="alx check --fix",
+                    remove=_drop(claim_id),
                 )
+            )
         person_links = claim.get("person_ids", [])
         person_links = person_links if isinstance(person_links, list) else []
         for person_id in person_links:
             if person_id not in people_by_id:
                 errors.append(
-                    f"{claim_id} references unknown person {person_id}."
+                    _f(
+                        "ledger/person",
+                        f"{claim_id} references unknown person {person_id}.",
+                        ids=[claim_id, person_id],
+                        fix="alx ledger merge PATCH",
+                        remove=_drop(claim_id),
+                    )
                 )
         protected_people = [
             people_by_id[person_id]
@@ -2020,18 +2422,46 @@ def validate_references(data):
             "resolution",
         }:
             errors.append(
-                f"{claim_id}: claim linked to a protected person needs an "
-                "explicit person_claim_role classification."
+                _f(
+                    "ledger/person",
+                    f"{claim_id}: claim linked to a protected person needs an "
+                    "explicit person_claim_role classification.",
+                    ids=[claim_id],
+                    fix="set field person_claim_role",
+                    remove=_drop(claim_id),
+                )
             )
+        for person_id in person_links:
+            person = people_by_id.get(person_id)
+            if person and person.get("living_status") == "unknown":
+                errors.append(
+                    _f(
+                        "ledger/person",
+                        f"{claim_id}: person {person_id} has living_status unknown; "
+                        "refuse person-linked claims until status is pinned via "
+                        "`alx ledger merge PATCH`. Remove: "
+                        f"`{_drop(claim_id)}`.",
+                        ids=[claim_id, person_id],
+                        fix="alx ledger merge PATCH",
+                        remove=_drop(claim_id),
+                    )
+                )
         if protected_people and (
             not isinstance(person_claim_assessment, dict)
             or person_claim_assessment.get("classification")
             != person_claim_role
-            or len(_text(person_claim_assessment.get("rationale"))) < 40
+            or len(_text(person_claim_assessment.get("rationale")))
+            < _prose_minimum(person_claim_assessment.get("rationale"))
         ):
             errors.append(
-                f"{claim_id}: protected-person claim needs a substantive "
-                "person_claim_assessment matching person_claim_role."
+                _f(
+                    "ledger/person",
+                    f"{claim_id}: protected-person claim needs a substantive "
+                    "person_claim_assessment matching person_claim_role.",
+                    ids=[claim_id],
+                    fix="set field person_claim_assessment",
+                    remove=_drop(claim_id),
+                )
             )
         harm_review = claim.get("human_harm_review")
         claim_text = _text(claim.get("claim"))
@@ -2065,8 +2495,14 @@ def validate_references(data):
                 "sensitive_private_fact",
             }:
                 errors.append(
-                    f"{claim_id}: harmful wording conflicts with "
-                    f"person_claim_role {person_claim_role!r}."
+                    _f(
+                        "ledger/harm",
+                        f"{claim_id}: harmful wording conflicts with "
+                        f"person_claim_role {person_claim_role!r}.",
+                        ids=[claim_id],
+                        fix="set field person_claim_role",
+                        remove=_drop(claim_id),
+                    )
                 )
         if (
             SENSITIVE_PRIVATE_PATTERN.search(claim_text)
@@ -2528,7 +2964,19 @@ def validate_references(data):
             for related_id in related_claims:
                 if related_id == claim_id:
                     errors.append(f"{claim_id} has a circular {relation} reference.")
-                if related_id not in claim_set:
+                if related_id in excluded_ids:
+                    errors.append(
+                        _f(
+                            "ledger/excluded-supports",
+                            f"{claim_id}: surviving {relation} naming excluded "
+                            f"claim {related_id}. Fix: set field {relation}. "
+                            f"Remove: `{_drop(claim_id)}`.",
+                            ids=[claim_id, related_id],
+                            fix=f"set field {relation}",
+                            remove=_drop(claim_id),
+                        )
+                    )
+                elif related_id not in claim_set:
                     errors.append(f"{claim_id} references unknown claim {related_id}.")
                 elif relation == "contradicts":
                     other = claims_by_id.get(related_id, {})
@@ -2540,15 +2988,29 @@ def validate_references(data):
                         )
         if claim.get("status") == "disputed":
             if not str(claim.get("resolution") or "").strip():
-                errors.append(f"{claim_id} is disputed but has no resolution.")
+                errors.append(
+                    _f(
+                        "ledger/coverage",
+                        f"{claim_id} is disputed but has no resolution.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field resolution",
+                    )
+                )
             if not claim.get("contradicts"):
                 errors.append(
-                    f"{claim_id} is disputed but has no contradicting claim."
+                    _f(
+                        "ledger/coverage",
+                        f"{claim_id} is disputed but has no contradicting claim.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field contradicts",
+                    )
                 )
 
         foundations = foundation_source_ids(claim_id)
         direct_foundations = direct_source_ids(claim_id)
-        errors.extend(derived_assertion_errors(claim))
+        errors.extend(_derived_findings(claim))
         ledger_dates = [claim.get("as_of"), claim.get("verified_at")]
         for source_id in sorted(direct_foundations):
             source = sources_by_id[source_id]
@@ -2563,7 +3025,7 @@ def validate_references(data):
                 if related_id in claims_by_id
             )
         errors.extend(
-            evidence_coverage_errors(claim, ledger_dates, inherited)
+            _evidence_coverage_findings(claim, ledger_dates, inherited)
         )
         errors.extend(
             _absence_errors(claim, report_day)
@@ -2589,8 +3051,14 @@ def validate_references(data):
                 report_day - claim_day
             ).days > FRESHNESS_WINDOW_DAYS:
                 errors.append(
-                    f"{claim_id}: time-sensitive claim is dated "
-                    f"{(report_day - claim_day).days} days before the report date."
+                    _f(
+                        "ledger/freshness",
+                        f"{claim_id}: time-sensitive claim is dated "
+                        f"{(report_day - claim_day).days} days before the report date.",
+                        ids=[claim_id],
+                        fix="set field as_of",
+                        remove=_drop(claim_id),
+                    )
                 )
             for source_id in sorted(foundations):
                 source = sources_by_id[source_id]
@@ -2629,10 +3097,18 @@ def validate_references(data):
                     published_day is None or stale_publication
                 ) and not CONTINUOUS_UPDATE_PATTERN.search(undated_reason):
                     errors.append(
-                        f"{source_id}: source for time-sensitive {claim_id} is "
-                        "not published inside the freshness window and its "
-                        "undated_reason does not state that the page is "
-                        "continuously updated."
+                        _f(
+                            "ledger/undated-reason",
+                            f"{source_id}: source for time-sensitive {claim_id} is "
+                            "not published inside the freshness window and its "
+                            "undated_reason does not state that the page is "
+                            "continuously updated. Accepted phrasings, for example: "
+                            "'continuously updated', 'updated continuously', "
+                            "'living page', '持续更新', '持續更新'.",
+                            ids=[source_id, claim_id],
+                            fix=f"alx source set {source_id}",
+                            remove=_drop(claim_id),
+                        )
                     )
         if (
             claim.get("confidence") == "high"
@@ -2666,8 +3142,14 @@ def validate_references(data):
             }
             if triangulation_status == "met" and len(families) < 2:
                 errors.append(
-                    f"{claim_id} declares triangulation met but has "
-                    f"{len(families)} normalized source family."
+                    _f(
+                        "ledger/triangulation",
+                        f"{claim_id} declares triangulation met but has "
+                        f"{len(families)} normalized source family.",
+                        ids=[claim_id],
+                        fix="set field triangulation",
+                        remove=_drop(claim_id),
+                    )
                 )
             if triangulation_status == "met" and not any(
                 sources_by_id[source_id].get("provenance")
@@ -2676,23 +3158,47 @@ def validate_references(data):
                 if source_id in sources_by_id
             ):
                 errors.append(
-                    f"{claim_id} declares triangulation met but has "
-                    "no independent source."
+                    _f(
+                        "ledger/triangulation",
+                        f"{claim_id} declares triangulation met but has "
+                        "no independent source.",
+                        ids=[claim_id],
+                        fix="alx source set S1",
+                        remove=_drop(claim_id),
+                    )
                 )
             if triangulation_status == "limited":
                 if claim.get("confidence") == "high":
                     errors.append(
-                        f"{claim_id}: high-confidence key judgment cannot "
-                        "use limited triangulation."
+                        _f(
+                            "ledger/triangulation",
+                            f"{claim_id}: high-confidence key judgment cannot "
+                            "use limited triangulation.",
+                            ids=[claim_id],
+                            fix="set field triangulation",
+                            remove=_drop(claim_id),
+                        )
                     )
                 if not str(claim.get("limitations") or "").strip():
                     errors.append(
-                        f"{claim_id} has limited triangulation but no limitation."
+                        _f(
+                            "ledger/triangulation",
+                            f"{claim_id} has limited triangulation but no limitation.",
+                            ids=[claim_id],
+                            fix="set field limitations",
+                            remove=_drop(claim_id),
+                        )
                     )
             if triangulation_status == "not_applicable":
                 errors.append(
-                    f"{claim_id} is a key analysis; triangulation cannot be "
-                    "not applicable."
+                    _f(
+                        "ledger/triangulation",
+                        f"{claim_id} is a key analysis; triangulation cannot be "
+                        "not applicable.",
+                        ids=[claim_id],
+                        fix="set field triangulation",
+                        remove=_drop(claim_id),
+                    )
                 )
 
         if claim.get("importance") == "key":
@@ -2702,8 +3208,14 @@ def validate_references(data):
             judged = direct_foundations or foundations
             if not judged:
                 errors.append(
-                    f"{claim_id}: key claim has no direct source and no "
-                    "first-level supporting claim with one."
+                    _f(
+                        "ledger/key-claim",
+                        f"{claim_id}: key claim has no direct source and no "
+                        "first-level supporting claim with one.",
+                        ids=[claim_id],
+                        fix="alx source set S1",
+                        remove=_drop(claim_id),
+                    )
                 )
             elif all(
                 sources_by_id[source_id].get("provenance")
@@ -2711,9 +3223,15 @@ def validate_references(data):
                 for source_id in judged
             ):
                 errors.append(
-                    f"{claim_id}: key claim rests only on interested sources "
-                    f"({', '.join(sorted(judged))}); add independent "
-                    "evidence or record the area as a gap."
+                    _f(
+                        "ledger/key-claim",
+                        f"{claim_id}: key claim rests only on interested/unverified sources "
+                        f"({', '.join(sorted(judged))}); add independent "
+                        "evidence or record the area as a gap.",
+                        ids=[claim_id, *sorted(judged)],
+                        fix=f"alx source set {sorted(judged)[0]}",
+                        remove=_drop(claim_id),
+                    )
                 )
             declared_roles = {
                 source_id: {
@@ -2780,13 +3298,25 @@ def validate_references(data):
         for claim_id in central:
             claim = claims_by_id.get(claim_id)
             if not claim:
-                errors.append(f"Synthesis references unknown central judgment {claim_id}.")
+                errors.append(
+                    _f(
+                        "ledger/synthesis",
+                        f"Synthesis references unknown central judgment {claim_id}.",
+                        ids=[claim_id],
+                        fix="set field synthesis",
+                    )
+                )
             elif (
                 claim.get("importance") != "key"
                 or claim.get("include_in_report") is not True
             ):
                 errors.append(
-                    f"Central judgment {claim_id} must be an included key claim."
+                    _f(
+                        "ledger/synthesis",
+                        f"Central judgment {claim_id} must be an included key claim.",
+                        ids=[claim_id],
+                        fix="set field synthesis",
+                    )
                 )
         for claim_id, claim in claims_by_id.items():
             if (
@@ -2795,7 +3325,12 @@ def validate_references(data):
                 and claim_id not in central
             ):
                 errors.append(
-                    f"Key report claim {claim_id} is missing from the central synthesis."
+                    _f(
+                        "ledger/synthesis",
+                        f"Key report claim {claim_id} is missing from the central synthesis.",
+                        ids=[claim_id],
+                        fix="set field synthesis",
+                    )
                 )
         for claim_id in counterevidence:
             if claim_id not in claim_set:
@@ -2874,7 +3409,177 @@ def validate_references(data):
                     f"Central judgment {claim_id} is not covered by a "
                     "high-priority research area."
                 )
-    return errors
+    return [_ref(item) for item in errors]
+
+
+def validate_references(data):
+    return _as_legacy(_reference_findings(data))
+
+
+def collect_findings(ledger, *, schema_path=None, cache_dir=None):
+    schema_file = Path(schema_path) if schema_path else DEFAULT_SCHEMA
+    schema = json.loads(schema_file.read_text(encoding="utf-8"))
+    findings = [
+        _f("ledger/schema", item, fix="set field schema_version")
+        for item in validate_schema(ledger, schema)
+    ]
+    findings.extend(_reference_findings(ledger))
+    if cache_dir:
+        findings.extend(_offline_probe_findings(ledger, cache_dir))
+    return findings
+
+
+def _offline_probe_findings(ledger, cache_dir):
+    try:
+        from source_fidelity import probe_findings, read_cache
+    except ImportError:
+        return []
+    findings = []
+    sources = {
+        source.get("source_id"): source
+        for source in ledger.get("sources") or []
+        if isinstance(source, dict)
+    }
+    for claim in ledger.get("claims") or []:
+        if not isinstance(claim, dict):
+            continue
+        for source_id in claim.get("source_ids") or []:
+            cached = read_cache(cache_dir, source_id)
+            if cached is None:
+                continue
+            text, _meta = cached
+            findings.extend(probe_findings(claim, sources.get(source_id, {}), text))
+    return findings
+
+
+def expand_claim_input(item, ledger, *, cache_meta):
+    evidence = item.get("source_evidence") if isinstance(item.get("source_evidence"), list) else []
+    source_ids = list(
+        dict.fromkeys(
+            entry.get("source_id")
+            for entry in evidence
+            if isinstance(entry, dict) and entry.get("source_id")
+        )
+    )
+    sources_by_id = {
+        source.get("source_id"): source
+        for source in ledger.get("sources") or []
+        if isinstance(source, dict) and source.get("source_id")
+    }
+    families = {
+        _normalized_family(sources_by_id[source_id].get("source_family"))
+        for source_id in source_ids
+        if source_id in sources_by_id
+    }
+    families.discard("")
+    fetched = None
+    if isinstance(cache_meta, dict):
+        for source_id in source_ids:
+            meta = cache_meta.get(source_id) or {}
+            if isinstance(meta, dict) and meta.get("fetched_at"):
+                fetched = meta["fetched_at"]
+                break
+    claim = dict(item)
+    claim["source_ids"] = source_ids
+    claim["include_in_report"] = True
+    claim["report_excerpts"] = []
+    claim["triangulation"] = {
+        "status": "met" if len(families) >= 2 else "limited",
+    }
+    if fetched:
+        claim["verified_at"] = fetched
+    return claim
+
+
+def _claim_input_schema_findings(claim):
+    if not CLAIM_INPUT_SCHEMA.is_file():
+        return []
+    schema = json.loads(CLAIM_INPUT_SCHEMA.read_text(encoding="utf-8"))
+    if not claim.get("claim_id"):
+        return [
+            _f(
+                "ledger/claim-input",
+                "add claim_id",
+                fix="set field claim_id",
+            )
+        ]
+    return [
+        _f("ledger/claim-input", item, fix="set field claim")
+        for item in validate_schema(claim, schema)
+    ]
+
+
+def _extract_length_findings(claim):
+    findings = []
+    claim_id = claim.get("claim_id", "")
+    texts = []
+    if claim.get("extract_or_location"):
+        texts.append(str(claim.get("extract_or_location")))
+    for entry in claim.get("source_evidence") or []:
+        if isinstance(entry, dict) and entry.get("extract_or_location"):
+            texts.append(str(entry.get("extract_or_location")))
+    for text in texts:
+        folded = unicodedata.normalize("NFKC", text)
+        compact = re.sub(r"\s+", "", folded)
+        if len(compact) < 20:
+            findings.append(
+                Finding(
+                    family="ledger/extract-length",
+                    severity="hard",
+                    klass="F",
+                    ids=_ids_in(claim_id),
+                    message=(
+                        f"{claim_id}: extract length {len(compact)} is below "
+                        "threshold 20; extend the quote"
+                    ),
+                    fix="extend the quote in claims/<file>",
+                    remove=_drop(claim_id),
+                )
+            )
+        for segment in re.split(r"…|\.\.\.", folded):
+            piece = re.sub(r"\s+", "", segment)
+            if piece and len(piece) < 8:
+                findings.append(
+                    Finding(
+                        family="ledger/extract-length",
+                        severity="hard",
+                        klass="F",
+                        ids=_ids_in(claim_id),
+                        message=(
+                            f"{claim_id}: extract segment length {len(piece)} "
+                            "is below threshold 8; extend the quote"
+                        ),
+                        fix="extend the quote in claims/<file>",
+                        remove=_drop(claim_id),
+                    )
+                )
+    return findings
+
+
+def claim_findings(claim, ledger, *, cache_dir=None):
+    findings = []
+    findings.extend(_claim_input_schema_findings(claim))
+    findings.extend(_extract_length_findings(claim))
+    working = dict(claim)
+    if working.get("source_ids") is None and working.get("source_evidence"):
+        working = expand_claim_input(working, ledger, cache_meta={})
+    findings.extend(_evidence_coverage_findings(working))
+    findings.extend(_derived_findings(working))
+    claims = [item for item in (ledger.get("claims") or []) if isinstance(item, dict)]
+    shadow = dict(ledger)
+    if working.get("claim_id") not in {item.get("claim_id") for item in claims}:
+        shadow["claims"] = claims + [working]
+    claim_id = working.get("claim_id")
+    findings.extend(
+        item
+        for item in _reference_findings(shadow)
+        if claim_id and claim_id in item.ids
+    )
+    if cache_dir:
+        findings.extend(
+            _offline_probe_findings({"claims": [working], "sources": ledger.get("sources")}, cache_dir)
+        )
+    return findings
 
 
 def validate_schema(data, schema):
@@ -2903,16 +3608,15 @@ def main(argv=None):
 
     try:
         data = json.loads(Path(args.ledger).read_text(encoding="utf-8"))
-        schema = json.loads(Path(args.schema).read_text(encoding="utf-8"))
+        findings = collect_findings(data, schema_path=args.schema)
     except (OSError, json.JSONDecodeError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1
-
-    errors = validate_schema(data, schema) + validate_references(data)
-    return emit_findings(
-        errors,
-        ok_message=f"[OK] Evidence ledger validated: {args.ledger}",
-    )
+    print(render_grouped(findings), file=sys.stderr)
+    if hard_errors(findings):
+        return 1
+    print(f"[OK] Evidence ledger validated: {args.ledger}")
+    return 0
 
 
 if __name__ == "__main__":

@@ -125,10 +125,16 @@ REMEDY_SAMPLE = {
 
 CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+$"),
+    re.compile(r"^set field \S+ in \S+, then alx claim add \S+$"),
     re.compile(r"^extend the quote in \S+$"),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
+    re.compile(r"^add the source link to paragraph \d+ of report\.md$"),
+    re.compile(
+        r"^add the source link to the paragraph that states claim C\d+ "
+        r"in report\.md$"
+    ),
 )
 
 
@@ -1055,8 +1061,21 @@ class IssueTests(AlxTestCase):
             payload["ledger_sha256"] = alx.file_sha256(self.dir / "ledger.json")
             return json.dumps(payload)
 
-        def fake_online(ledger_path, receipt_path, **kwargs):
+        real_check = alx.source_fidelity.check_source_fidelity
+
+        def fake_live_check(ledger, **kwargs):
+            """`issue` step 2 runs the live pass itself and reuses its result."""
+            if not kwargs.get("online"):
+                return real_check(ledger, **kwargs)
             calls["online"] += 1
+            return online or {
+                "status": "passed",
+                "checks": [],
+                "refreshed_source_ids": [],
+                "disclosure_required": [],
+            }
+
+        def fake_online(ledger_path, receipt_path, **kwargs):
             Path(receipt_path).parent.mkdir(parents=True, exist_ok=True)
             Path(receipt_path).write_text(
                 json.dumps(
@@ -1091,6 +1110,13 @@ class IssueTests(AlxTestCase):
             calls["network"] += 1
             raise AssertionError("render must not reach the network")
 
+        stack.enter_context(
+            mock.patch.object(
+                alx.source_fidelity,
+                "check_source_fidelity",
+                side_effect=fake_live_check,
+            )
+        )
         stack.enter_context(
             mock.patch.object(
                 alx.source_fidelity,
@@ -1408,6 +1434,18 @@ class SkillRunbookTests(unittest.TestCase):
                 self.assertNotIn("$", command)
                 parser.parse_args(shlex.split(command))
 
+    def test_step_7_sends_the_reviewer_to_the_printed_skeleton(self):
+        """Item 5: the note format is printed, never read out of the repo."""
+        text = (
+            Path(alx.__file__).resolve().parents[1] / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertLessEqual(len(text.splitlines()), 150)
+        self.assertIn(
+            "skeleton lists every field; fill only those; never read "
+            "scripts/ or references/*.schema.json",
+            text,
+        )
+
 
 class CheckOutputTests(AlxTestCase):
     """Spec §6.7/§6.10: the printed line must be true for a weak model."""
@@ -1621,6 +1659,342 @@ class CheckOutputTests(AlxTestCase):
         self.assertIn("…", rendered)
         self.assertIn("Fix: alx find S1 1916", rendered)
         self.assertIn("Remove: `alx claim drop C1 --apply`", rendered)
+
+
+class LiveFidelityTests(AlxTestCase):
+    """Spec §6.9.2/§6.10: T1's live result must reach classification."""
+
+    def prepared(self):
+        issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root",
+            "dir",
+            "run_alx",
+            "run_in",
+            "write_json",
+            "init",
+            "fetch",
+            "bootstrap",
+            "draft_report",
+            "ledger",
+            "state",
+        ):
+            setattr(issue_tests, name, getattr(self, name))
+        issue_tests.prepared()
+        return issue_tests
+
+    def live_result(self, fetcher):
+        """A real `source_fidelity` result, produced by T1 itself."""
+        return alx.source_fidelity.check_source_fidelity(
+            self.ledger(), fetcher=fetcher, sample_size=8, online=True
+        )
+
+    def test_check_reports_the_offline_probe_findings_of_t1(self):
+        """Section (d): T1 stores `asdict` payloads; they must not be dropped."""
+        self.bootstrap()
+        (self.dir / "sources" / "S1.txt").write_text(
+            "An unrelated page that carries none of the recorded extracts.",
+            encoding="utf-8",
+        )
+        result = alx.source_fidelity.check_source_fidelity(
+            self.ledger(), sample_size=0, online=False, cache_dir=self.dir / "sources"
+        )
+        self.assertTrue(
+            all(isinstance(item, dict) for item in result["findings"]), result
+        )
+        collected = alx._fidelity_findings(alx.Workspace(self.dir), self.ledger())
+        self.assertTrue(collected, "section (d) dropped T1's payload findings")
+        self.assertIn("fidelity/mismatch", {item.family for item in collected})
+        self.assertEqual({"F"}, {alx.adopted_class(item) for item in collected})
+        _code, out = self.run_in("check")
+        self.assertIn("[fidelity/mismatch]", out)
+
+    def test_an_online_mismatch_refuses_issue_as_class_f(self):
+        from contextlib import ExitStack
+
+        issue_tests = self.prepared()
+        result = self.live_result(
+            lambda url: "<html><body><p>An unrelated page.</p></body></html>"
+        )
+        self.assertTrue(
+            any(check["status"] == "mismatch" for check in result["checks"]), result
+        )
+        with ExitStack() as stack:
+            issue_tests.stub_gates(stack)
+            stack.enter_context(
+                mock.patch.object(
+                    alx.source_fidelity, "check_source_fidelity", return_value=result
+                )
+            )
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn("[fidelity/mismatch]", out)
+        self.assertIn("issue refused", out)
+        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+
+    def test_a_live_unreachable_beyond_quorum_is_class_a(self):
+        from contextlib import ExitStack
+
+        issue_tests = self.prepared()
+
+        def dead(url):
+            raise OSError("name resolution failed")
+
+        result = self.live_result(dead)
+        self.assertEqual(
+            {"unreachable"}, {check["status"] for check in result["checks"]}, result
+        )
+        adopted = alx.adopt(alx._online_findings(result), online=True)
+        self.assertTrue(adopted)
+        self.assertEqual({"A"}, {item.klass for item in adopted})
+        with ExitStack() as stack:
+            issue_tests.stub_gates(stack)
+            stack.enter_context(
+                mock.patch.object(
+                    alx.source_fidelity, "check_source_fidelity", return_value=result
+                )
+            )
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+
+    def test_deliver_waives_a_live_unreachable_as_a_delivery_note(self):
+        from contextlib import ExitStack
+
+        issue_tests = self.prepared()
+
+        def dead(url):
+            raise OSError("name resolution failed")
+
+        result = self.live_result(dead)
+        with ExitStack() as stack:
+            issue_tests.stub_gates(stack)
+            stack.enter_context(
+                mock.patch.object(
+                    alx.source_fidelity, "check_source_fidelity", return_value=result
+                )
+            )
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(any("unreachable" in note for note in notes["notes"]), notes)
+
+
+class IntegrationHoleTests(AlxTestCase):
+    """Task 7c: the remedies and the note skeleton a live dry run needed."""
+
+    def started_content_review(self):
+        self.bootstrap()
+        code, out = self.run_in("check", "--fix")
+        self.assertIn("claim->paragraph", out)
+        code, out = self.run_in("review", "start", "content")
+        self.assertEqual(0, code, out)
+
+    def line_with(self, out, needle):
+        return next(line for line in out.splitlines() if needle in line)
+
+    # item 2 --------------------------------------------------------------
+    def test_deliver_restores_a_producer_quotation_loss(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("snapshot")
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        (self.dir / "report.md").write_text(
+            report.replace("「原始日記」", "records"), encoding="utf-8"
+        )
+        item = alx.Finding(
+            family="fidelity/quotation-lost",
+            severity="hard",
+            klass="F",
+            ids=[],
+            message="Quoted span missing from the report: 「原始日記」",
+            fix="",
+            remove="alx snapshot --restore",
+        )
+        alx._auto_remedies(
+            alx.Workspace(self.dir), self.state(), self.ledger(), [item], []
+        )
+        self.assertIn(
+            "「原始日記」", (self.dir / "report.md").read_text(encoding="utf-8")
+        )
+
+    def test_a_stale_review_note_is_left_unstamped(self):
+        """Spec §6.8: no stub — the real gates run and the hash stays old."""
+        issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(issue_tests, name, getattr(self, name))
+        issue_tests.prepared()
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        (self.dir / "report.md").write_text(
+            report.replace(
+                "as the [registry note]", "and independently, as the [registry note]"
+            ),
+            encoding="utf-8",
+        )
+        stamps = {
+            kind: json.loads(
+                (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
+            )["report_sha256"]
+            for kind in ("rewild", "content")
+        }
+        alx._receipt_phase(
+            alx.Workspace(self.dir), self.state(), self.ledger(), [], []
+        )
+        for kind, before in stamps.items():
+            note = json.loads(
+                (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(before, note["report_sha256"])
+        self.assertNotEqual(
+            alx.file_sha256(self.dir / "report.md"), stamps["content"]
+        )
+
+    # item 3 --------------------------------------------------------------
+    def test_a_reworded_paragraph_gets_a_binding_remedy_not_a_re_review(self):
+        self.started_content_review()
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        (self.dir / "report.md").write_text(
+            report.replace(
+                "The archive released 1,204 documents in March 2026, a release",
+                "In March 2026 the archive put out 1,204 documents, a release",
+            ),
+            encoding="utf-8",
+        )
+        _code, out = self.run_in("check")
+        line = self.line_with(out, "cannot be located")
+        self.assertIn("Fix: alx check --fix", line)
+        self.assertNotIn("alx review start content --iter", line)
+        _code, out = self.run_in("check", "--fix")
+        self.assertNotIn("cannot be located", out)
+
+    def test_a_missing_citation_asks_for_the_link_not_a_re_review(self):
+        self.started_content_review()
+        url = self.ledger()["sources"][0]["url"]
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        (self.dir / "report.md").write_text(
+            report.replace(f"[recorded in the study]({url})", "recorded in the study"),
+            encoding="utf-8",
+        )
+        _code, out = self.run_in("check")
+        line = self.line_with(out, "no nearby citation")
+        self.assertIn("Fix: add the source link to paragraph 1 of report.md", line)
+        self.assertNotIn("alx review start content --iter", line)
+
+    # item 4 --------------------------------------------------------------
+    def test_review_start_prints_every_field_and_prefills_claim_support(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        code, out = self.run_in("review", "start", "content")
+        self.assertEqual(0, code, out)
+        for token in (
+            "Fill reviews/content.json",
+            "scores.<key>.score: integer 1-5",
+            "checks.<key>",
+            "section_reviews[]",
+            "completion_note",
+            "claim_support[].disposition: supported | qualified | removed",
+        ):
+            self.assertIn(token, out)
+        note = json.loads(
+            (self.dir / "reviews" / "content.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            ["C1", "C2"], [entry["claim_id"] for entry in note["claim_support"]]
+        )
+        self.assertEqual({""}, {entry["disposition"] for entry in note["claim_support"]})
+
+    def test_the_filled_skeleton_validates_against_the_schemas(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("snapshot")
+        for kind in ("rewild", "content"):
+            code, out = self.run_in("review", "start", kind)
+            self.assertEqual(0, code, out)
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        reviews.dir = self.dir
+        reviews.root = self.root
+        reviews.run_alx = self.run_alx
+        reviews.run_in = self.run_in
+        reviews.state = self.state
+        reviews.ledger = self.ledger
+        for kind, schema_name in (
+            ("rewild", "rewild-review.schema.json"),
+            ("content", "content-review.schema.json"),
+        ):
+            with self.subTest(kind=kind):
+                reviews.fill_note(kind)
+                note = json.loads(
+                    (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
+                )
+                schema = json.loads(
+                    (Path(alx.__file__).resolve().parents[1] / "references" / schema_name)
+                    .read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    [], list(alx.validate_ledger.validate_schema(note, schema))
+                )
+                code, out = self.run_in("review", "finish", kind)
+                self.assertEqual(0, code, out)
+
+    def test_finish_names_the_file_and_every_missing_path(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("review", "start", "content")
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(1, code)
+        self.assertIn("reviews/content.json", out)
+        for path in (
+            "status",
+            "scores.question_answered.score",
+            "scores.question_answered.rationale",
+            "checks.central_judgment_answers_question",
+            "section_reviews",
+            "completion_note",
+            "claim_support[C1].disposition",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(path, out)
+
+    # addendum ------------------------------------------------------------
+    def test_a_claim_field_remedy_names_the_claim_add_round_trip(self):
+        rendered = alx.render_grouped(
+            alx.adopt(
+                [
+                    alx.Finding(
+                        family="ledger/reference",
+                        severity="hard",
+                        klass="F",
+                        ids=["C23"],
+                        message="Analysis has circular support: C23 -> C10 -> C23",
+                        fix="",
+                        remove="",
+                    )
+                ]
+            )
+        )
+        self.assertIn(
+            "set field supports in claims/*.json, then alx claim add claims/*.json",
+            rendered,
+        )
+
+    def test_an_uncited_claim_gets_the_link_imperative(self):
+        self.bootstrap()
+        url = self.ledger()["sources"][1]["url"]
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        (self.dir / "report.md").write_text(
+            report.replace(f"[registry note]({url})", "registry note", 1),
+            encoding="utf-8",
+        )
+        _code, out = self.run_in("check")
+        line = self.line_with(out, "C2 is included in the report with no")
+        self.assertIn("Fix: add the source link to paragraph", line)
+        bound = self.line_with(out, "C1 is included in the report with no")
+        self.assertIn("Fix: alx check --fix", bound)
 
 
 class RemedyTests(AlxTestCase):

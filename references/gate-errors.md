@@ -48,7 +48,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/claim-input` — F
 - **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch.
-- **fix:** set field `<name>` in `claims/<file>.json`.
+- **fix:** set field `<name>` in `claims/<file>.json`, then `alx claim add claims/<file>.json` (the claim re-enters the ledger only through `claim add`, which upserts by `claim_id`).
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `kind: analysis` without `reasoning`.
 
@@ -78,7 +78,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/triangulation` — F
 - **rule:** `triangulation.status`/`rationale` contradicts the merged source families.
-- **fix:** set field triangulation in claims/<file>
+- **fix:** set field triangulation in claims/<file>, then `alx claim add claims/<file>`
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `status: met` with one family.
 
@@ -96,7 +96,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/source-ids` — F/W
 - **rule:** `source_ids` missing (warn; derived from `source_evidence`) or naming a source the evidence does not carry (hard).
-- **fix:** set field supports in claims/<file>
+- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C5 has extracts on S1,S2; `source_ids` empty.
 
@@ -132,7 +132,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/excluded-supports` — F
 - **rule:** a surviving claim's `supports` names a claim in `excluded_claims`.
-- **fix:** set field `supports` in `claims/<file>.json`.
+- **fix:** set field `supports` in `claims/<file>.json`, then `alx claim add claims/<file>.json`.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C4 supports C2, and C2 was dropped.
 
@@ -192,7 +192,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** n/a
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.
 
-### `integrity/length` — F
+### `integrity/length` — F/A
 - **rule:** report length outside the validator's band (en 7,500–15,000 words; zh 5,000–10,000 non-ws chars). Below the floor arrives as a warning (Class A); above the ceiling is hard.
 - **fix:** extend the report body in report.md (below the floor; Class A).
 - **remove:** delete paragraph `<n>` of report.md (above the ceiling)
@@ -214,7 +214,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `binding/excerpt-missing` — F
 - **rule:** an `include_in_report` claim has an empty `report_excerpts`.
-- **fix:** `alx claim bind C<n> --paragraph N` — `--fix` writes the excerpt of a bound claim in the same run, so a surviving finding is unbound.
+- **fix:** `alx claim bind C<n> --paragraph N` — `--fix` writes the excerpt of a bound claim in the same run, so a surviving finding is unbound. With no candidate paragraph the claim is cited nowhere: add the source link to paragraph `<n>` of report.md (ruling R9).
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C6 bound to paragraph 8, `report_excerpts: []`.
 
@@ -351,10 +351,11 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `scores.evidence.score = 3`.
 
 ### `content/check` — F
-- **rule:** the content note fails `content-review.schema.json` or its completeness rules.
+- **rule:** the content note fails `content-review.schema.json` or its completeness rules; the same family also carries the two claim-binding errors below.
 - **fix:** `alx review start content --iter`
 - **remove:** `alx review restore content`
 - **example:** `status` is not `completed`.
+- **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → add the source link to paragraph `<n>` of report.md. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
 
 ### `content/critical-finding` — F
 - **rule:** a critical review finding is not dispositioned `resolved`.

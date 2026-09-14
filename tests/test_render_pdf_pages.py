@@ -187,6 +187,178 @@ class RenderPagesCommandTests(unittest.TestCase):
                     self.assertEqual(0, result.returncode, result.stderr)
                     self.assertEqual(2, len(list(output.glob("page-*.png"))))
 
+    def test_out_dir_alias_matches_positional_output_dir(self):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            output = temp / "pages"
+            pdf.write_bytes(b"%PDF")
+            with mock.patch.object(render_pdf_pages, "render_pages") as render:
+                code = render_pdf_pages.main(
+                    [str(pdf), "--out-dir", str(output)]
+                )
+        self.assertEqual(0, code)
+        render.assert_called_once()
+        self.assertEqual(Path(output), Path(render.call_args.args[1]))
+
+    def test_auto_fallback_tries_pdfkit_then_pdfium_then_poppler(self):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            output = temp / "pages"
+            pdf.write_bytes(b"%PDF")
+            output.mkdir()
+            order = []
+
+            def fail(name):
+                def _inner(*args, **kwargs):
+                    order.append(name)
+                    raise RuntimeError(f"{name} exploded\nwith detail")
+
+                return _inner
+
+            def succeed(*args, **kwargs):
+                order.append("poppler")
+                (output / "page-0001.png").write_bytes(b"png")
+
+            with (
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfkit", side_effect=fail("pdfkit")
+                ),
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfium", side_effect=fail("pdfium")
+                ),
+                mock.patch.object(
+                    render_pdf_pages, "render_with_poppler", side_effect=succeed
+                ),
+                mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
+            ):
+                render_pdf_pages.render_pages(pdf, output, backend="auto")
+
+        self.assertEqual(["pdfkit", "pdfium", "poppler"], order)
+
+    def test_fallback_errors_are_one_line_each(self):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            output = temp / "pages"
+            pdf.write_bytes(b"%PDF")
+            with (
+                mock.patch.object(
+                    render_pdf_pages,
+                    "render_with_pdfkit",
+                    side_effect=RuntimeError("pdfkit failed\nstack"),
+                ),
+                mock.patch.object(
+                    render_pdf_pages,
+                    "render_with_pdfium",
+                    side_effect=RuntimeError("pdfium failed\nstack"),
+                ),
+                mock.patch.object(
+                    render_pdf_pages,
+                    "render_with_poppler",
+                    side_effect=RuntimeError("poppler failed\nstack"),
+                ),
+                self.assertRaises(RuntimeError) as raised,
+            ):
+                render_pdf_pages.render_pages(pdf, output, backend="auto")
+        message = str(raised.exception)
+        self.assertNotIn("\n", message)
+        self.assertIn("pdfkit:", message)
+        self.assertIn("pdfium:", message)
+        self.assertIn("poppler:", message)
+
+    def test_subprocess_renderers_use_90s_timeout(self):
+        from scripts import render_pdf_pages
+
+        captured = {}
+
+        def fake_run(*args, **kwargs):
+            captured.update(kwargs)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(render_pdf_pages.shutil, "which", return_value="/bin/pdftocairo"),
+            mock.patch.object(render_pdf_pages.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(render_pdf_pages, "_normalize_page_names"),
+        ):
+            render_pdf_pages.render_with_poppler(
+                Path("in.pdf"), Path("out"), dpi=72
+            )
+        self.assertEqual(90, captured.get("timeout"))
+
+    def test_pdfkit_timeout_falls_through_to_next_backend(self):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            output = temp / "pages"
+            pdf.write_bytes(b"%PDF")
+            order = []
+
+            def timeout(*args, **kwargs):
+                order.append("pdfkit")
+                raise subprocess.TimeoutExpired(cmd="swift", timeout=90)
+
+            def succeed(*args, **kwargs):
+                order.append("pdfium")
+                (output / "page-0001.png").write_bytes(b"png")
+
+            with (
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfkit", side_effect=timeout
+                ),
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfium", side_effect=succeed
+                ),
+                mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
+            ):
+                render_pdf_pages.render_pages(pdf, output, backend="auto")
+        self.assertEqual(["pdfkit", "pdfium"], order)
+
+    def test_force_allows_nonempty_output_directory(self):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            output = temp / "pages"
+            pdf.write_bytes(b"%PDF")
+            output.mkdir()
+            (output / "mine.txt").write_text("keep", encoding="utf-8")
+            with (
+                mock.patch.object(
+                    render_pdf_pages,
+                    "render_with_pdfkit",
+                    side_effect=RuntimeError("skip"),
+                ),
+                mock.patch.object(
+                    render_pdf_pages,
+                    "render_with_pdfium",
+                    side_effect=RuntimeError("skip"),
+                ),
+                mock.patch.object(
+                    render_pdf_pages,
+                    "render_with_poppler",
+                    side_effect=lambda *a, **k: (output / "page-0001.png").write_bytes(
+                        b"png"
+                    ),
+                ),
+                mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
+            ):
+                render_pdf_pages.render_pages(
+                    pdf, output, backend="auto", force=True
+                )
+            self.assertEqual("keep", (output / "mine.txt").read_text(encoding="utf-8"))
+            self.assertTrue((output / "page-0001.png").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,11 +40,11 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** claim `1918`; extract `1918-01`.
 
-### `ledger/extract-length` — F
-- **rule:** extract < 20 normalized chars (CJK 20), or an ellipsis segment < 8.
+### `ledger/extract-length` — W/F
+- **rule:** advice only (ruling R13): the whole extract is < 20 normalized chars (< 10 when it contains CJK). Never raised on an ellipsis-separated piece, and never blocks `claim add`. Length is not a fabrication check; `fidelity/mismatch` decides that. An empty `extract_or_location` is still hard.
 - **fix:** extend the quote in claims/<file>; widen with `alx find S<n> KEYWORD`.
-- **remove:** `alx claim drop C<n> --apply`
-- **example:** `extract_or_location: "short"` (5 chars, minimum 20).
+- **remove:** none (Class A).
+- **example:** `extract_or_location: "short"` (5 chars, threshold 20).
 
 ### `ledger/claim-input` — F
 - **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch.
@@ -237,12 +237,6 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx find S<n> KEYWORD`, then extend the quote in claims/<file>.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C2 extract "4,000 documents" not in S1.txt.
-
-### `fidelity/short-segment` — F
-- **rule:** an ellipsis-split segment is under 8 normalized chars; rejected at authoring time, never skipped.
-- **fix:** extend the quote in claims/<file>.
-- **remove:** `alx claim drop C<n> --apply`
-- **example:** `"… in 2026 …"`.
 
 ### `fidelity/context-changed` — F
 - **rule:** the probe is present but a recorded probe-context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing.

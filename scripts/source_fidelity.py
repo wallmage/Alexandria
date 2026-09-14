@@ -67,10 +67,8 @@ DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_FETCH_ATTEMPTS = 2
 POLICY_V1 = "weighted-source-evidence-v1"
 POLICY_V2 = "weighted-source-evidence-v2"
-MIN_SEGMENT_CHARACTERS = 8
 FAMILIES = (
     "fidelity/mismatch",
-    "fidelity/short-segment",
     "fidelity/context-changed",
     "fidelity/cache-missing",
 )
@@ -894,8 +892,9 @@ def _extract_segments(extract, document=None):
     Literal-whole-first (spec §7.2.3): an extract that occurs verbatim in the
     normalized document is one segment. The segment rule exists only to catch a
     fabricated tail around an author-inserted ellipsis, so quote glyphs, list
-    markers and in-source ellipses must not strand orphan fragments below the
-    floor when the whole window is already verbatim.
+    markers and in-source ellipses must not strand orphan fragments when the
+    whole window is already verbatim. Piece length is never a fabrication
+    signal (ruling R13): every non-empty piece must occur, whatever its length.
     """
     text = str(extract or "").strip()
     if not text:
@@ -970,22 +969,6 @@ def probe_findings(claim, source, text, *, cache_meta=None):
     usable = []
     for segment in segments:
         normalized = normalize_text(segment)
-        if len(normalized) < MIN_SEGMENT_CHARACTERS:
-            findings.append(
-                Finding(
-                    family="fidelity/short-segment",
-                    severity="hard",
-                    klass="F",
-                    ids=[claim_id, source_id],
-                    message=(
-                        f"{claim_id}: extract segment is {len(normalized)} "
-                        f"normalized chars (threshold {MIN_SEGMENT_CHARACTERS})"
-                    ),
-                    fix="extend the quote in claims/<file>",
-                    remove=f"alx claim drop {claim_id} --apply",
-                )
-            )
-            continue
         usable.append(normalized)
         windows = _probe_windows(segment)
         missing = [window for window in windows if window not in document]

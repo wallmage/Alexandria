@@ -2,7 +2,7 @@
 
 ## Coverage map
 
-Read `content-quality.md`. Start from the selected archetype and reader contract. Turn each relevant dimension into a concrete question, priority, decision relevance, owner, evidence target, and completion criterion. Skip irrelevant dimensions. Add cross-cutting questions for incentives, alternatives, risks, and what would change the conclusion.
+Start from the selected archetype and reader contract. Turn each relevant dimension into a concrete question, priority, decision relevance, owner, evidence target, and completion criterion. Skip irrelevant dimensions. Add cross-cutting questions for incentives, alternatives, risks, and what would change the conclusion.
 
 Example:
 

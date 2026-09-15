@@ -1071,7 +1071,7 @@ class CheckTests(AlxTestCase):
         code, out = self.run_in("check")
         self.assertEqual(0, code)
         self.assertRegex(out, r"=== HARD \d+ \(fix, or alx issue drops them\) ===")
-        self.assertRegex(out, r"=== STATUS: check #1, elapsed \d+ min, remaining \d+ min")
+        self.assertRegex(out, r"=== STATUS: check #1\. Next:")
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
         self.assertIn("last_check", json.dumps(self.state()))
 
@@ -2051,7 +2051,11 @@ class LiveFidelityTests(AlxTestCase):
         self.assertTrue(
             all(isinstance(item, dict) for item in result["findings"]), result
         )
-        collected = alx._fidelity_findings(alx.Workspace(self.dir), self.ledger())
+        collected = alx.as_findings(
+            alx.validate_ledger._offline_probe_findings(
+                self.ledger(), self.dir / "sources"
+            )
+        )
         self.assertTrue(collected, "section (d) dropped T1's payload findings")
         self.assertIn("fidelity/mismatch", {item.family for item in collected})
         # R28: the mismatch is fabrication (F); a changed context only warns.
@@ -4171,9 +4175,14 @@ class RenderPdfCheckTests(AlxTestCase):
 
         captured = []
 
+        class PdfErrors(list):
+            text_chars = 500
+
         def fake_validate(path, **kwargs):
             captured.append(kwargs)
-            return ["PDF has 12 extracted text characters; minimum is 5000."]
+            return PdfErrors(
+                ["PDF has 12 extracted text characters; minimum is 5000."]
+            )
 
         def fake_render_pdf(input_path, output_path, **kwargs):
             Path(output_path).write_bytes(extractable_pdf_bytes())

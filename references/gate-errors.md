@@ -2,7 +2,7 @@
 
 Family → severity → rule → fix → remove → example. One section per family the code emits, grouped by the module that emits it.
 
-Severity is three-valued (ruling R33). **F = HARD-drop**: at `issue` the offending claim, paragraph or edit is removed or restored so it never ships; delivery continues; the removal is printed and noted. **B = HARD-refuse**: `issue` (or `render`) stops with exit 1 and the fix list; nothing is written until fixed; used only for whole-report defects that no drop can cure. HARD-refuse prints `=== BLOCKED (fix, then alx issue again) ===` and blocks `issue` and `render`. **W = WARN**: printed with a fix; never changes the deliverable. WARN is listed in the delivery notes and never blocks `issue`, `render` or `claim add`. Class A no longer exists; `alx issue --deliver` is accepted as an alias of `alx issue` when nothing is hard.
+Severity is three-valued (ruling R33). **F = HARD-drop**: at `issue` the offending claim, paragraph or edit is removed or restored so it never ships; delivery continues; the removal is printed and noted. **B = HARD-refuse**: `issue` (or `render`) stops with exit 1 and the fix list; nothing is written until fixed; used only for whole-report defects that no drop can cure: no snapshot at `issue`, a report under two thirds of the length floor, an unrestorable encoding, a broken PDF at `render`. An unsupported figure, a Rewild meaning reversal and an unfixed critical review finding are warnings that `issue` repeats as reminders (user ruling, 09-16). HARD-refuse prints `=== BLOCKED (fix, then alx issue again) ===` and blocks `issue` and `render`. **W = WARN**: printed with a fix; never changes the deliverable. WARN is listed in the delivery notes and never blocks `issue`, `render` or `claim add`. Class A no longer exists; `alx issue --deliver` is accepted as an alias of `alx issue` when nothing is hard.
 
 Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
@@ -20,10 +20,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Ledger (`check` b / `validate_ledger`)
 
-### `ledger/quantity` — B
+### `ledger/quantity` — W
 - **rule:** an Arabic-digit figure, percentage, currency or date in a claim that no extract or cached page of its sources carries. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R29: a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) carries no obligation and raises no finding; a digit, percentage, currency or date is covered when its form appears in the claim's extracts or anywhere in the cached page, title or `published` of any source the claim cites; a Han ordinal or year count on the page (第十三年, 十三周年) covers the digits 13. Han numerals stay silent (R26/C26). Message: `C9: '1945-09-02' is in the claim but not in S8 (extracts or cached page). Fix: alx find S8 1945-09-02, or reword the claim.`
 - **fix:** `alx find S<n> <figure>` then correct the claim or extract, or `alx claim drop C<n>`
-- **remove:** n/a (HARD-refuse; nothing is written)
+- **remove:** n/a (warning; `issue` repeats it under `=== REMINDERS (not fixed yet; warnings, never block) ===` and still issues)
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
 
 ### `ledger/status` — W
@@ -274,10 +274,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Rewild (`check` e / `rewild_gate`)
 
-### `fidelity/semantic` — B/W
+### `fidelity/semantic` — W
 - **rule:** Rewild reversed a direction, negation or causal link between the snapshot and the report. Negation, direction, causal or association drift between snapshot and report, measured on citation-stripped checker prose with monotonic clause alignment. Narrow split-remnant artifacts may be excused heuristically and recorded in the receipt. When more than eight such exemptions accumulate, `alx check` adds one finding in this family: `N heuristic split-remnant exemptions exceed the limit of 8; a report with this much structural churn must be re-checked against the pre-Rewild source and re-drafted, not exempted.`
 - **fix:** rewrite the report clause to match the snapshot clause (direction, negation or causal link); or `alx snapshot --restore`
-- **remove:** n/a (HARD-refuse for a reversal; nothing is written. WARN half never blocks `issue`)
+- **remove:** n/a (warning; a reversal is repeated by `issue` as a reminder and never blocks)
 - **example:** snapshot "did not exceed"; report "exceeded".
 
 ### `fidelity/rewild` — F
@@ -349,10 +349,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `status` is not `completed`.
 - **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → add the source link to paragraph `<n>` of report.md. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
 
-### `content/critical-finding` — B
+### `content/critical-finding` — W
 - **rule:** the content review lists a critical finding with no fix recorded. A critical review finding is not dispositioned `resolved`.
 - **fix:** fix the report and record the disposition in reviews/content.json, then `alx review finish content`
-- **remove:** n/a (HARD-refuse; nothing is written)
+- **remove:** n/a (warning; `issue` repeats it as a reminder — "not fixed yet" — and still issues)
 - **example:** findings[2] disposition `open`.
 
 ### `content/disclosure` — W

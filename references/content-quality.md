@@ -327,7 +327,7 @@ Score each dimension from 1 to 5:
 
 A 5 is exceptional. It requires unusually strong evidence, synthesis, and execution; do not award it as a courtesy. Every dimension must reach 4 before production.
 A missing or stale content review is a warning and never blocks `alx issue`.
-An unresolved critical finding blocks `alx issue` until its fix is recorded.
+An unresolved critical finding is repeated by `alx issue` as a reminder until its fix is recorded; it never blocks.
 
 ### The rubric scores substance, not conformity
 

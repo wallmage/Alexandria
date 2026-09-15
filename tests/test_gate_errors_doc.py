@@ -67,9 +67,6 @@ class GateErrorsDocTests(unittest.TestCase):
             "fidelity/cache-detached", "fidelity/rewild",
         }
         hard_refuse = {
-            "ledger/quantity",
-            "fidelity/semantic",
-            "content/critical-finding",
             "integrity/encoding",
             "integrity/length",
         }

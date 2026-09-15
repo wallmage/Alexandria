@@ -426,19 +426,17 @@ WARN_FAMILIES = frozenset(
     }
 )
 
-#: R33: these families (and the B4/B5/B7 flow conditions) refuse `issue`.
-REFUSE_FAMILIES = frozenset(
-    {
-        "ledger/quantity",
-        "fidelity/semantic",
-        "content/critical-finding",
-    }
+#: R33 (user 09-16): only whole-report defects refuse `issue` — no snapshot,
+#: a report under two thirds of the length floor, an unrestorable encoding,
+#: a broken PDF at render. An unsupported figure, a Rewild meaning reversal
+#: and an unfixed critical review finding are warnings that name the fix.
+REFUSE_FAMILIES = frozenset()
+#: R33 (user): these warnings are repeated by `issue` as reminders — the report
+#: still issues, the agent is told what is not fixed yet.
+REMINDER_FAMILIES = frozenset(
+    {"ledger/quantity", "fidelity/semantic", "content/critical-finding"}
 )
-_SEMANTIC_REFUSE_RE = re.compile(
-    r"direction reversal|negation changed|Causal claim|Causal substitution|"
-    r"Unmatched directional",
-    re.I,
-)
+REMINDER_HEADER = "=== REMINDERS (not fixed yet; warnings, never block) ==="
 BLOCKED_HEADER = "=== BLOCKED (fix, then alx issue again) ==="
 
 
@@ -464,13 +462,7 @@ def class_f_findings(findings):
     return [item for item in hard_findings(findings) if item.klass == "F"]
 
 
-def _semantic_is_refuse(message):
-    return bool(_SEMANTIC_REFUSE_RE.search(str(message)))
-
-
 def _is_refuse_finding(item):
-    if item.family == "fidelity/semantic":
-        return _semantic_is_refuse(item.message)
     return item.family in REFUSE_FAMILIES or item.family == "integrity/encoding"
 
 
@@ -4283,6 +4275,10 @@ def cmd_issue(args):
         return 1
     state["last_issue"] = {"blocked": 0}
     ws.save_state(state)
+    reminders = [item for item in findings if item.family in REMINDER_FAMILIES]
+    if reminders:
+        lines.append(REMINDER_HEADER)
+        lines.append(render_grouped(reminders))
     online_findings, _ok = _online_phase(
         ws, state, ledger, args, lines, delivery_notes
     )

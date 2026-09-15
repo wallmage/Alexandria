@@ -870,10 +870,8 @@ class ClaimTests(AlxTestCase):
         self.assertIn("[ledger/quantity]", out)
         self.assertIn("C9", {claim["claim_id"] for claim in self.ledger()["claims"]})
         _code, out = self.run_in("check")
-        hard = out.split("=== WARN")[0]
-        # R33: quantity is a would-be BLOCKED item; check still does not refuse.
-        self.assertIn("ledger/quantity", hard)
-        self.assertIn("ledger/quantity", out)
+        # R33 (user): an unsupported figure is a warning, never a block.
+        self.assertIn("ledger/quantity", out.split("=== WARN")[1])
 
     def test_omitted_kind_and_importance_warn_and_still_land(self):
         """A3: missing kind/importance is advice — defaults recorded, claim lands."""
@@ -5872,7 +5870,7 @@ class HardRefuseTests(AlxTestCase):
     def receipts_written(self):
         return (self.dir / "receipts" / "issue.json").exists()
 
-    def test_quantity_refuses_issue_then_accepts_after_the_fix(self):
+    def test_quantity_warns_at_issue_and_issue_accepts(self):
         from contextlib import ExitStack
 
         self.ready()
@@ -5883,31 +5881,17 @@ class HardRefuseTests(AlxTestCase):
         )
         self.assertEqual(0, self.run_in("claim", "add", batch)[0])
         self.run_in("check", "--fix")
-        prior = list((self.dir / "receipts").glob("*"))
         with ExitStack() as stack:
             self.helper().stub_gates(stack)
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
-        self.assertIn(self.BLOCKED, out)
-        self.assertIn("ledger/quantity", out)
-        self.assertIn("7,777", out)
-        self.assertFalse(self.receipts_written(), out)
-        self.assertEqual(prior, list((self.dir / "receipts").glob("*")))
-        ledger = self.ledger()
-        for claim in ledger["claims"]:
-            if claim["claim_id"] == "C9":
-                claim["claim"] = CLAIM_ONE["claim"]
-        (self.dir / "ledger.json").write_text(
-            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
-        )
-        with ExitStack() as stack:
-            self.helper().stub_gates(stack)
-            code, out = self.run_in("issue")
+        # R33 (user): the unsupported figure is a warning, never a block.
         self.assertEqual(0, code, out)
         self.assertNotIn(self.BLOCKED, out)
+        self.assertIn("ledger/quantity", out)
+        self.assertIn("7,777", out)
         self.assertTrue(self.receipts_written(), out)
 
-    def test_semantic_reversal_refuses_issue_overcap_does_not(self):
+    def test_semantic_reversal_warns_and_issue_accepts(self):
         from contextlib import ExitStack
 
         self.ready()
@@ -5930,12 +5914,13 @@ class HardRefuseTests(AlxTestCase):
                 mock.patch.object(alx, "_rewild_findings", return_value=[reversal])
             )
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
-        self.assertIn(self.BLOCKED, out)
+        # R33 (user): a reversal is a warning naming the sentence, never a block.
+        self.assertEqual(0, code, out)
+        self.assertNotIn(self.BLOCKED, out)
         self.assertIn("fidelity/semantic", out)
         self.assertIn("sales rose", out)
         self.assertIn("sales fell", out)
-        self.assertFalse(self.receipts_written(), out)
+        self.assertTrue(self.receipts_written(), out)
         with ExitStack() as stack:
             self.helper().stub_gates(stack)
             stack.enter_context(
@@ -5945,7 +5930,7 @@ class HardRefuseTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertTrue(self.receipts_written(), out)
 
-    def test_critical_finding_refuses_issue_until_disposition_is_fixed(self):
+    def test_unfixed_critical_finding_warns_and_issue_still_accepts(self):
         from contextlib import ExitStack
 
         self.ready()
@@ -5967,16 +5952,10 @@ class HardRefuseTests(AlxTestCase):
         with ExitStack() as stack:
             self.helper().stub_gates(stack)
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
-        self.assertIn(self.BLOCKED, out)
-        self.assertIn("content/critical-finding", out)
-        self.assertFalse(self.receipts_written(), out)
-        note["findings"][0]["disposition"] = "fixed"
-        path.write_text(json.dumps(note), encoding="utf-8")
-        with ExitStack() as stack:
-            self.helper().stub_gates(stack)
-            code, out = self.run_in("issue")
+        # R33 (user): the unfixed critical finding is a reminder, not a block.
         self.assertEqual(0, code, out)
+        self.assertNotIn(self.BLOCKED, out)
+        self.assertIn("content/critical-finding", out)
         self.assertTrue(self.receipts_written(), out)
 
     def test_no_snapshot_refuses_issue_then_accepts_after_snapshot(self):
@@ -6139,6 +6118,8 @@ class HardRefuseTests(AlxTestCase):
         )
         self.run_in("claim", "add", batch)
         self.run_in("check", "--fix")
+        for snapshot in self.dir.glob("report.pre-rewild*.md"):
+            snapshot.unlink()
         with ExitStack() as stack:
             self.helper().stub_gates(stack)
             self.run_in("issue")
@@ -6146,7 +6127,7 @@ class HardRefuseTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertRegex(out, r"Next: `alx issue` \(blocked: \d+ items\)")
 
-    def test_check_prints_refuse_items_under_hard_and_exits_0_for_quantity(self):
+    def test_check_prints_quantity_under_warn_and_exits_0(self):
         self.ready()
         batch = self.write_json(
             "qty.json",
@@ -6156,6 +6137,5 @@ class HardRefuseTests(AlxTestCase):
         self.run_in("claim", "add", batch)
         self.run_in("check", "--fix")
         code, out = self.run_in("check")
-        hard = out.split("=== WARN")[0]
-        self.assertIn("ledger/quantity", hard)
+        self.assertIn("ledger/quantity", out.split("=== WARN")[1])
         self.assertEqual(0, code, out)

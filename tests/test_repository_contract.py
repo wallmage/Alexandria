@@ -390,7 +390,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("alx snapshot", rewild)
         self.assertIn("alx review start rewild", rewild)
         self.assertIn(
-            "Semantic reversals (direction, negation, causality) block `alx issue`",
+            "Semantic reversals (direction, negation, causality) are warnings that `alx issue` repeats as reminders",
             rewild,
         )
         self.assertIn("Fabricated figures restore the snapshot", rewild)
@@ -401,7 +401,7 @@ class RepositoryContractTests(unittest.TestCase):
             quality,
         )
         self.assertIn(
-            "An unresolved critical finding blocks `alx issue` until its fix is recorded",
+            "An unresolved critical finding is repeated by `alx issue` as a reminder until its fix is recorded; it never blocks",
             quality,
         )
 

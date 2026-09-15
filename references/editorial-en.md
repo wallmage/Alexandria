@@ -12,7 +12,7 @@ Edit for a clear, direct, human voice.
 - Use headings that tell the reader something.
 - Avoid canned openings, forced contrasts, fake quotations, and ornamental metaphors.
 - Do not turn uncertainty into certainty.
-- Do not add facts, examples, or color that the evidence does not support.
+- Do not add facts, examples, or color that the evidence ledger does not support.
 - Use concrete cases or worked examples where they materially improve understanding; do not add decorative anecdotes.
 - Preserve the report's hard length range by replacing repetition with deeper evidence, mechanisms, counterevidence, comparisons, or implications.
 - State a decision once at the executive level and once where the evidence is

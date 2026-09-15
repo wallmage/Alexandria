@@ -5,7 +5,7 @@ Use this reference to select report layouts automatically before rendering.
 ## Automatic selection; no intake questions
 
 Start research directly from the topic. Do not ask the user to choose a template,
-browse a catalogue, name a preparer or client, or decide confidentiality.
+review a catalogue, name a preparer or client, or decide confidentiality.
 Deliver two PDFs with identical content: Executive as the default and one
 non-Executive companion selected from the topic mapping below using
 `select_adaptive_companion()`. The user can choose between the finished files.
@@ -29,9 +29,9 @@ An explicit template choice always wins. Without one, adapt from the topic:
 - **Sunbeam:** entrepreneurship, education, youth development, civic participation, public engagement, the creative economy, social impact, or community initiatives.
 - **Current:** mobility, customer journeys, service innovation, innovation programs, the future of work, work redesign, organizational change, or the circular economy.
 - **Apricot:** workplace culture, employee experience, care, mental health, public or community health, lifelong learning, people and culture, or community wellbeing.
-- **Ambiguous or evenly mixed:** use a stable topic hash to distribute the adaptive version across the eleven systems instead of repeatedly choosing the same design.
+- **Ambiguous or evenly mixed:** use a stable topic hash to distribute the adaptive version across the portfolio instead of repeatedly choosing the same design.
 
-An explicit template choice produces one PDF and always wins. Without a choice, render Executive plus the deterministic non-Executive companion selected for the topic; both use the same Markdown, sources, and citations, so the second version adds no research or writing tokens and only one additional local rendering pass. If rendering encounters a technical problem, recover internally using the SKILL.md complete-delivery fallback and finish the PDFs. Do not ask the user to troubleshoot or make a template decision.
+An explicit template choice produces one PDF and always wins. Without a choice, render Executive plus the deterministic non-Executive companion selected for the topic; both use the already-approved Markdown, sources, citations, and Rewild receipt, so the second version adds no research or writing tokens and only one additional local rendering pass. If rendering encounters a technical problem, recover internally using the SKILL.md complete-delivery fallback and finish the PDFs. Do not ask the user to troubleshoot or make a template decision.
 
 ## Metadata contract
 
@@ -48,7 +48,7 @@ Use these portable blockquote markers only when the content earns the emphasis:
 ```markdown
 > [!METRIC]
 > **2.4×**
-> Higher renewal intent in the tracked cohort.
+> Higher renewal intent in the reviewed cohort.
 
 > [!INSIGHT]
 > The scarce asset is judgment applied early enough to change the decision.

@@ -204,8 +204,8 @@ def _render_named_backend(selected, pdf_path, output_dir, *, dpi):
 
 def render_pages(pdf_path, output_dir, *, dpi=144, backend="auto", force=False):
     pdf_path, output_dir = validate_paths(pdf_path, output_dir, force=force)
+    failures = []
     if backend == "auto":
-        failures = []
         selected = None
         for name in AUTO_FALLBACK:
             try:
@@ -221,6 +221,7 @@ def render_pages(pdf_path, output_dir, *, dpi=144, backend="auto", force=False):
     if not page_count:
         raise RuntimeError(f"{selected} rendered no PDF pages.")
     print(f"[OK] Rendered {page_count} pages: {output_dir}")
+    return selected, failures
 
 
 def main(argv=None):

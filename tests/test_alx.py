@@ -4051,6 +4051,105 @@ class RenderDegradeTests(AlxTestCase):
         )
 
 
+class RenderPdfkitVisibilityTests(AlxTestCase):
+    """F1 (pdf-06): darwin Preview path — PDFKit failure is visible, not a refusal."""
+
+    def issued(self, stack):
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        helper.stub_gates(stack)
+        code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+
+    def test_darwin_pdfkit_failure_prints_line_and_keeps_sheet(self):
+        from contextlib import ExitStack
+
+        from scripts import md_to_pdf, render_pdf_pages
+
+        def fake_render_pdf(input_path, output_path, **kwargs):
+            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            return Path(output_path)
+
+        def fail_pdfkit(*args, **kwargs):
+            raise RuntimeError("swift missing")
+
+        def succeed_pdfium(pdf_path, output_dir, **kwargs):
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            (Path(output_dir) / "page-0001.png").write_bytes(b"png")
+
+        with ExitStack() as stack:
+            self.issued(stack)
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfkit", side_effect=fail_pdfkit
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfium", side_effect=succeed_pdfium
+                )
+            )
+            stack.enter_context(mock.patch.object(alx.sys, "platform", "darwin"))
+            stack.enter_context(
+                mock.patch.object(render_pdf_pages.sys, "platform", "darwin")
+            )
+            stack.enter_context(
+                mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock())
+            )
+            code, out = self.run_in("render", "--template", "executive")
+        self.assertEqual(0, code, out)
+        self.assertIn(
+            "executive contact sheet: PDFKit failed (swift missing); "
+            "rendered with pdfium",
+            out,
+        )
+        self.assertTrue((self.dir / "pages-executive" / "page-0001.png").is_file())
+
+    def test_darwin_pdfkit_success_prints_nothing_extra(self):
+        from contextlib import ExitStack
+
+        from scripts import md_to_pdf, render_pdf_pages
+
+        def fake_render_pdf(input_path, output_path, **kwargs):
+            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            return Path(output_path)
+
+        def succeed_pdfkit(pdf_path, output_dir, **kwargs):
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            (Path(output_dir) / "page-0001.png").write_bytes(b"png")
+
+        with ExitStack() as stack:
+            self.issued(stack)
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfkit", side_effect=succeed_pdfkit
+                )
+            )
+            stack.enter_context(mock.patch.object(alx.sys, "platform", "darwin"))
+            stack.enter_context(
+                mock.patch.object(render_pdf_pages.sys, "platform", "darwin")
+            )
+            stack.enter_context(
+                mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock())
+            )
+            code, out = self.run_in("render", "--template", "executive")
+        self.assertEqual(0, code, out)
+        self.assertNotIn("PDFKit failed", out)
+        self.assertIn("executive contact sheet:", out)
+        self.assertTrue((self.dir / "pages-executive" / "page-0001.png").is_file())
+
+
 class RenderPdfCheckTests(AlxTestCase):
     """A2 / content-07: baseline --min-text-chars 5000; print-only."""
 

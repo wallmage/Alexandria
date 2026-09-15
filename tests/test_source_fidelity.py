@@ -1879,3 +1879,111 @@ class ProbeContextReconfirmationTests(unittest.TestCase):
                 cache, "S1", "C1", source_fidelity.probe_strings(self.EXTRACT)
             )
             self.assertEqual([], self._families(cache))
+
+
+class TwoExtractsFromOneSourceTests(unittest.TestCase):
+    """R29/A3: one claim quoting one source twice reported a false change.
+
+    `record_probe_contexts` is called once per evidence entry and used to key
+    the recorded contexts by claim alone, so the second entry overwrote the
+    first; comparing the first entry's probes against the second entry's
+    hashes then raised `fidelity/context-changed` on every cache that had
+    never been refetched (9 of them on the 2026-09-15 GLM workspace).
+    """
+
+    FIRST = "The tariff rose to 12 percent in 2026."
+    SECOND = "The quota fell to 4,000 tonnes in 2027."
+    #: The two passages sit more than PROBE_CONTEXT_RADIUS apart, so each
+    #: probe's recorded context covers its own passage only.
+    FILLER = "Unrelated background sentence. " * 40
+    PAGE = f"Opening line. {FIRST} {FILLER} {SECOND} Closing line."
+
+    def _result(self, text):
+        return source_fidelity.FetchResult(
+            status="ok",
+            reason_class="",
+            reason="",
+            text=text,
+            charset="utf-8",
+            url="https://example.org/p",
+            final_url="https://example.org/p",
+            aliases=[],
+            http_status=200,
+            title="Tariffs",
+            published=None,
+            text_sha256="",
+        )
+
+    def _claim(self):
+        return {
+            "claim_id": "C1",
+            "source_ids": ["S1"],
+            "source_evidence": [
+                {"source_id": "S1", "extract_or_location": self.FIRST},
+                {"source_id": "S1", "extract_or_location": self.SECOND},
+            ],
+        }
+
+    def _record(self, cache):
+        for entry in self._claim()["source_evidence"]:
+            source_fidelity.record_probe_contexts(
+                cache,
+                "S1",
+                "C1",
+                source_fidelity.probe_strings(entry["extract_or_location"]),
+            )
+
+    def _families(self, cache):
+        text, meta = source_fidelity.read_cache(cache, "S1")
+        families = []
+        for entry in self._claim()["source_evidence"]:
+            families.extend(
+                item.family
+                for item in source_fidelity.probe_findings(
+                    self._claim(),
+                    {"source_id": "S1", "url": "https://example.org/p"},
+                    text,
+                    cache_meta=meta,
+                    extract=entry["extract_or_location"],
+                )
+            )
+        return families
+
+    def test_an_unchanged_cache_reports_no_context_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(cache, "S1", self._result(self.PAGE))
+            self._record(cache)
+            self.assertEqual([], self._families(cache))
+
+    def test_a_refresh_that_changes_the_text_reports_one_context_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(cache, "S1", self._result(self.PAGE))
+            self._record(cache)
+            source_fidelity.write_cache(
+                cache,
+                "S1",
+                self._result(
+                    f"Opening line. {self.FIRST} {self.FILLER} "
+                    f"Correction: {self.SECOND} Closing line."
+                ),
+            )
+            self.assertEqual(
+                ["fidelity/context-changed"],
+                [
+                    family
+                    for family in self._families(cache)
+                    if family == "fidelity/context-changed"
+                ],
+            )
+
+    def test_contexts_are_recorded_per_probe_not_per_claim(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(cache, "S1", self._result(self.PAGE))
+            self._record(cache)
+            _text, meta = source_fidelity.read_cache(cache, "S1")
+            recorded = meta["probe_contexts"]["C1"]
+            self.assertIsInstance(recorded, dict)
+            self.assertEqual(2, len(recorded))

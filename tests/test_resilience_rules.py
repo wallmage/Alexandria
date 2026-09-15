@@ -512,7 +512,7 @@ class LivingPersonRulesAreGoneTests(unittest.TestCase):
 
 
 class CjkNumeralQuantityTests(unittest.TestCase):
-    """R26: a count spelled in Han numerals warns; digits and dates stay hard."""
+    """R29: a count spelled in Han numerals is silent; digits/dates stay hard."""
 
     def claim(self, text):
         return {
@@ -534,15 +534,8 @@ class CjkNumeralQuantityTests(unittest.TestCase):
     def findings(self, text):
         return quantity_findings(self.claim(text), valid_quality_ledger())
 
-    def test_a_han_numeral_count_is_a_warn(self):
-        item = self.findings("三位作者共同署名该文。")[0]
-        self.assertEqual("warn", item.severity)
-        self.assertEqual("A", item.klass)
-        self.assertIn("quantity '三' appears in claim but not in", item.message)
-        self.assertIn("claim n:3", item.message)
-        self.assertEqual("alx find S2 三", item.fix)
-        self.assertEqual("", item.remove)
-        self.assertNotIn("Remove:", item.message)
+    def test_a_han_numeral_count_raises_no_finding(self):
+        self.assertEqual([], self.findings("三位作者共同署名该文。"))
 
     def test_the_same_count_in_digits_stays_hard(self):
         item = self.findings("3位作者共同署名该文。")[0]

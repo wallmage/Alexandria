@@ -280,7 +280,6 @@ CLASS_A_FAMILIES = frozenset(
         "tooling/receipt",
         "tooling/render",
         "review/rewild",
-        "rewild/humanization",
         "rewild/checker",
         "integrity/structure",
         "integrity/date-line",
@@ -314,10 +313,8 @@ OWN_FAMILIES = (
     "fidelity/undecodable",
     "fidelity/unreachable",
     "integrity/encoding",
-    "review/content-missing",
     "review/content-stale",
     "review/rewild",
-    "rewild/humanization",
     "tooling/receipt",
     "tooling/render",
 )
@@ -391,10 +388,10 @@ def add_link(paragraph, claim_id):
 Finding = gate_severity.Finding
 
 
-def render_grouped(findings, *, per_family=5):
+def render_grouped(findings, *, per_family=5, verbose=False):
     """R28: the HARD/WARN tier is the whole story; no class label is printed."""
     return gate_severity.render_grouped(
-        findings, per_family=per_family, with_class=False
+        findings, per_family=per_family, with_class=False, verbose=verbose
     )
 
 
@@ -413,9 +410,7 @@ WARN_FAMILIES = frozenset(
     {
         "tooling/receipt",
         "tooling/render",
-        "rewild/humanization",
         "review/rewild",
-        "review/content-missing",
         "review/content-stale",
         "fidelity/unreachable",
         "fidelity/undecodable",
@@ -2985,9 +2980,9 @@ def freshness_findings(ws, state, ledger, kind):
     """Spec §6.8: current inputs must equal the reviewed copy up to mechanics."""
     record = state.get("reviews", {}).get(kind, {})
     if not record.get("finished"):
-        return [
-            finding(_review_family(kind, "missing"), f"the {kind} review is missing.")
-        ]
+        # R29: reviews are optional, so their absence is silent. A note that
+        # exists but no longer matches the report is still reported below.
+        return []
     reviewed = ws.review_dir(kind, record["iteration"])
     current = _paragraph_set(ws.report_text(), state)
     previous = _paragraph_set(
@@ -3256,9 +3251,14 @@ def cmd_check(args):
     lines.append(
         f"claim->paragraph ({len(rows)} claims):" if rows else "claim->paragraph: none"
     )
-    lines += [f"  {claim_id}={paragraph}" for claim_id, paragraph in rows]
+    # R29: the whole `check` output has to stay readable in one screen, so the
+    # mapping folds instead of spending one line per claim.
+    pairs = [f"{claim_id}={paragraph}" for claim_id, paragraph in rows]
     lines += [
-        render_grouped(findings),
+        "  " + " ".join(pairs[start : start + 8]) for start in range(0, len(pairs), 8)
+    ]
+    lines += [
+        render_grouped(findings, verbose=args.verbose),
         _status_line(state, findings, remaining),
     ]
     _record_last_check(state, findings)
@@ -4212,6 +4212,11 @@ def build_parser():
 
     check = subparsers.add_parser("check", help="every offline evaluator, grouped")
     check.add_argument("--fix", action="store_true")
+    check.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print every WARN item instead of one line per family",
+    )
     check.set_defaults(handler=cmd_check)
 
     review = subparsers.add_parser("review", help="review lifecycle")

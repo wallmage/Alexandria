@@ -68,7 +68,12 @@ def group(findings):
 CLASS_LABELS = {"F": " (F)"}
 
 
-def render_grouped(findings, *, per_family=5, with_class=False):
+#: R29: the WARN tier is advice, so it prints one line per family. The first
+#: member carries the family's message and fix; `--verbose` expands the tier.
+WARN_MESSAGE_CHARS = 160
+
+
+def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
     records = [item for item in findings if is_finding(item)]
     hard = [item for item in records if item.severity == "hard"]
     warn = [item for item in records if item.severity == "warn"]
@@ -78,6 +83,18 @@ def render_grouped(findings, *, per_family=5, with_class=False):
         if not with_class or not any(item.klass == "F" for item in members):
             return ""
         return CLASS_LABELS["F"]
+
+    def emit_compact(items):
+        for family, members in group(items).items():
+            first = members[0]
+            # One line per family, so a message spanning several lines folds.
+            message = " ".join(str(first.message).split())
+            if len(message) > WARN_MESSAGE_CHARS:
+                message = message[:WARN_MESSAGE_CHARS].rstrip() + "…"
+            line = f"[{family}] {len(members)} — {message}"
+            if first.fix:
+                line += f" — Fix: {first.fix}"
+            lines.append(line)
 
     def emit(items):
         for family, members in group(items).items():
@@ -100,7 +117,10 @@ def render_grouped(findings, *, per_family=5, with_class=False):
 
     emit(hard)
     lines.append(f"=== WARN {len(warn)} ===")
-    emit(warn)
+    if verbose:
+        emit(warn)
+    else:
+        emit_compact(warn)
     lines.append(f"=== STATUS: {len(hard)} hard, {len(warn)} warn ===")
     return "\n".join(lines)
 

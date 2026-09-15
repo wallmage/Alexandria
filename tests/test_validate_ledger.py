@@ -1843,10 +1843,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
             )
         )
 
-    def test_han_scale_magnitude_is_an_evidence_obligation(self):
-        # "三千萬"/"六億" are figures exactly as "3000萬"/"6億" already are;
-        # the leading digit (三/六) is what makes them unambiguous (see the
-        # idiom tests below for the case without one).
+    def test_han_scale_magnitude_is_evidence_but_raises_no_finding(self):
+        # R29: "三千萬"/"六億" still read as figures on the evidence side, so
+        # they cover a digit claim; as a claim obligation they raise nothing.
         for phrase, expected in (("三千萬", 30_000_000), ("六億", 600_000_000)):
             with self.subTest(phrase=phrase):
                 self.assertEqual(
@@ -1864,7 +1863,8 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                 }
             ),
         )
-        self.assertTrue(
+        self.assertEqual(
+            [],
             validate_ledger.evidence_coverage_errors(
                 {
                     "claim_id": "C900",
@@ -1872,15 +1872,14 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                     "claim": "年度成本將增加三千萬元。",
                     "extract_or_location": "年度成本將增加三億元。",
                 }
-            )
+            ),
         )
 
-    def test_ten_leading_scale_magnitude_is_an_evidence_obligation(self):
+    def test_ten_leading_scale_magnitude_is_evidence_but_raises_no_finding(self):
         # 十 supplies a leading quantity of its own ("十八萬" is 1*10 + 8, then
-        # times 10,000), so these are figures exactly as "三千萬" is. The guard
-        # for "萬一"/"千萬" demanded a bare *digit* at the head, and 十 is a
-        # place-value unit rather than a digit -- so every 十-leading magnitude
-        # walked past the whole check with no obligation at all.
+        # times 10,000), so these read as figures exactly as "三千萬" does.
+        # R29: as a claim obligation a Han numeral raises no finding, so the
+        # mismatched extract below is silent too.
         for phrase, expected in (
             ("十萬", 100_000),
             ("十八萬", 180_000),
@@ -1903,15 +1902,17 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                 }
             ),
         )
-        errors = validate_ledger.evidence_coverage_errors(
-            {
-                "claim_id": "C906",
-                "kind": "fact",
-                "claim": "全區已安裝十八萬個智慧水錶。",
-                "extract_or_location": "全區已安裝18,000個智慧水錶。",
-            }
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C906",
+                    "kind": "fact",
+                    "claim": "全區已安裝十八萬個智慧水錶。",
+                    "extract_or_location": "全區已安裝18,000個智慧水錶。",
+                }
+            ),
         )
-        self.assertTrue(any("quantity" in error for error in errors), errors)
 
     def test_han_decimal_before_a_scale_word_is_an_evidence_obligation(self):
         # The decimal machinery (點/点) and the scale machinery have to compose:
@@ -2054,16 +2055,17 @@ class ChineseWordNumberScanTests(unittest.TestCase):
             ),
         )
 
-    def test_han_plain_count_is_an_evidence_obligation(self):
-        # Mirrors English's spelled counts ("three CVEs", "ten engineers"):
-        # a Han count gated on the 個/个 classifier behaves the same way.
+    def test_han_plain_count_raises_no_finding(self):
+        # R29: a count spelled in Han numerals carries no obligation at all,
+        # so an extract that says nothing about it is not a finding.
         for claim in (
             "研究人員揭露三個漏洞。",
             "第一期換表已完成十八個月。",
             "服務公司過去三年掉十一個百分點。",
         ):
             with self.subTest(claim=claim):
-                self.assertTrue(
+                self.assertEqual(
+                    [],
                     validate_ledger.evidence_coverage_errors(
                         {
                             "claim_id": "C901",
@@ -2071,7 +2073,7 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                             "claim": claim,
                             "extract_or_location": "本頁概述產品。",
                         }
-                    )
+                    ),
                 )
         self.assertEqual(
             [],
@@ -2096,8 +2098,10 @@ class ChineseWordNumberScanTests(unittest.TestCase):
             ),
         )
 
-    def test_han_count_rejects_a_different_value(self):
-        self.assertTrue(
+    def test_han_count_against_a_different_value_raises_no_finding(self):
+        """R29: the Han-numeral obligation path is deleted, not downgraded."""
+        self.assertEqual(
+            [],
             validate_ledger.evidence_coverage_errors(
                 {
                     "claim_id": "C901",
@@ -2105,7 +2109,7 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                     "claim": "研究人員揭露三個漏洞。",
                     "extract_or_location": "報告記錄5個漏洞。",
                 }
-            )
+            ),
         )
 
     def test_han_ordinals_do_not_create_obligations(self):
@@ -2514,11 +2518,13 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             "ledger/synthesis",
             "ledger/triangulation",
             "ledger/undated-reason",
+            # R29: lexical/semantic heuristics and ledger shape warn too.
+            "ledger/direction",
+            "ledger/schema",
+            "ledger/status",
         }
     )
-    R28_HARD_FAMILIES = frozenset(
-        {"ledger/direction", "ledger/quantity", "ledger/schema", "ledger/status"}
-    )
+    R28_HARD_FAMILIES = frozenset({"ledger/quantity"})
 
     def test_r28_downgraded_families_are_warn(self):
         by_family = {}
@@ -2851,7 +2857,8 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             ),
         )
 
-    def test_increased_versus_decreased_stays_hard(self):
+    def test_increased_versus_decreased_is_a_warn(self):
+        """R29: a direction heuristic is not verbatim fidelity."""
         errors = validate_ledger.evidence_coverage_errors(
             {
                 "claim_id": "C900",
@@ -2861,7 +2868,7 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             }
         )
         self.assertTrue(any("direction" in error.lower() for error in errors), errors)
-        self.assertFalse(any(error.startswith("WARNING:") for error in errors), errors)
+        self.assertTrue(all(error.startswith("WARNING:") for error in errors), errors)
 
     def test_unverified_provenance_is_interested_in_portfolio_and_key_claim(self):
         data = valid_quality_ledger()
@@ -3030,8 +3037,11 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             err = io.StringIO()
             with redirect_stderr(err), redirect_stdout(io.StringIO()):
                 code = validate_ledger.main([str(path)])
-        self.assertEqual(1, code)
+        # R29: a direction heuristic warns, so the grouped output carries it
+        # in the WARN tier and the command no longer refuses.
+        self.assertEqual(0, code)
         self.assertIn("=== HARD", err.getvalue())
+        self.assertIn("=== WARN", err.getvalue())
 
     def test_expanded_key_claim_input_validates_against_the_ledger_schema(self):
         """Pinned contract: claim-input -> full v4 claim (spec §6.4, §9)."""
@@ -3406,3 +3416,44 @@ class ClaimRemedyTests(unittest.TestCase):
             ],
             self._fixes(data, "quantity '1936-12-10' appears in claim"),
         )
+
+
+class R29SeverityTests(unittest.TestCase):
+    """R29/A1-A2: the downgraded families and the deleted Han-numeral path."""
+
+    def test_the_three_downgraded_families_carry_no_remove_remedy(self):
+        for family in sorted(validate_ledger.WARN_FAMILIES):
+            with self.subTest(family=family):
+                item = validate_ledger._f(
+                    family, "C1: message", remove="alx claim drop C1 --apply"
+                )
+                self.assertEqual("warn", item.severity)
+                self.assertEqual("", item.remove)
+
+    def test_a_schema_defect_never_blocks(self):
+        findings = validate_ledger.collect_findings({})
+        schema = [item for item in findings if item.family == "ledger/schema"]
+        self.assertTrue(schema)
+        self.assertEqual({"warn"}, {item.severity for item in schema})
+        self.assertEqual([], [item for item in findings if item.severity == "hard"])
+
+    def test_a_han_numeral_quantity_raises_nothing_while_a_digit_stays_hard(self):
+        han = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C1",
+                "kind": "fact",
+                "claim": "三位作者共同署名。",
+                "extract_or_location": "本页概述产品。",
+            }
+        )
+        self.assertEqual([], han)
+        digits = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C1",
+                "kind": "fact",
+                "claim": "3位作者共同署名。",
+                "extract_or_location": "本页概述产品。",
+            }
+        )
+        self.assertTrue(digits)
+        self.assertFalse(any(error.startswith("WARNING:") for error in digits), digits)

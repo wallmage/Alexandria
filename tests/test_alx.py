@@ -1348,9 +1348,7 @@ class IssueTests(AlxTestCase):
         for family in (
             "tooling/receipt",
             "tooling/render",
-            "rewild/humanization",
             "review/rewild",
-            "review/content-missing",
             "review/content-stale",
             "fidelity/unreachable",
             "fidelity/undecodable",
@@ -1814,10 +1812,14 @@ class CheckOutputTests(AlxTestCase):
         self.assertEqual(self.grouped_block(first), self.grouped_block(second))
 
     def test_an_unrepairable_date_line_keeps_its_prose_remedy(self):
-        """R28: no class label is printed; the prose remedy still is."""
+        """R28: no class label is printed; the prose remedy still is.
+
+        R29: the WARN tier is compact, so the per-item line the remedy lives
+        on is printed by `check --verbose`.
+        """
         self.bootstrap()
         self.break_the_date_line_and_the_supports()
-        _code, out = self.run_in("check", "--fix")
+        _code, out = self.run_in("check", "--fix", "--verbose")
         line = next(
             line for line in self.finding_lines(out) if "Date line" in line
         )
@@ -2106,12 +2108,12 @@ class IntegrationHoleTests(AlxTestCase):
             ),
             encoding="utf-8",
         )
-        _code, out = self.run_in("check")
-        line = self.line_with(out, "cannot be located")
-        self.assertIn("Fix: alx check --fix", line)
-        self.assertNotIn("alx review start content --iter", line)
-        _code, out = self.run_in("check", "--fix")
-        self.assertNotIn("cannot be located", out)
+        _code, out = self.run_in("check", "--verbose")
+        # R29: claim<->paragraph binding is the binding gate's job, so the
+        # content review no longer re-reports a stale excerpt at all.
+        self.assertNotIn("cannot be located in the report", out)
+        _code, out = self.run_in("check", "--fix", "--verbose")
+        self.assertNotIn("cannot be located in the report", out)
 
     def test_a_missing_citation_asks_for_the_link_not_a_re_review(self):
         self.started_content_review()
@@ -2121,14 +2123,11 @@ class IntegrationHoleTests(AlxTestCase):
             report.replace(f"[recorded in the study]({url})", "recorded in the study"),
             encoding="utf-8",
         )
-        _code, out = self.run_in("check")
-        line = self.line_with(out, "no nearby citation")
-        self.assertIn(
-            "Fix: write [C1] at the end of the sentence in paragraph 1 of "
-            "report.md, then alx check --fix",
-            line,
-        )
-        self.assertNotIn("alx review start content --iter", line)
+        _code, out = self.run_in("check", "--verbose")
+        # R29: the missing citation is reported once, by the binding gate.
+        self.assertNotIn("no nearby citation", out)
+        line = self.line_with(out, "binding/claim-paragraph")
+        self.assertIn("] 1", line)
 
     # item 4 --------------------------------------------------------------
     def test_review_start_prints_every_field_and_prefills_the_whole_form(self):
@@ -4075,7 +4074,8 @@ class PortfolioVocabularyTests(AlxTestCase):
         (self.dir / "ledger.json").write_text(
             json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
         )
-        _code, out = self.run_in("check")
+        # R29: the full vocabulary lives on the per-item line `--verbose` prints.
+        _code, out = self.run_in("check", "--verbose")
         self.assertIn("portfolio has no independent source", out)
         for flag, values in (
             ("--provenance", alx.PROVENANCES),
@@ -4840,3 +4840,74 @@ class InitLengthTargetTests(AlxTestCase):
         self.assertIn("target length: 7500–15000 words", out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertIn("Target 7500–15000 words.", report)
+
+
+class CompactWarnTierTests(AlxTestCase):
+    """R29/A5: the WARN tier is one line per family; `--verbose` expands it."""
+
+    def _unverified(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        for source in ledger["sources"]:
+            source["provenance"] = "unverified"
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def test_check_prints_one_line_per_warn_family(self):
+        self._unverified()
+        _code, out = self.run_in("check")
+        warn = out.split("=== WARN ")[1].split("=== STATUS:")[0].splitlines()[1:]
+        self.assertTrue(warn)
+        for line in warn:
+            with self.subTest(line=line):
+                self.assertTrue(line.startswith("["), line)
+                self.assertIn(" — ", line)
+        families = [line.split("]")[0] + "]" for line in warn]
+        self.assertEqual(len(families), len(set(families)))
+
+    def test_verbose_expands_the_warn_tier_to_one_line_per_item(self):
+        self._unverified()
+        _code, compact = self.run_in("check")
+        _code, verbose = self.run_in("check", "--verbose")
+        self.assertIn("[ledger/provenance] 2", compact)
+        self.assertIn("[ledger/provenance] 2", verbose)
+        self.assertGreater(
+            len(verbose.splitlines()), len(compact.splitlines())
+        )
+        self.assertTrue(
+            any(line.startswith("  ") for line in verbose.splitlines()[5:]),
+            verbose,
+        )
+
+    def test_the_hard_tier_and_the_headers_are_unchanged(self):
+        self.bootstrap()
+        (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
+        _code, out = self.run_in("check")
+        self.assertIn("[fidelity/cache-detached]", out)
+        self.assertRegex(out, r"=== HARD \d+ \(blocks issue\) ===")
+        self.assertRegex(out, r"=== WARN \d+ ===")
+        self.assertRegex(out, r"=== STATUS: \d+ hard, \d+ warn ===")
+        hard = out.split("=== HARD ")[1].split("=== WARN")[0].splitlines()[1:]
+        self.assertTrue(any(line.startswith("  ") for line in hard), out)
+
+
+class DeletedNoiseFamiliesTests(AlxTestCase):
+    """R29/A4: review noise the gates no longer raise."""
+
+    def test_a_missing_review_is_not_a_finding(self):
+        self.bootstrap()
+        _code, out = self.run_in("check")
+        self.assertNotIn("review/content-missing", out)
+        self.assertNotIn("review is missing", out)
+        self.assertNotIn("review/rewild", out)
+
+    def test_the_deleted_families_are_not_registered(self):
+        for family in (
+            "review/content-missing",
+            "rewild/humanization",
+            "content/claim-support",
+            "content/claim-binding",
+        ):
+            with self.subTest(family=family):
+                self.assertNotIn(family, alx.FAMILIES)

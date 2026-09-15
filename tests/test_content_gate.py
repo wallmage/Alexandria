@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts import content_gate
 from scripts.content_gate import (
     _schema_errors,
     run_check,
@@ -720,8 +721,6 @@ class ContentGateTests(unittest.TestCase):
                     "content/score",
                     "content/critical-finding",
                     "content/disclosure",
-                    "content/claim-support",
-                    "content/claim-binding",
                 },
                 {item.family for item in content},
             )
@@ -1027,10 +1026,13 @@ class ContentGateTests(unittest.TestCase):
             self.assertTrue(any("writing_clarity" in message for message in messages), messages)
             self.assertTrue(any("F-crit" in message for message in messages), messages)
             self.assertTrue(any("disclosure" in message for message in messages), messages)
-            self.assertIn("content/claim-support", families)
+            # R29: claim<->paragraph binding is the binding gate's job.
+            self.assertNotIn("content/claim-support", families)
+            self.assertNotIn("content/claim-binding", families)
             self.assertFalse(receipt.exists())
 
-    def test_run_check_per_claim_single_line_three_binding_checks(self):
+    def test_run_check_emits_no_per_claim_binding_line(self):
+        """R29: `content/claim-support` and `content/claim-binding` are gone."""
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, _receipt, _source_receipt = self.make_case(
                 directory
@@ -1049,15 +1051,14 @@ class ContentGateTests(unittest.TestCase):
             ledger_data["claims"][0]["report_paragraph"] = 1
             ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
             findings = run_check(report, ledger, review)
-            lines = [
-                item.message
-                for item in findings
-                if item.message.startswith("C1:")
-            ]
-            self.assertEqual(1, len(lines), findings)
-            self.assertIn("paragraph=", lines[0])
-            self.assertIn("support=", lines[0])
-            self.assertIn("citation=", lines[0])
+            self.assertEqual(
+                [],
+                [
+                    item.message
+                    for item in findings
+                    if item.message.startswith("C1:")
+                ],
+            )
 
     def test_run_check_can_skip_the_ledger_error_re_emission(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1103,9 +1104,14 @@ class ContentGateTests(unittest.TestCase):
                 "binding/link-not-in-ledger",
                 [item.family for item in without_ledger],
             )
-            self.assertTrue(
-                any(item.message.startswith("C1:") for item in without_ledger),
-                without_ledger,
+            # R29: the review half no longer re-reports claim binding either.
+            self.assertEqual(
+                [],
+                [
+                    item.message
+                    for item in without_ledger
+                    if item.message.startswith("C1:")
+                ],
             )
 
     def test_check_flag_is_dry_run(self):
@@ -1280,3 +1286,17 @@ class SkippedSourceFidelityReceiptTests(unittest.TestCase):
                     source_fidelity_receipt_path=source_receipt,
                 ),
             )
+
+
+class R29ReviewNoiseTests(unittest.TestCase):
+    """R29/A4: the review gate no longer re-reports claim binding."""
+
+    def test_the_two_deleted_families_are_unregistered(self):
+        self.assertNotIn("content/claim-support", content_gate.FAMILIES)
+        self.assertNotIn("content/claim-binding", content_gate.FAMILIES)
+
+    def test_the_claim_support_field_stays_accepted(self):
+        schema = json.loads(
+            content_gate.CONTENT_REVIEW_SCHEMA.read_text(encoding="utf-8")
+        )
+        self.assertIn("claim_support", schema["properties"])

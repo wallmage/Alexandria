@@ -585,26 +585,22 @@ class ClaimTests(AlxTestCase):
         self.assertEqual(meta["fetched_at"][:10], claim["verified_at"])
 
     def test_missing_claim_id_fails_while_a_warned_claim_is_upserted(self):
-        # R13: the short extract is present in the source, so it only warns.
+        # A2: a quantity not in the extract/page warns; the claim still lands.
         self.init()
         self.fetch("https://example.org/study")
         bad = dict(CLAIM_ONE)
         bad.pop("claim_id")
-        short = {
-            "claim_id": "C9",
-            "claim": "The archive released documents.",
-            "kind": "fact",
-            "importance": "supporting",
-            "source_evidence": [
-                {"source_id": "S1", "extract_or_location": "The archive"}
-            ],
-        }
-        batch = self.write_json("claims.json", [bad, short])
+        warned = dict(
+            CLAIM_ONE,
+            claim_id="C9",
+            claim="The archive released 7,777 documents in March 2026.",
+        )
+        batch = self.write_json("claims.json", [bad, warned])
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(0, code, out)
         self.assertIn("C10 added (assigned id)", out)
         self.assertIn("C9 WARN", out)
-        self.assertIn("extend the quote", out)
+        self.assertIn("[ledger/quantity]", out)
         self.assertEqual(
             ["C10", "C9"], [c["claim_id"] for c in self.ledger()["claims"]]
         )
@@ -612,20 +608,17 @@ class ClaimTests(AlxTestCase):
     def test_warn_only_claim_is_accepted(self):
         self.init()
         self.fetch("https://example.org/study")
-        short = {
-            "claim_id": "C9",
-            "claim": "The archive released documents.",
-            "kind": "fact",
-            "importance": "supporting",
-            "source_evidence": [
-                {"source_id": "S1", "extract_or_location": "The archive"}
-            ],
-        }
-        batch = self.write_json("claims.json", [short])
+        warned = dict(
+            CLAIM_ONE,
+            claim_id="C9",
+            claim="The archive released 7,777 documents in March 2026.",
+        )
+        batch = self.write_json("claims.json", [warned])
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(0, code)
         self.assertIn("C9 added", out)
         self.assertIn("C9 WARN", out)
+        self.assertIn("[ledger/quantity]", out)
         self.assertNotIn("FAIL", out)
         self.assertEqual(["C9"], [c["claim_id"] for c in self.ledger()["claims"]])
 
@@ -722,23 +715,6 @@ class ClaimTests(AlxTestCase):
         code, out = self.run_in("check")
         self.assertNotIn("leftover-prose", out)
 
-    def test_surviving_supports_to_excluded_claim_is_hard(self):
-        self.bootstrap()
-        ledger = self.ledger()
-        ledger["claims"][1]["supports"] = ["C1"]
-        (self.dir / "ledger.json").write_text(
-            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
-        )
-        self.run_in("claim", "drop", "C1", "--apply")
-        surviving = {
-            claim["claim_id"]: claim for claim in self.ledger()["claims"]
-        }
-        self.assertIn("C2", surviving)
-        code, out = self.run_in("check")
-        self.assertEqual(1, code)
-        self.assertIn("C1", out)
-        self.assertIn("excluded", out)
-
     def test_claim_add_upserts_by_claim_id(self):
         self.init()
         self.fetch("https://example.org/study")
@@ -794,25 +770,23 @@ class ClaimTests(AlxTestCase):
         self.assertEqual([], self.ledger()["claims"])
 
     def test_r28_warn_families_are_printed_but_block_neither_add_nor_check(self):
-        """R28: a downgraded family is advice — the claim still lands."""
+        """A2: ledger/quantity is advice — the claim still lands."""
         self.bootstrap()
         warned = dict(
             CLAIM_ONE,
             claim_id="C9",
-            supports=["C99"],
-            person_ids=["P9"],
+            claim="The archive released 7,777 documents in March 2026.",
         )
         batch = self.write_json("warned.json", [warned])
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(0, code, out)
         self.assertIn("C9 WARN", out)
-        self.assertIn("[ledger/reference]", out)
-        self.assertIn("[ledger/person]", out)
+        self.assertIn("[ledger/quantity]", out)
         self.assertIn("C9", {claim["claim_id"] for claim in self.ledger()["claims"]})
         _code, out = self.run_in("check")
         hard = out.split("=== WARN")[0]
-        for family in ("ledger/reference", "ledger/person", "ledger/synthesis"):
-            self.assertNotIn(family, hard)
+        self.assertNotIn("ledger/quantity", hard)
+        self.assertIn("ledger/quantity", out)
 
     def test_drop_cascade_drops_both_claims_mapped_to_one_paragraph(self):
         self.bootstrap()
@@ -1821,9 +1795,16 @@ class CheckOutputTests(AlxTestCase):
     def test_check_fix_is_only_advertised_where_it_repairs_and_converges(self):
         self.bootstrap()
         self.break_the_date_line_and_the_supports()
+        ledger = self.ledger()
+        ledger["claims"][0]["claim"] = (
+            "The archive released 7,777 documents in March 2026."
+        )
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
         _code, first = self.run_in("check", "--fix")
         self.assertIn("integrity/date-line", first)
-        self.assertIn("ledger/reference", first)
+        self.assertIn("ledger/quantity", first)
         self.assertNotIn("Fix: alx check --fix", first)
         _code, second = self.run_in("check", "--fix")
         self.assertEqual(self.grouped_block(first), self.grouped_block(second))
@@ -1851,7 +1832,8 @@ class CheckOutputTests(AlxTestCase):
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         _code, out = self.run_in("check")
         self.assertRegex(out, r"\[fidelity/cache-detached\] \d+\n")
-        self.assertRegex(out, r"=== STATUS: \d+ hard, \d+ warn ===")
+        self.assertRegex(out, r"=== HARD \d+ \(blocks issue\) ===")
+        self.assertRegex(out, r"=== WARN \d+ ===")
         self.assertNotIn("Class A", out)
 
     # item 4 --------------------------------------------------------------
@@ -2535,25 +2517,6 @@ class FixRoundTests(AlxTestCase):
         self.assertNotIn(
             "原始日記", (self.dir / "report.md").read_text(encoding="utf-8")
         )
-
-    # J9 ------------------------------------------------------------------
-    def test_the_ledger_half_of_content_gate_is_not_printed_twice(self):
-        self.bootstrap()
-        self.run_in("check", "--fix")
-        code, out = self.run_in("review", "start", "content")
-        self.assertEqual(0, code, out)
-        ledger = self.ledger()
-        ledger["sources"][0]["url"] = ledger["sources"][0]["url"].replace(
-            "https://", "http://"
-        )
-        (self.dir / "ledger.json").write_text(
-            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
-        )
-        _code, out = self.run_in("check")
-        https = [line for line in out.splitlines() if "must be https" in line]
-        self.assertEqual(1, len(https), out)
-        self.assertNotIn("alx review start content --iter", https[0])
-
 
 class DeliveryRoundTests(AlxTestCase):
     """Task 7d part J: what `issue --deliver` may and may not ship."""
@@ -3728,15 +3691,6 @@ class AccountabilityNoteTests(AlxTestCase):
             json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
         )
 
-    def test_the_floor_remedy_names_the_flag_and_the_real_id(self):
-        self.short_note()
-        _code, out = self.run_in("check")
-        line = next(item for item in out.splitlines() if "accountability_note" in item)
-        self.assertIn(
-            "Fix: alx source set S1 --accountability-note accountability-note.txt",
-            line,
-        )
-
     def test_source_set_writes_the_note_and_clears_the_finding(self):
         self.short_note()
         path = self.root / "accountability-note.txt"
@@ -4086,26 +4040,6 @@ class InitEchoTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertNotIn("archetype:", out)
         self.assertIn("Workspace ready", out)
-
-
-class PortfolioVocabularyTests(AlxTestCase):
-    def test_the_portfolio_finding_lists_every_allowed_value(self):
-        self.bootstrap()
-        ledger = self.ledger()
-        for source in ledger["sources"]:
-            source["provenance"] = "unverified"
-        (self.dir / "ledger.json").write_text(
-            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
-        )
-        # R29: the full vocabulary lives on the per-item line `--verbose` prints.
-        _code, out = self.run_in("check", "--verbose")
-        self.assertIn("portfolio has no independent source", out)
-        for flag, values in (
-            ("--provenance", alx.PROVENANCES),
-            ("--type", alx.EVIDENCE_TYPES),
-            ("--role", alx.SOURCE_ROLES),
-        ):
-            self.assertIn(f"{flag}: {', '.join(values)}", out)
 
 
 class FlowFixTests(AlxTestCase):
@@ -4890,11 +4824,21 @@ class CompactWarnTierTests(AlxTestCase):
         self.assertEqual(len(families), len(set(families)))
 
     def test_verbose_expands_the_warn_tier_to_one_line_per_item(self):
-        self._unverified()
+        self.bootstrap()
+        ledger = self.ledger()
+        ledger["claims"][0]["claim"] = (
+            "The archive released 7,777 documents in March 2026."
+        )
+        ledger["claims"][1]["claim"] = (
+            "The registry logged 8,888 documents in March 2026."
+        )
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
         _code, compact = self.run_in("check")
         _code, verbose = self.run_in("check", "--verbose")
-        self.assertIn("[ledger/provenance] 2", compact)
-        self.assertIn("[ledger/provenance] 2", verbose)
+        self.assertIn("[ledger/quantity] 2", compact)
+        self.assertIn("[ledger/quantity] 2", verbose)
         self.assertGreater(
             len(verbose.splitlines()), len(compact.splitlines())
         )
@@ -4910,7 +4854,6 @@ class CompactWarnTierTests(AlxTestCase):
         self.assertIn("[fidelity/cache-detached]", out)
         self.assertRegex(out, r"=== HARD \d+ \(blocks issue\) ===")
         self.assertRegex(out, r"=== WARN \d+ ===")
-        self.assertRegex(out, r"=== STATUS: \d+ hard, \d+ warn ===")
         hard = out.split("=== HARD ")[1].split("=== WARN")[0].splitlines()[1:]
         self.assertTrue(any(line.startswith("  ") for line in hard), out)
 

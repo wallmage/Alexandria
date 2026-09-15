@@ -1297,7 +1297,22 @@ def quantitative_evidence(*texts):
     for text in texts:
         for _, _, evidence_forms, _ in _scan_quantities(text):
             forms |= evidence_forms
+        # R29: as evidence, a Han ordinal (第十三) or year count (十三周年,
+        # 十三年) offers its digit value: a figure the page spells out is never
+        # a fabrication in the claim that writes it as 13.
+        for match in _HAN_ORDINAL_OR_YEAR_RE.finditer(str(text or "")):
+            span = match.group(1) or match.group(2)
+            if span in {"一", "零"} or any(char in _CJK_SCALE_WORDS for char in span):
+                continue
+            forms.add(f"n:{_han_numeral_string(span)}")
     return forms
+
+
+_HAN_ORDINAL_OR_YEAR_RE = re.compile(
+    re.escape(_CJK_ORDINAL_MARKER)
+    + "([" + _HAN_NUMERAL_CHARS + "]+)"
+    + "|([" + _HAN_NUMERAL_CHARS + "]+)(?=周年|年)"
+)
 
 
 def _quantity_is_covered(claim_forms, evidence_forms):

@@ -224,7 +224,7 @@ REMEDY_TEMPLATES = {
     "extend-report": "extend the report body in report.md",
     "delete-paragraph": "delete paragraph {paragraph} of report.md",
     "remove-link": "remove link {url} from report.md",
-    "edit-prose": "(edit prose; waivable by alx issue --deliver)",
+    "edit-prose": "(edit prose; warning, never blocks)",
     # Ruling R9: inserting a link leaves the visible text unchanged, so it is a
     # mechanical delta and never stales a review.
     "add-link": (
@@ -258,7 +258,7 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^remove link \S+ from report\.md$"),
-    re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
+    re.compile(r"^\(edit prose; warning, never blocks\)$"),
     re.compile(
         r"^write \[C\d+\] at the end of the sentence in paragraph \d+ of "
         r"report\.md, then alx check --fix$"
@@ -1315,12 +1315,12 @@ def cmd_init(args):
             file=sys.stderr,
         )
         return 1
-    subject_text = Path(args.subject).read_text(encoding="utf-8").strip()
+    subject_text = _input_path(args, args.subject).read_text(encoding="utf-8").strip()
     lines = [line.strip() for line in subject_text.splitlines() if line.strip()]
     subject = lines[0] if lines else "Untitled subject"
     question = lines[1] if len(lines) > 1 else subject
     reader = (
-        Path(args.reader).read_text(encoding="utf-8").strip()
+        _input_path(args, args.reader).read_text(encoding="utf-8").strip()
         if args.reader
         else "Unspecified reader; set it with `alx ledger merge`."
     )

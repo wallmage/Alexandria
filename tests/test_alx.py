@@ -144,7 +144,7 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^remove link \S+ from report\.md$"),
-    re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
+    re.compile(r"^\(edit prose; warning, never blocks\)$"),
     re.compile(
         r"^write \[C\d+\] at the end of the sentence in paragraph \d+ of "
         r"report\.md, then alx check --fix$"
@@ -1793,7 +1793,7 @@ class CheckOutputTests(AlxTestCase):
                 self.assertNotIn("Remove:", rendered)
                 self.assertNotIn("alx snapshot --restore", rendered)
                 self.assertIn(
-                    "Fix: (edit prose; waivable by alx issue --deliver)", rendered
+                    "Fix: (edit prose; warning, never blocks)", rendered
                 )
 
     # item 2 --------------------------------------------------------------
@@ -1834,7 +1834,7 @@ class CheckOutputTests(AlxTestCase):
         line = next(
             line for line in self.finding_lines(out) if "Date line" in line
         )
-        self.assertIn("(edit prose; waivable by alx issue --deliver)", line)
+        self.assertIn("(edit prose; warning, never blocks)", line)
         self.assertIn("[integrity/date-line] 1", out)
         self.assertNotIn("waivable by --deliver)", out)
 
@@ -2383,7 +2383,7 @@ class HonestRemedyTests(AlxTestCase):
                 )
             ]
         )
-        self.assertIn("Fix: (edit prose; waivable by alx issue --deliver)", rendered)
+        self.assertIn("Fix: (edit prose; warning, never blocks)", rendered)
         self.assertNotIn("Remove:", rendered)
         self.assertNotIn("alx check", rendered)
 
@@ -4976,3 +4976,18 @@ class FlowResilienceTests(AlxTestCase):
         self.assertIn("Snapshot written: report.pre-rewild.iter1.md", out)
         self.assertTrue((self.dir / "report.pre-rewild.md").exists())
         self.assertTrue((self.dir / "report.pre-rewild.iter1.md").exists())
+
+
+class InitPathResolutionTests(AlxTestCase):
+    """C3 reaches `init` too: a --subject path under --dir must not crash."""
+
+    def test_init_resolves_a_relative_subject_under_dir(self):
+        work = self.root / "ws-init"
+        work.mkdir()
+        (work / "subject.txt").write_text("Probe subject\nWhat does it decide?\n", encoding="utf-8")
+        code, out = self.run_alx(
+            "--dir", work, "init", str(work), "--lang", "en", "--subject", "subject.txt"
+        )
+        self.assertEqual(0, code, out)
+        self.assertTrue((work / "ledger.json").exists())
+        self.assertNotIn("Traceback", out)

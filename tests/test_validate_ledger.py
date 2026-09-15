@@ -2121,9 +2121,11 @@ class ChineseWordNumberScanTests(unittest.TestCase):
     def test_han_ordinals_do_not_create_obligations(self):
         # "第三"/"第十八" name a position, not a figure, mirroring the
         # exclusion English fractions and ordinal-units get.
+        # R29: as evidence the page may offer the value; as a claim it never
+        # becomes an obligation.
         for phrase in ("第三", "第十八", "第一級"):
             with self.subTest(phrase=phrase):
-                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
+                self.assertEqual([], validate_ledger.quantitative_obligations(phrase))
         self.assertEqual(
             [],
             validate_ledger.evidence_coverage_errors(
@@ -2141,7 +2143,7 @@ class ChineseWordNumberScanTests(unittest.TestCase):
         # side of the fraction becomes an obligation.
         for phrase in ("三分之二", "十分之九", "四年之內增加約三分之二"):
             with self.subTest(phrase=phrase):
-                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
+                self.assertEqual([], validate_ledger.quantitative_obligations(phrase))
         self.assertEqual(
             [],
             validate_ledger.evidence_coverage_errors(
@@ -2400,7 +2402,7 @@ class ChineseWordNumberScanTests(unittest.TestCase):
         # And the idiom guards are untouched: none of these opens a unit.
         for phrase in ("萬一", "千萬不要", "千萬分之一", "十分感謝", "第三次"):
             with self.subTest(phrase=phrase):
-                self.assertEqual(set(), validate_ledger.quantitative_evidence(phrase))
+                self.assertEqual([], validate_ledger.quantitative_obligations(phrase))
 
     def test_golden_ledgers_still_pass_with_han_numeral_scanning(self):
         for name in ("en", "zh-CN", "zh-HK"):
@@ -3194,6 +3196,27 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         )
         self.assertIn("claim_id", input_schema["required"])
         self.assertIn("source_evidence", input_schema["required"])
+
+
+class HanNumeralEvidenceTests(unittest.TestCase):
+    """R29: a Han-numeral spelling on the page covers the claim's digits."""
+
+    def test_an_ordinal_and_an_anniversary_offer_their_value(self):
+        self.assertIn("n:13", validate_ledger.quantitative_evidence("本日为西安蒙难第十三年纪念日"))
+        self.assertIn("n:13", validate_ledger.quantitative_evidence("十三周年"))
+
+    def test_a_digit_claim_is_covered_by_the_han_spelling(self):
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C28",
+                    "kind": "fact",
+                    "claim": "1949年12月12日（西安蒙难13周年）的日记。",
+                    "extract_or_location": "1949年12月12日：本日为西安蒙难第十三年纪念日。",
+                }
+            ),
+        )
 
 
 if __name__ == "__main__":

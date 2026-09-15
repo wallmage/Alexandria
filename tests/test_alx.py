@@ -1395,7 +1395,12 @@ class IssueTests(AlxTestCase):
                 alx.file_sha256(self.dir / "report.md"), note["report_sha256"]
             )
 
-    def test_issue_refuses_class_f_without_deliver(self):
+    def test_issue_drops_the_class_f_claim_and_still_issues(self):
+        """C1 restatement of ..._refuses_class_f_without_deliver.
+
+        `issue` applies the Remove remedies, prints the finding it cannot
+        remove (a detached cache is not a claim), and writes the receipts.
+        """
         from contextlib import ExitStack
 
         self.prepared()
@@ -1403,10 +1408,11 @@ class IssueTests(AlxTestCase):
         with ExitStack() as stack:
             calls = self.stub_gates(stack)
             code, out = self.run_in("issue")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code, out)
+        self.assertIn("dropped C1 (fidelity/mismatch)", out)
         self.assertIn("cache-detached", out)
-        self.assertEqual(0, calls["online"])
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+        self.assertEqual(1, calls["online"])
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     def test_deliver_never_bypasses_class_f(self):
         from contextlib import ExitStack
@@ -1497,19 +1503,24 @@ class IssueTests(AlxTestCase):
 
 
 class RenderTests(AlxTestCase):
-    def test_render_refuses_without_a_matching_issue_receipt(self):
+    def test_render_runs_the_issue_step_itself(self):
+        """C2 restatement of ..._refuses_without_a_matching_issue_receipt.
+
+        A missing receipt, then a stale one: both times `render` runs the
+        issue step and renders, instead of refusing.
+        """
         self.bootstrap()
         code, out = self.run_in("render")
-        self.assertEqual(1, code)
-        self.assertIn("alx issue", out)
-        (self.dir / "receipts").mkdir(exist_ok=True)
+        self.assertEqual(0, code, out)
+        self.assertIn("receipts/issue.json written", out)
+        self.assertTrue(list(self.dir.glob("report-*.pdf")), out)
         (self.dir / "receipts" / "issue.json").write_text(
             json.dumps({"report_sha256": "0" * 64, "ledger_sha256": "0" * 64}),
             encoding="utf-8",
         )
         code, out = self.run_in("render")
-        self.assertEqual(1, code)
-        self.assertIn("alx issue", out)
+        self.assertEqual(0, code, out)
+        self.assertIn("receipts/issue.json written", out)
 
     def test_issue_then_render_runs_no_gate_and_no_network(self):
         from contextlib import ExitStack
@@ -1948,7 +1959,8 @@ class LiveFidelityTests(AlxTestCase):
         _code, out = self.run_in("check")
         self.assertIn("[fidelity/mismatch]", out)
 
-    def test_an_online_mismatch_refuses_issue_as_class_f(self):
+    def test_an_online_mismatch_drops_the_claim_it_names(self):
+        """C1 restatement of ..._refuses_issue_as_class_f."""
         from contextlib import ExitStack
 
         issue_tests = self.prepared()
@@ -1966,10 +1978,9 @@ class LiveFidelityTests(AlxTestCase):
                 )
             )
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
-        self.assertIn("[fidelity/mismatch]", out)
-        self.assertIn("issue refused", out)
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+        self.assertEqual(0, code, out)
+        self.assertRegex(out, r"dropped C\d+ \(fidelity/mismatch\): ")
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     def test_a_live_unreachable_beyond_quorum_is_a_warning(self):
         """R28: an unreachable source is availability, never a refusal."""
@@ -2614,7 +2625,10 @@ class DeliveryRoundTests(AlxTestCase):
         return seen
 
     # J1 ------------------------------------------------------------------
-    def test_a_live_mismatch_never_reaches_a_receipt(self):
+    def test_a_live_mismatch_writes_no_fidelity_receipt(self):
+        """C1 restatement of ..._never_reaches_a_receipt: the mismatch drops
+        the claim it names and `issue` finishes; the live receipt, which a
+        standing mismatch withholds, is the only thing missing."""
         from contextlib import ExitStack
 
         issue_tests = self.helper()
@@ -2623,9 +2637,13 @@ class DeliveryRoundTests(AlxTestCase):
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
-        self.assertIn("[fidelity/mismatch]", out)
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+        self.assertEqual(0, code, out)
+        self.assertIn("dropped C2 (fidelity/mismatch)", out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
+        self.assertNotIn("C2", {claim["claim_id"] for claim in self.ledger()["claims"]})
+        self.assertIn(
+            "C2", {claim["claim_id"] for claim in self.ledger()["excluded_claims"]}
+        )
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
 
     def test_deliver_drops_the_mismatching_claim_before_issuing(self):
@@ -2666,9 +2684,9 @@ class DeliveryRoundTests(AlxTestCase):
             )
             code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
-        drops = [line for line in out.splitlines() if line.startswith("auto-remedy:")]
+        drops = [line for line in out.splitlines() if line.startswith("dropped ")]
         self.assertEqual(1, len(drops), out)
-        self.assertRegex(drops[0], r"^auto-remedy: claim C2 dropped \(.+\)\.$")
+        self.assertRegex(drops[0], r"^dropped C2 \(fidelity/mismatch\): .+")
         self.assertNotIn("alx claim drop", out)
         worklog = (self.dir / "worklog.md").read_text(encoding="utf-8").splitlines()
         auto = [line for line in worklog if "auto-drop" in line]
@@ -2688,8 +2706,8 @@ class DeliveryRoundTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
-            code, _out = self.run_in("issue")
-        self.assertEqual(1, code)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
 
     # J5 ------------------------------------------------------------------
@@ -2711,7 +2729,7 @@ class DeliveryRoundTests(AlxTestCase):
             )
             code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
-        self.assertIn("claim C2 dropped", out)
+        self.assertIn("dropped C2 (", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     # J7 ------------------------------------------------------------------
@@ -2726,7 +2744,7 @@ class DeliveryRoundTests(AlxTestCase):
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
+        self.assertEqual(0, code, out)
         self.assertNotEqual(before["at"], self.state()["last_check"]["at"])
 
     def test_render_keeps_the_companion_past_the_reserve(self):
@@ -2943,7 +2961,9 @@ class RewildEffectiveSnapshotTests(AlxTestCase):
         )
         self.assertEqual(alx.file_sha256(seen["source"]), note["source_sha256"])
 
-    def test_a_quotation_lost_from_a_surviving_paragraph_still_refuses(self):
+    def test_a_quotation_lost_from_a_surviving_paragraph_is_restored(self):
+        """C1 restatement of ..._still_refuses: the Remove remedy of a lost
+        quotation is the snapshot restore, and `issue` applies it itself."""
         from contextlib import ExitStack
 
         self.prepared_with_quote()
@@ -2963,9 +2983,9 @@ class RewildEffectiveSnapshotTests(AlxTestCase):
             issues.stub_gates(stack, rewild=False)
             self.quotation_gate(stack, seen)
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
-        self.assertIn("quotation-lost", out)
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+        self.assertEqual(0, code, out)
+        self.assertIn("restored from the latest snapshot", out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
 
 class ParkedReviewNoteTests(AlxTestCase):
@@ -3323,25 +3343,25 @@ class RefreshedSourceReprobeTests(AlxTestCase):
         )
         return self.run_in("issue", "--sample-size", "1", *extra)
 
-    def test_a_claim_outside_the_sample_blocks_issue(self):
+    def test_a_claim_outside_the_sample_is_dropped_by_issue(self):
+        """C1 restatement of ..._blocks_issue."""
         from contextlib import ExitStack
 
         self.prepared()
         with ExitStack() as stack:
             code, out = self.issue(stack)
-        self.assertEqual(1, code, out)
-        # The live sample covered C1 only; C9 is blocked by the re-probe that
+        self.assertEqual(0, code, out)
+        # The live sample covered C1 only; C9 is caught by the re-probe that
         # the refreshed cache triggers.
         result = json.loads(
             (self.dir / ".alx" / "fidelity-result.json").read_text(encoding="utf-8")
         )
         self.assertEqual({"C1"}, {check["claim_id"] for check in result["checks"]})
         self.assertIn("1 source(s) refreshed", out)
-        self.assertIn("[fidelity/mismatch]", out)
         self.assertIn("C9", out)
         self.assertNotIn("C8", out)
-        self.assertIn("issue refused", out)
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+        self.assertIn("dropped C9 (fidelity/mismatch)", out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     def test_deliver_drops_the_claim_outside_the_sample(self):
         from contextlib import ExitStack
@@ -3432,12 +3452,10 @@ class FileArgumentTests(AlxTestCase):
 
     def assert_refused(self, flag, code, out):
         self.assertEqual(2, code, out)
-        # Restated for the message that names the resolved path and the cwd.
+        # C3: restated for the message that names both locations tried.
         self.assertIn(f"{flag}: no file at ", out)
+        self.assertIn(" nor at ", out)
         self.assertIn(f"(cwd {Path.cwd()})", out)
-        self.assertIn(
-            "paths are relative to the current directory or use --dir", out
-        )
         self.assertNotIn("Traceback", out)
 
     def test_init_refuses_prose_for_subject_and_reader(self):
@@ -4126,7 +4144,8 @@ class FlowFixTests(AlxTestCase):
         self.assertIn("binding/link-not-in-ledger", out)
         self.assertIn(f"Remove: `remove link {self.FOREIGN} from report.md`", out)
 
-    def test_deliver_strips_the_foreign_link_and_issues(self):
+    def test_issue_strips_the_foreign_link_and_issues(self):
+        """C1 restatement of test_deliver_strips_...: plain `issue` strips."""
         from contextlib import ExitStack
 
         issue_tests = self.issue_helper()
@@ -4135,10 +4154,8 @@ class FlowFixTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             code, out = self.run_in("issue")
-            self.assertEqual(1, code, out)
-            self.assertIn("binding/link-not-in-ledger", out)
-            code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
+        self.assertIn(f"link removed: {self.FOREIGN}", out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertNotIn(self.FOREIGN, report)
         # The anchor text stays; only the URL goes.
@@ -4146,13 +4163,14 @@ class FlowFixTests(AlxTestCase):
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     # item 4 ---------------------------------------------------------------
-    def test_the_next_command_degrades_to_deliver(self):
+    def test_the_next_command_is_issue_and_never_a_snapshot(self):
+        """C6 restatement of test_the_next_command_degrades_to_deliver."""
         self.bootstrap()
         self.run_in("check", "--fix")
         self.set_remaining(5)
         code, out = self.run_in("status")
         self.assertEqual(0, code, out)
-        self.assertIn("Next: `alx issue --deliver`", out)
+        self.assertIn("Next: `alx issue`", out)
         self.assertNotIn("alx snapshot", out)
         self.assertNotIn("alx review start", out)
 
@@ -4840,3 +4858,50 @@ class InitLengthTargetTests(AlxTestCase):
         self.assertIn("target length: 7500–15000 words", out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertIn("Target 7500–15000 words.", report)
+
+
+class FlowResilienceTests(AlxTestCase):
+    """C3-C5: a relative input path, an unknown flag value, a second snapshot."""
+
+    def test_claim_add_resolves_a_relative_path_under_dir(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.dir / "claims" / "batch.json"
+        batch.parent.mkdir(parents=True, exist_ok=True)
+        batch.write_text(
+            json.dumps([CLAIM_ONE, CLAIM_TWO], ensure_ascii=False), encoding="utf-8"
+        )
+        code, out = self.run_in("claim", "add", "claims/batch.json")
+        self.assertEqual(0, code, out)
+        self.assertEqual(
+            {"C1", "C2"}, {claim["claim_id"] for claim in self.ledger()["claims"]}
+        )
+
+    def test_an_unknown_fetch_flag_value_warns_and_stores_the_default(self):
+        self.init()
+        with mock_production_transport(responses(PAGE)):
+            code, out = self.run_in(
+                "fetch",
+                "https://example.org/study",
+                "--type",
+                "commentary",
+                "--role",
+                "pundit",
+            )
+        self.assertEqual(0, code, out)
+        self.assertIn("unknown --type 'commentary'; stored as news_report", out)
+        self.assertIn("unknown --role 'pundit'; stored as independent_analysis", out)
+        source = self.ledger()["sources"][0]
+        self.assertEqual("news_report", source["evidence_type"])
+        self.assertEqual(["independent_analysis"], source["roles"])
+
+    def test_a_second_snapshot_writes_a_numbered_copy(self):
+        self.bootstrap()
+        code, out = self.run_in("snapshot")
+        self.assertEqual(0, code, out)
+        self.assertIn("Snapshot written: report.pre-rewild.md", out)
+        code, out = self.run_in("snapshot")
+        self.assertEqual(0, code, out)
+        self.assertIn("Snapshot written: report.pre-rewild.iter1.md", out)
+        self.assertTrue((self.dir / "report.pre-rewild.md").exists())
+        self.assertTrue((self.dir / "report.pre-rewild.iter1.md").exists())

@@ -376,6 +376,33 @@ class ContentGateSeesThePageTests(unittest.TestCase):
             )
 
 
+class ReportAliasLinkTests(unittest.TestCase):
+    """Run 6: a body link to a source's http alias is a citation of that source
+    in the content gate too, not a foreign URL."""
+
+    def test_an_alias_link_is_not_reported_as_missing(self):
+        from scripts import validate_report
+
+        ledger = valid_quality_ledger()
+        source = ledger["sources"][0]
+        source["url"] = "https://paper.example.cn/a.htm?div=-1"
+        source["aliases"] = ["http://paper.example.cn/a.htm?div=-1"]
+        text = (
+            "# T\n\n> s\n\n> 15 September 2026\n\n"
+            "Body [cite](http://paper.example.cn/a.htm?div=-1).\n\n"
+            "## Sources\n\n- [a](https://paper.example.cn/a.htm?div=-1)\n"
+        )
+        errors = validate_report.validate_report_against_ledger(text, ledger)
+        self.assertEqual(
+            [], [e for e in errors if "Report URL is not present" in e], errors
+        )
+        text_foreign = text.replace(
+            "http://paper.example.cn/a.htm?div=-1", "https://elsewhere.example/x"
+        )
+        errors = validate_report.validate_report_against_ledger(text_foreign, ledger)
+        self.assertTrue([e for e in errors if "Report URL is not present" in e])
+
+
 class EvidenceEntryProbeTests(unittest.TestCase):
     """R22: two passages from one page are evidence, and each is probed."""
 

@@ -807,11 +807,6 @@ def validate_report_against_ledger(text, ledger):
     if not isinstance(sources, list) or not isinstance(claims, list):
         return ["Evidence ledger sources and claims must be arrays."]
 
-    ledger_urls = {
-        source.get("url")
-        for source in sources
-        if isinstance(source, dict) and source.get("url")
-    }
     source_urls = {
         source.get("source_id"): source.get("url")
         for source in sources
@@ -840,8 +835,13 @@ def validate_report_against_ledger(text, ledger):
         return foundations
 
     errors = []
-    for url in sorted(set(extract_markdown_urls(text)) - ledger_urls):
-        errors.append(f"Report URL is not present in the ledger: {url}")
+    # Same membership rule as binding_findings: aliases count, URLs are
+    # normalized, non-http links are not citations (run 6: an http alias of
+    # an https source produced a false content note).
+    allowed = _ledger_url_set(ledger)
+    for url in sorted(set(extract_markdown_urls(text))):
+        if _http_url(url) and normalize_url(url) not in allowed:
+            errors.append(f"Report URL is not present in the ledger: {url}")
 
     sections = _h2_sections(text)
     body = text

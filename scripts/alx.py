@@ -4175,6 +4175,38 @@ def _record_render_note(ws, note):
     _write_json(path, {"written_at": _now().isoformat(), "notes": notes})
 
 
+def _contact_sheet_status(result):
+    """F1: render_pages returns (backend, failures); mocks may return a list."""
+    if isinstance(result, tuple) and len(result) == 2:
+        selected, failures = result
+        return selected, list(failures or [])
+    return None, []
+
+
+def _pdfkit_failure_reason(failures):
+    for item in failures:
+        if item.startswith("pdfkit:"):
+            return item.split(":", 1)[1].strip()
+    return ""
+
+
+def _note_pdfkit_contact_fallback(ws, lines, template, selected, failures):
+    """F1: PDFKit failure stays visible when a later backend wrote the sheet."""
+    reason = _pdfkit_failure_reason(failures)
+    if not reason or not selected or selected == "pdfkit":
+        return
+    note = (
+        f"{template} contact sheet: PDFKit failed ({reason}); "
+        f"rendered with {selected}"
+    )
+    _record_render_note(ws, note)
+    lines.append(
+        render_grouped(
+            [finding("tooling/render", f"{note}.", fix=remedy("render"))]
+        )
+    )
+
+
 def cmd_render(args):
     ws, state, ledger = _open(args)
     receipt_path = ws.receipts / "issue.json"
@@ -4250,7 +4282,14 @@ def cmd_render(args):
         # instead of refusing because it is not empty.
         shutil.rmtree(pages, ignore_errors=True)
         try:
-            render_pdf_pages.render_pages(str(output), str(pages))
+            # Darwin Preview path requests PDFKit first (AUTO_FALLBACK[0]).
+            # Off darwin the call stays the default auto chain, no extra print.
+            if sys.platform == "darwin":
+                result = render_pdf_pages.render_pages(
+                    str(output), str(pages), backend="auto"
+                )
+            else:
+                result = render_pdf_pages.render_pages(str(output), str(pages))
         except Exception as exc:  # D4b: every rasterizer backend failed
             # Spec §6.10/§6.11: a rasterizer failure is Class A. The PDF is
             # already written, so the contact sheet is the only loss and the
@@ -4263,6 +4302,9 @@ def cmd_render(args):
                 )
             )
             continue
+        if sys.platform == "darwin":
+            selected, failures = _contact_sheet_status(result)
+            _note_pdfkit_contact_fallback(ws, lines, template, selected, failures)
         lines.append(f"{template} contact sheet: {pages}")
     _emit(ws, state, "render", f"{len(templates)} PDFs", lines)
     return 0

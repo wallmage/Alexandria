@@ -238,9 +238,45 @@ class RenderPagesCommandTests(unittest.TestCase):
                 mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
                 mock.patch.object(render_pdf_pages.sys, "platform", "darwin"),
             ):
-                render_pdf_pages.render_pages(pdf, output, backend="auto")
+                selected, failures = render_pdf_pages.render_pages(
+                    pdf, output, backend="auto"
+                )
 
         self.assertEqual(["pdfkit", "pdfium", "poppler"], order)
+        self.assertEqual("poppler", selected)
+        self.assertTrue(any(item.startswith("pdfkit:") for item in failures), failures)
+        self.assertTrue(any(item.startswith("pdfium:") for item in failures), failures)
+
+    def test_auto_fallback_exposes_selected_backend_and_failures(self):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            output = temp / "pages"
+            pdf.write_bytes(b"%PDF")
+
+            def succeed(*args, **kwargs):
+                (output / "page-0001.png").write_bytes(b"png")
+
+            with (
+                mock.patch.object(
+                    render_pdf_pages,
+                    "render_with_pdfkit",
+                    side_effect=RuntimeError("swift missing"),
+                ),
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfium", side_effect=succeed
+                ),
+                mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
+                mock.patch.object(render_pdf_pages.sys, "platform", "darwin"),
+            ):
+                selected, failures = render_pdf_pages.render_pages(
+                    pdf, output, backend="auto"
+                )
+
+        self.assertEqual("pdfium", selected)
+        self.assertEqual(["pdfkit: swift missing"], failures)
 
     def test_fallback_errors_are_one_line_each(self):
         from scripts import render_pdf_pages

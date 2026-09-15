@@ -572,7 +572,7 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
     if family in ONLINE_CLASS_A_FAMILIES or family.startswith("tooling/"):
-        return remedy("issue-deliver"), _drop_or_refresh(item)
+        return remedy("issue"), _drop_or_refresh(item)
     if family == "ledger/claim-input":
         return (
             set_field("claim-input", "claims/*.json"),
@@ -629,7 +629,7 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
     if family in {"rewild/ai-vocabulary", "rewild/style", "rewild/length"}:
         return remedy("edit-prose"), ""
     if family.startswith("rewild/"):
-        return remedy("issue-deliver"), ""
+        return remedy("issue"), ""
     if family == "ledger/schema":
         # J2: one derivation of the field, shared with T2, so the remedy can
         # never name a field the schema error did not name.
@@ -1316,12 +1316,18 @@ def cmd_init(args):
     ws = Workspace(args.directory)
     args.archetype = getattr(args, "archetype", None) or "hybrid"
     if ws.ledger_path.exists() and not args.force:
-        print(
-            f"workspace exists: {ws.dir} — keeping it "
-            "(alx init --force resets it)"
-        )
-        print(f"Next: {_next_command(ws, ws.load_state(), ws.load_ledger())}")
-        return 0
+        try:
+            state, ledger = ws.load_state(), ws.load_ledger()
+        except (OSError, ValueError):
+            state = ledger = None
+        if state is not None:
+            print(
+                f"workspace exists: {ws.dir} — keeping it "
+                "(alx init --force resets it)"
+            )
+            print(f"Next: {_next_command(ws, state, ledger)}")
+            return 0
+        print(f"workspace at {ws.dir} is incomplete; re-initializing it")
     subject_text = _input_path(args, args.subject).read_text(encoding="utf-8").strip()
     lines = [line.strip() for line in subject_text.splitlines() if line.strip()]
     subject = lines[0] if lines else "Untitled subject"

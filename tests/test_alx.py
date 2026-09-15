@@ -141,6 +141,10 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+, then alx claim add \S+$"),
     re.compile(r"^alx fetch --id S\d+ --refresh, then alx claim add \S+$"),
     re.compile(r"^extend the quote in \S+$"),
+    re.compile(
+        r"^paste the closest passage as extract_or_location in \S+, "
+        r"or alx find S\d+ KEYWORD$"
+    ),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^remove link \S+ from report\.md$"),
@@ -1114,7 +1118,8 @@ class ReviewTests(AlxTestCase):
         _code, out = self.run_in("check")
         self.assertNotIn("re-review required", out)
 
-    def test_sentence_change_requires_a_review_iteration(self):
+    def test_changes_after_a_review_never_ask_for_another_review(self):
+        """R30: reviews are optional, so a stale one is never a finding."""
         self.bootstrap()
         self.run_in("check", "--fix")
         self.finish_reviews()
@@ -1123,33 +1128,15 @@ class ReviewTests(AlxTestCase):
             "as the [registry note]", "and independently, as the [registry note]"
         )
         (self.dir / "report.md").write_text(report, encoding="utf-8")
-        code, out = self.run_in("check")
-        # R28: a stale content review is a warning; check still names the re-review.
-        self.assertEqual(0, code, out)
-        self.assertIn("re-review required", out)
-        self.assertIn("alx review start content --iter", out)
-        code, out = self.run_in("review", "start", "content", "--iter")
-        self.assertEqual(0, code, out)
-        self.assertTrue(
-            (self.dir / ".alx" / "reviews" / "content" / "2" / "report.md").exists()
-        )
-        self.fill_note("content")
-        code, out = self.run_in("review", "finish", "content")
-        self.assertEqual(0, code, out)
-        code, out = self.run_in("check")
-        self.assertNotIn("re-review required: content", out)
-
-    def test_ledger_claim_change_requires_content_iteration(self):
-        self.bootstrap()
-        self.run_in("check", "--fix")
-        self.finish_reviews()
         ledger = self.ledger()
         ledger["claims"][0]["claim"] = "The archive released 1,204 documents in March."
         (self.dir / "ledger.json").write_text(
             json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
         )
-        _code, out = self.run_in("check")
-        self.assertIn("re-review required", out)
+        code, out = self.run_in("check")
+        self.assertEqual(0, code, out)
+        self.assertNotIn("re-review required", out)
+        self.assertNotIn("review start", out)
 
     def test_restore_reverts_report_and_ledger(self):
         self.bootstrap()

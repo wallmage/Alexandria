@@ -94,12 +94,7 @@ class RepositoryContractTests(unittest.TestCase):
         production = (ROOT / "references" / "pdf-production.md").read_text(
             encoding="utf-8"
         )
-        for script in (
-            "md_to_pdf.py",
-            "validate_ledger.py",
-            "validate_report.py",
-            "render_pdf_pages.py",
-        ):
+        for script in ("alx.py", "render_pdf_pages.py", "pdf_quality.py"):
             self.assertIn(f'$SKILL_ROOT/scripts/{script}', production)
         self.assertNotIn("python3 scripts/", production)
 

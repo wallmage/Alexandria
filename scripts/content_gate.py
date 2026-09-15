@@ -97,11 +97,6 @@ FAMILIES = (
     "content/language",
 )
 
-#: R29: claim<->paragraph binding is the binding gate's job, so `content/check`
-#: no longer re-reports the two binding errors `validate_report` raises.
-_BINDING_EXCEPTIONS = re.compile(
-    r"cannot be located in the report|has no nearby citation"
-)
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
 EVIDENCE_LEDGER_SCHEMA = ROOT / "references" / "evidence-ledger.schema.json"
@@ -514,11 +509,13 @@ def run_check(
         review = review or {}
     if isinstance(ledger, dict):
         for error in validate_report_against_ledger(report_text, ledger):
-            if _BINDING_EXCEPTIONS.search(str(error)):
-                continue
-            findings.append(
-                _finding("content/check", error.removeprefix(WARNING_PREFIX))
-            )
+            message = error.removeprefix(WARNING_PREFIX)
+            fix = ""
+            if "cannot be located in the report" in message:
+                fix = "alx check --fix"
+            elif "has no nearby citation to its ledger source" in message:
+                fix = "add the source link to paragraph <n> of report.md"
+            findings.append(_finding("content/check", message, fix=fix))
         if include_ledger_checks:
             for error in validate_references(ledger, _sources_cache(ledger_path)):
                 findings.append(_finding("content/check", error))

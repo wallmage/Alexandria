@@ -65,8 +65,8 @@ except (ImportError, AttributeError):  # T2 owns Finding; local stand-in until m
 
 SCHEMA_VERSION = 1
 DEFAULT_SAMPLE_SIZE = 8
-DEFAULT_TIMEOUT_SECONDS = 10
-DEFAULT_FETCH_ATTEMPTS = 2
+DEFAULT_TIMEOUT_SECONDS = 20
+DEFAULT_FETCH_ATTEMPTS = 3
 POLICY_V1 = "weighted-source-evidence-v1"
 POLICY_V2 = "weighted-source-evidence-v2"
 FAMILIES = (
@@ -461,7 +461,7 @@ def _map_fetch_exception(url, exc):
     return _empty_fetch(url, status="unreachable", reason_class=klass, reason=message)
 
 
-def fetch_document(url, *, cache_dir=None, refresh=False, timeout=10, deadline=None):
+def fetch_document(url, *, cache_dir=None, refresh=False, timeout=DEFAULT_TIMEOUT_SECONDS, deadline=None):
     """Fetch one URL through the production transport and decode it."""
     del deadline
     raw_url = str(url or "")

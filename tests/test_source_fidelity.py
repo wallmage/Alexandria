@@ -431,6 +431,7 @@ class SafeTargetTests(unittest.TestCase):
             "_request_pinned",
             side_effect=[
                 ssl.SSLEOFError("transient one"),
+                ssl.SSLEOFError("transient two"),
                 response,
             ],
         ) as request:
@@ -440,8 +441,7 @@ class SafeTargetTests(unittest.TestCase):
             )
 
         self.assertEqual("example domain", source_fidelity.strip_markup(fetched.text))
-        # Spec §6.11: 1 retry → 2 attempts. Was 3 (DEFAULT_FETCH_ATTEMPTS).
-        self.assertEqual(2, request.call_count)
+        self.assertEqual(3, request.call_count)
 
 class SamplingTests(unittest.TestCase):
     def test_central_and_key_claims_are_sampled_first(self):
@@ -1068,7 +1068,7 @@ class ResilienceFetchTests(unittest.TestCase):
         self.assertEqual("http-403", result.reason_class)
         self.assertEqual(403, result.http_status)
 
-    def test_timeout_is_unreachable_and_retries_once(self):
+    def test_timeout_is_unreachable_and_exhausts_default_fetch_attempts(self):
         calls = []
 
         def boom(target, *, timeout):
@@ -1087,11 +1087,36 @@ class ResilienceFetchTests(unittest.TestCase):
         ):
             result = source_fidelity.fetch_document(
                 "https://slow.example.org/page",
-                timeout=10,
             )
         self.assertEqual("unreachable", result.status)
         self.assertEqual("timeout", result.reason_class)
-        self.assertEqual(2, len(calls))
+        self.assertEqual(3, len(calls))
+        self.assertEqual([20, 20, 20], calls)
+
+    def test_default_timeout_seconds_is_20(self):
+        self.assertEqual(20, source_fidelity.DEFAULT_TIMEOUT_SECONDS)
+
+    def test_default_fetch_attempts_is_3(self):
+        self.assertEqual(3, source_fidelity.DEFAULT_FETCH_ATTEMPTS)
+
+    def test_fetch_document_default_timeout_is_20(self):
+        recorded = []
+
+        def capture(target, *, timeout):
+            recorded.append(timeout)
+            return (200, {"content-type": "text/html"}, b"<p>ok</p>")
+
+        with (
+            mock.patch.object(
+                source_fidelity.socket, "getaddrinfo",
+                side_effect=self.public_resolver,
+            ),
+            mock.patch.object(
+                source_fidelity, "_request_pinned", side_effect=capture,
+            ),
+        ):
+            source_fidelity.fetch_document("https://example.com/")
+        self.assertEqual([20], recorded)
 
     def test_deadline_expires_before_fetch(self):
         with mock_production_transport(

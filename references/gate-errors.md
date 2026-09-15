@@ -337,10 +337,11 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `scores.evidence.score = 3`.
 
 ### `content/check` — W
-- **rule:** the content note fails `content-review.schema.json` or its completeness rules. R29: claim↔paragraph binding is the binding gate's job and is no longer re-reported here.
+- **rule:** the content note fails `content-review.schema.json` or its completeness rules; the same family also carries the two claim-binding errors below.
 - **fix:** `alx review start content --iter`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `status` is not `completed`.
+- **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → add the source link to paragraph `<n>` of report.md. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
 
 ### `content/critical-finding` — W
 - **rule:** a critical review finding is not dispositioned `resolved`.
@@ -378,7 +379,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 `ledger/harm` — deleted with the person harm rules (R25/R28). `human_harm_review` is no longer a field and no harm finding is raised; ignore any residual emission.
 
-R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `review/content-missing` — reviews are optional and their absence is silent. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. The two binding errors `content/check` used to carry ("cannot be located in the report", "has no nearby citation to its ledger source") are no longer emitted there. Han-numeral quantities raise no `ledger/quantity` finding.
+R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `review/content-missing` — reviews are optional and their absence is silent. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. Han-numeral quantities raise no `ledger/quantity` finding.
 
 ## Aliases
 

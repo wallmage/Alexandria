@@ -1,8 +1,10 @@
 import hashlib
+import io
 import json
 import re
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from scripts import content_gate
@@ -1032,7 +1034,11 @@ class ContentGateTests(unittest.TestCase):
             self.assertFalse(receipt.exists())
 
     def test_run_check_emits_no_per_claim_binding_line(self):
-        """R29: `content/claim-support` and `content/claim-binding` are gone."""
+        """R29: `content/claim-support` and `content/claim-binding` are gone.
+
+        An absent excerpt re-emits validate_report's locate string as
+        `content/check` WARN. The C1: bookkeeping line stays deleted.
+        """
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, _receipt, _source_receipt = self.make_case(
                 directory
@@ -1049,6 +1055,9 @@ class ContentGateTests(unittest.TestCase):
             review.write_text(json.dumps(note), encoding="utf-8")
             ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
             ledger_data["claims"][0]["report_paragraph"] = 1
+            ledger_data["claims"][0]["report_excerpts"] = [
+                "This exact passage does not appear anywhere in the report body."
+            ]
             ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
             findings = run_check(report, ledger, review)
             self.assertEqual(
@@ -1059,6 +1068,18 @@ class ContentGateTests(unittest.TestCase):
                     if item.message.startswith("C1:")
                 ],
             )
+            families = [item.family for item in findings]
+            self.assertNotIn("content/claim-support", families)
+            self.assertNotIn("content/claim-binding", families)
+            located = [
+                item
+                for item in findings
+                if "cannot be located in the report" in item.message
+            ]
+            self.assertTrue(located, findings)
+            self.assertEqual("content/check", located[0].family)
+            self.assertEqual("warn", located[0].severity)
+            self.assertEqual("alx check --fix", located[0].fix)
 
     def test_run_check_can_skip_the_ledger_error_re_emission(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1078,9 +1099,18 @@ class ContentGateTests(unittest.TestCase):
             ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
             ledger_data["claims"][0]["report_paragraph"] = 1
             ledger_data["claims"][0]["supports"] = ["C404"]
+            ledger_data["claims"][0]["report_excerpts"] = [
+                "This compact fixture checks typography, navigation, "
+                "citations, and special characters."
+            ]
             ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
+            source_url = ledger_data["sources"][0]["url"]
+            text = report.read_text(encoding="utf-8")
+            body, sources = text.split("## Sources", 1)
             report.write_text(
-                report.read_text(encoding="utf-8")
+                body.replace(source_url, "")
+                + "## Sources"
+                + sources
                 + "\n\nAn extra link to [an unlisted page](https://unlisted.example/x).\n",
                 encoding="utf-8",
             )
@@ -1104,7 +1134,8 @@ class ContentGateTests(unittest.TestCase):
                 "binding/link-not-in-ledger",
                 [item.family for item in without_ledger],
             )
-            # R29: the review half no longer re-reports claim binding either.
+            # R29: no C1: bookkeeping; validate_report's citation string is
+            # re-emitted as content/check WARN even when ledger checks skip.
             self.assertEqual(
                 [],
                 [
@@ -1112,6 +1143,26 @@ class ContentGateTests(unittest.TestCase):
                     for item in without_ledger
                     if item.message.startswith("C1:")
                 ],
+            )
+            self.assertNotIn(
+                "content/claim-support",
+                [item.family for item in without_ledger],
+            )
+            self.assertNotIn(
+                "content/claim-binding",
+                [item.family for item in without_ledger],
+            )
+            nearby = [
+                item
+                for item in without_ledger
+                if "has no nearby citation to its ledger source" in item.message
+            ]
+            self.assertTrue(nearby, without_ledger)
+            self.assertEqual("content/check", nearby[0].family)
+            self.assertEqual("warn", nearby[0].severity)
+            self.assertEqual(
+                "add the source link to paragraph <n> of report.md",
+                nearby[0].fix,
             )
 
     def test_check_flag_is_dry_run(self):
@@ -1141,6 +1192,71 @@ class ContentGateTests(unittest.TestCase):
             )
             self.assertFalse(receipt.exists())
             self.assertIn(code, (0, 1))
+
+    def test_check_flag_prints_cannot_be_located_as_warning_and_exits_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, _receipt, _source_receipt = self.make_case(
+                directory
+            )
+            ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
+            ledger_data["claims"][0]["report_excerpts"] = [
+                "This exact passage does not appear anywhere in the report body."
+            ]
+            ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                code = content_gate_main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--review-note",
+                        str(review),
+                        "--check",
+                    ]
+                )
+            printed = (
+                "WARNING: Claim C1 cannot be located in the report: "
+                "This exact passage does not appear anywhere in the report body."
+            )
+            self.assertEqual(0, code)
+            self.assertIn(printed, err.getvalue())
+
+    def test_check_flag_prints_no_nearby_citation_as_warning_and_exits_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, _receipt, _source_receipt = self.make_case(
+                directory
+            )
+            ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
+            ledger_data["claims"][0]["report_excerpts"] = [
+                "This compact fixture checks typography, navigation, "
+                "citations, and special characters."
+            ]
+            ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
+            source_url = ledger_data["sources"][0]["url"]
+            text = report.read_text(encoding="utf-8")
+            body, sources = text.split("## Sources", 1)
+            report.write_text(
+                body.replace(source_url, "") + "## Sources" + sources,
+                encoding="utf-8",
+            )
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                code = content_gate_main(
+                    [
+                        str(report),
+                        "--ledger",
+                        str(ledger),
+                        "--review-note",
+                        str(review),
+                        "--check",
+                    ]
+                )
+            printed = (
+                "WARNING: Claim C1 has no nearby citation to its ledger source."
+            )
+            self.assertEqual(0, code)
+            self.assertIn(printed, err.getvalue())
 
     def test_stale_content_receipt_overwritten_without_force(self):
         # Note: spec §7.5 stale receipts overwrite without --force.

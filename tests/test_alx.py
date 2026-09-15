@@ -2177,12 +2177,11 @@ class IntegrationHoleTests(AlxTestCase):
             ),
             encoding="utf-8",
         )
-        _code, out = self.run_in("check", "--verbose")
-        # R29: claim<->paragraph binding is the binding gate's job, so the
-        # content review no longer re-reports a stale excerpt at all.
-        self.assertNotIn("cannot be located in the report", out)
-        _code, out = self.run_in("check", "--fix", "--verbose")
-        self.assertNotIn("cannot be located in the report", out)
+        code, out = self.run_in("check", "--verbose")
+        # R32: the stale excerpt prints again as a content/check WARN (as at
+        # 4a1825c); it informs and never blocks.
+        self.assertEqual(0, code, out)
+        self.assertIn("cannot be located in the report", out)
 
     def test_a_missing_citation_asks_for_the_link_not_a_re_review(self):
         self.started_content_review()
@@ -2192,9 +2191,11 @@ class IntegrationHoleTests(AlxTestCase):
             report.replace(f"[recorded in the study]({url})", "recorded in the study"),
             encoding="utf-8",
         )
-        _code, out = self.run_in("check", "--verbose")
-        # R29: the missing citation is reported once, by the binding gate.
-        self.assertNotIn("no nearby citation", out)
+        code, out = self.run_in("check", "--verbose")
+        # R32: the binding gate names the paragraph and content/check prints
+        # the missing-citation WARN again (as at 4a1825c); exit stays 0.
+        self.assertEqual(0, code, out)
+        self.assertIn("no nearby citation", out)
         line = self.line_with(out, "binding/claim-paragraph")
         self.assertIn("] 1", line)
 

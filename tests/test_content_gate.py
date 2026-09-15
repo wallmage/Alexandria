@@ -1292,15 +1292,15 @@ if __name__ == "__main__":
 
 
 class CjkReviewNoteFloorTests(unittest.TestCase):
-    """J3: the content-review schema carries the CJK floor (spec §7.1 halving).
+    """R32: the content-review schema floor is 20 for every script (4a1825c).
 
-    A schema cannot be script-aware, so its string minimums are the CJK floor
-    and the gate keeps the full floor for non-CJK prose, with threshold and
-    actual in the message.
+    The gate applies the schema minimum as written (no Latin doubling), with
+    threshold and actual in the message.
     """
 
     CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
     ZH_15 = "1915年残13天没有逐日表。"
+    ZH_24 = "1915年残13天没有逐日表，只能依靠旬报推算。"
     EN_15 = "Thin, unusable"
 
     def schema(self):
@@ -1335,14 +1335,16 @@ class CjkReviewNoteFloorTests(unittest.TestCase):
             if "limitation_or_tradeoff" in error
         ]
 
-    def test_chinese_note_of_15_characters_passes_schema_and_floor(self):
+    def test_chinese_note_below_20_characters_fails_and_24_passes(self):
         self.assertEqual(15, len(self.ZH_15))
-        self.assertEqual([], self.schema_errors(self.ZH_15))
-        self.assertEqual([], self.floor_errors(self.ZH_15))
+        self.assertTrue(self.schema_errors(self.ZH_15))
+        self.assertGreaterEqual(len(self.ZH_24), 20)
+        self.assertEqual([], self.schema_errors(self.ZH_24))
+        self.assertEqual([], self.floor_errors(self.ZH_24))
 
     def test_english_note_of_15_characters_fails_the_full_floor(self):
         self.assertEqual(14, len(self.EN_15))
-        self.assertEqual([], self.schema_errors(self.EN_15))
+        self.assertTrue(self.schema_errors(self.EN_15))
         errors = self.floor_errors(self.EN_15)
         self.assertTrue(
             any("threshold 20, actual 14" in error for error in errors), errors
@@ -1356,7 +1358,7 @@ class CjkReviewNoteFloorTests(unittest.TestCase):
                 encoding="utf-8",
             )
             zh = _schema_errors(
-                self.note(self.ZH_15), path, "Content review:", prose_floor=True
+                self.note(self.ZH_24), path, "Content review:", prose_floor=True
             )
             en = _schema_errors(
                 self.note(self.EN_15), path, "Content review:", prose_floor=True

@@ -4488,12 +4488,12 @@ class LedgerSchemaCeremonyTests(AlxTestCase):
         claim = self.ledger()["claims"][-1]
         self.assertEqual(["P1"], claim["person_ids"])
         self.assertIsNone(claim["decision_relevance"])
-        self.assertEqual(
-            [],
-            alx.validate_ledger.validate_schema(
-                self.ledger(), self.ledger_schema()
-            ),
+        # R32: the schema again requires the research-design sections
+        # (coverage rows, synthesis); the accepted claim itself validates.
+        errors = alx.validate_ledger.validate_schema(
+            self.ledger(), self.ledger_schema()
         )
+        self.assertEqual([], [e for e in errors if e.startswith("claims")], errors)
 
     def test_a_free_form_brief_patch_merges_with_no_hard_finding(self):
         self.bootstrap()
@@ -4556,12 +4556,10 @@ class LedgerSchemaCeremonyTests(AlxTestCase):
         code, out = self.fetch("https://example.org/study", page=page)
         self.assertEqual(0, code, out)
         self.assertEqual("2010-04-16", self.ledger()["sources"][0]["published"])
-        self.assertEqual(
-            [],
-            alx.validate_ledger.validate_schema(
-                self.ledger(), self.ledger_schema()
-            ),
+        errors = alx.validate_ledger.validate_schema(
+            self.ledger(), self.ledger_schema()
         )
+        self.assertEqual([], [e for e in errors if e.startswith("sources")], errors)
 
     def test_published_forms_alx_cannot_read_are_dropped(self):
         self.assertEqual("2010-04-16", alx._normalized_published("2010/4/16"))

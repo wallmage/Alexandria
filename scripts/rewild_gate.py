@@ -934,11 +934,13 @@ def _fidelity_prose(text):
 
 
 #: Spans whose words belong to a source, not to the writer: CJK and curly
-#: quotation marks, plus straight double quotes around at least four
-#: characters, which is short enough to catch a real quotation and long enough
-#: to skip inch marks and stray pairs.
+#: quotation marks, plus straight double quotes. Straight quotes pair
+#: sequentially (open == close): a length test inside the branch would make a
+#: short term like "雪耻" restart the scanner on its closing quote and turn the
+#: writer's own prose into a "quotation" (field test 4); the four-character
+#: floor for real quotations is applied afterwards in `_quotation_findings`.
 _QUOTED_SPAN = re.compile(
-    "「[^」\n]*」|『[^』\n]*』|“[^”\n]*”|‘[^’\n]*’|\"[^\"\n]{4,}\""
+    "「[^」\n]*」|『[^』\n]*』|“[^”\n]*”|‘[^’\n]*’|\"[^\"\n]*\""
 )
 
 
@@ -1031,7 +1033,8 @@ def _quotation_findings(source_text, report_text):
             remove=_RESTORE,
         )
         for span in dict.fromkeys(_QUOTED_SPAN.findall(source_text))
-        if span not in report_text
+        if (not span.startswith('"') or len(span) - 2 >= 4)
+        and span not in report_text
     ]
 
 

@@ -106,6 +106,26 @@ class RewildGateTests(unittest.TestCase):
         self.assertIn("figures not in the original", result.stdout)
 
 
+class QuotationSpanPairingTests(unittest.TestCase):
+    """Field test 4: straight quotes pair sequentially; a short term never flips parity."""
+
+    SOURCE = '每日以"雪耻"开头。他写道："倭寇侮辱,非可以愤激制之"，此后转向强硬。'
+
+    def test_editing_prose_between_quotes_is_not_a_lost_quotation(self):
+        from scripts.rewild_gate import _quotation_findings
+
+        report = self.SOURCE.replace("此后转向强硬", "从此转向强硬")
+        self.assertEqual([], _quotation_findings(self.SOURCE, report))
+
+    def test_altering_the_quoted_text_is_lost(self):
+        from scripts.rewild_gate import _quotation_findings
+
+        report = self.SOURCE.replace("愤激制之", "愤激对之")
+        found = _quotation_findings(self.SOURCE, report)
+        self.assertEqual(1, len(found))
+        self.assertIn('"倭寇侮辱,非可以愤激制之"', found[0].message)
+
+
 if __name__ == "__main__":
     unittest.main()
 

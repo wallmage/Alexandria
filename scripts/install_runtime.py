@@ -163,6 +163,7 @@ WINDOWS_LAUNCHER = (
     "@echo off\r\n"
     "setlocal\r\n"
     'for %%I in ("%~dp0..") do set "root=%%~fI"\r\n'
+    'set "root=%root:/=\\%"\r\n'
     'if not exist "%root%\\Library\\bin\\micromamba.exe" (\r\n'
     '  echo alx launcher: micromamba.exe missing under "%root%\\Library\\bin" 1>&2\r\n'
     "  exit /b 2\r\n"

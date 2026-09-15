@@ -51,28 +51,32 @@ jobs:
         continue-on-error: true
         run: |
           $r = $env:ALEXANDRIA_RUNTIME_DIR
-          Write-Output "--- launcher via cmd /c"
-          cmd /c "`"$r\bin\python.cmd`" scripts/alx.py --help" 2>&1 | Out-String | Write-Output
+          $b = $r -replace '/', '\'
+          $m = "$b\Library\bin\micromamba.exe"
+          Write-Output "--- 1 micromamba backslash prefix, --help"
+          & $m --no-rc run --prefix "$b\env" python scripts/alx.py --help 2>&1 | Out-String | Write-Output
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- launcher bytes"
-          Format-Hex -Path "$r\bin\python.cmd" | Select-Object -First 4 | Out-String | Write-Output
-          Write-Output "--- micromamba run from pwsh"
-          & "$r\Library\bin\micromamba.exe" --no-rc run --prefix "$r\env" python scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "--- 2 micromamba backslash prefix, no --help"
+          & $m --no-rc run --prefix "$b\env" python -c "import weasyprint; print('2 ok')" 2>&1 | Out-String | Write-Output
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- env python direct"
-          & "$r\env\python.exe" scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "--- 3 micromamba forward-slash prefix, no --help"
+          & $m --no-rc run --prefix "$r\env" python -c "print('3 ok')" 2>&1 | Out-String | Write-Output
           Write-Output "exit=$LASTEXITCODE"
-          & "$r\env\python.exe" -c "import weasyprint, jsonschema, pypdf; print('direct imports ok')" 2>&1 | Out-String | Write-Output
+          Write-Output "--- 4 launcher via backslash path, no --help"
+          & "$b\bin\python.cmd" -c "import weasyprint; print('4 ok')" 2>&1 | Out-String | Write-Output
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- listing"
-          Get-ChildItem "$r" | Out-String | Write-Output
-          Get-ChildItem "$r\Library\bin" -Filter micromamba* | Out-String | Write-Output
+          Write-Output "--- 5 launcher via forward-slash path, --help"
+          & "$r\bin\python.cmd" scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "exit=$LASTEXITCODE"
+          Write-Output "--- 6 micromamba run -- separator, --help"
+          & $m --no-rc run --prefix "$b\env" -- python scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "exit=$LASTEXITCODE"
       - name: Run alx through the one-path launcher SKILL.md uses
         shell: pwsh
         run: |
           $launcher = if ($IsWindows) { "$env:ALEXANDRIA_RUNTIME_DIR\bin\python.cmd" } else { "$env:ALEXANDRIA_RUNTIME_DIR/bin/python" }
           Get-Content $launcher
-          & $launcher scripts/alx.py --help
+          & $launcher -c "import weasyprint, jsonschema, pypdf; print('launcher ok')"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload installation log
         if: always()

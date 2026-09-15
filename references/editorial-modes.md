@@ -1,8 +1,6 @@
 # Editorial modes
 
 Choose at most one dominant mode. Use its craft traits; do not imitate a living writer's distinctive voice.
-Record the chosen mode in the evidence ledger brief so the final content
-review can test the report against the mode actually used.
 
 A mode is a document-level register and applies to the whole report. It is not
 the same choice as the section shapes in §9 of `content-quality.md`, which vary

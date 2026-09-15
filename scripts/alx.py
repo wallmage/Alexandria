@@ -4099,7 +4099,7 @@ def cmd_render(args):
         # C2: a missing or stale receipt is the issue step `render` runs itself.
         cmd_issue(
             argparse.Namespace(
-                dir=args.dir, deliver=False, sample_size=8, offline=True
+                dir=args.dir, deliver=False, sample_size=8, offline=False
             )
         )
         ws, state, ledger = _open(args)

@@ -560,24 +560,9 @@ def fold(text):
                 .replace("‑", "-").replace(" ", " ").lower())
 
 
-# Quoted spans: CJK and curly quotation marks, plus straight double quotes
-# around at least four characters — short enough to catch a real quotation,
-# long enough to skip inch marks and stray pairs.
-QUOTED_SPAN_RE = re.compile(
-    "「[^」\n]*」|『[^』\n]*』|“[^”\n]*”|‘[^’\n]*’|\"[^\"\n]{4,}\"")
-
-
 def strip_markdown(text):
-    """Drop markdown scaffolding that is not prose, keep the prose.
-
-    Headings, blockquotes, link text and quoted spans are dropped rather than
-    unwrapped. Every style signal here measures how the writer writes, and
-    those four are either labels or someone else's words: counting AI
-    vocabulary, punctuation or rhythm inside a quotation charges the writer
-    for the source's prose and pushes a report toward paraphrasing what it
-    should be quoting verbatim.
-    """
-    stats = {"code": 0, "heading": 0, "table": 0, "quote": 0, "link": 0}
+    """Drop markdown scaffolding that is not prose, keep the prose."""
+    stats = {"code": 0, "heading": 0, "table": 0}
     text, stats["code"] = re.subn(
         r"(?ms)^[ \t]*(?:```|~~~).*?^[ \t]*(?:```|~~~)[ \t]*$", "", text)
     text = re.sub(r"(?s)<!--.*?-->", "", text)
@@ -592,20 +577,14 @@ def strip_markdown(text):
             stats["heading"] += 1
             kept.append("")  # a heading is a break, not a sentence
             continue
-        if re.match(r"^[ \t]*>", line):
-            stats["quote"] += 1
-            kept.append("")
-            continue
         if re.match(r"^(-{3,}|\*{3,}|_{3,})$", stripped):
             continue
         kept.append(line)
     text = "\n".join(kept)
 
-    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", "", text)
-    text, links = re.subn(r"\[([^\]]+)\]\([^)]*\)", "", text)
-    stats["link"] += links
-    text, quoted = QUOTED_SPAN_RE.subn(" ", text)
-    stats["quote"] += quoted
+    text = re.sub(r"(?m)^[ \t]*>+[ \t]?", "", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"`([^`]*)`", r"\1", text)
 
     # A list item is its own sentence; give it a terminator so it does not
@@ -857,18 +836,6 @@ def check_paragraph_closers(paragraphs, lang):
     )
 
 
-#: One tolerated catalog hit per this many units of prose. A 9,000-word
-#: report and a 300-word note are not the same text, and a fixed ceiling of
-#: one hit made the long one fail for a rate the short one was allowed.
-VOCAB_BUDGET_SPAN = 500
-
-
-def vocabulary_budget(text, lang):
-    """Catalog hits a text of this length may contain."""
-    units = sentence_length(text, lang)
-    return max(1, units // VOCAB_BUDGET_SPAN)
-
-
 def check_vocabulary(text, lang):
     section("AI vocabulary")
     words, phrases, watch = VOCAB[lang]
@@ -876,12 +843,7 @@ def check_vocabulary(text, lang):
     if hits:
         shown = ", ".join(f"{w} ×{n}" for w, n in hits[:8])
         extra = f" (+{len(hits) - 8} more)" if len(hits) > 8 else ""
-        total = sum(n for _, n in hits)
-        budget = vocabulary_budget(text, lang)
-        report(total <= budget,
-               f"catalog hits: {shown}{extra} — {total} hit(s) in "
-               f"{sentence_length(text, lang)} unit(s) of prose; "
-               f"the budget is {budget}")
+        report(len(hits) <= 1 and hits[0][1] <= 1, f"catalog hits: {shown}{extra}")
     else:
         report(True, "no catalog vocabulary found")
     seen = count_hits(text, watch, [], lang)

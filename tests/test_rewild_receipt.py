@@ -1253,14 +1253,15 @@ class GateFailClosedTests(unittest.TestCase):
             "india",
         )
         self.assertGreater(len(names), MAX_HEURISTIC_EXEMPTIONS)
-        # Updated for sentence-level clauses: a split remnant is now a new
-        # sentence, so each exemption comes from a real sentence split.
+        # Intra-sentence comma splits collapse "blocked, not by" into the same
+        # clauses as "blocked. Not by". A remnant that still needs the
+        # exemption is a period cut inside a negated clause.
         splits_source = " ".join(
-            f"The {name} rollout was blocked, not by the vendor."
+            f"The {name} rollout was not blocked by the vendor today."
             for name in names
         )
         splits_report = " ".join(
-            f"The {name} rollout was blocked. Not by the vendor."
+            f"The {name} rollout was. Not blocked by the vendor today."
             for name in names
         )
         source_text = (
@@ -1586,6 +1587,79 @@ class CheckModeTests(unittest.TestCase):
             families = {finding.family for finding in findings}
             self.assertIn("review/rewild", families)
             self.assertIn("fidelity/quotation-lost", families)
+
+    def test_run_check_warns_on_heuristic_exemption_budget_and_exits_zero(self):
+        names = (
+            "alpha",
+            "bravo",
+            "charlie",
+            "delta",
+            "echo",
+            "foxtrot",
+            "golf",
+            "hotel",
+            "india",
+        )
+        splits_source = " ".join(
+            f"The {name} rollout was not blocked by the vendor today."
+            for name in names
+        )
+        splits_report = " ".join(
+            f"The {name} rollout was. Not blocked by the vendor today."
+            for name in names
+        )
+        source_text = (
+            "# Report\n\n## Finding\n\n"
+            f"{splits_source} {FILLER_ONE}.\n\n"
+            "## Sources\n\n[Source](https://example.com)"
+        )
+        report_text = source_text.replace(splits_source, splits_report)
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            report = work / "report.md"
+            source = work / "pre-rewild.md"
+            source.write_text(source_text, encoding="utf-8")
+            report.write_text(report_text, encoding="utf-8")
+            from scripts.rewild_gate import run_check
+
+            findings = run_check(report, source, lang="en")
+            self.assertTrue(
+                any(
+                    finding.severity == "warn"
+                    and finding.family == "fidelity/semantic"
+                    and f"exceed the limit of {MAX_HEURISTIC_EXEMPTIONS}"
+                    in finding.message
+                    for finding in findings
+                ),
+                findings,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        Path(__file__).resolve().parents[1]
+                        / "scripts"
+                        / "rewild_gate.py"
+                    ),
+                    str(report),
+                    "--source",
+                    str(source),
+                    "--lang",
+                    "en",
+                    "--check",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("=== WARN ", result.stderr)
+            self.assertIn("[fidelity/semantic]", result.stderr)
+            self.assertIn(
+                f"exceed the limit of {MAX_HEURISTIC_EXEMPTIONS}",
+                result.stderr,
+            )
+            self.assertEqual([], list(work.glob("*.json")))
 
     def test_cli_check_mode_exits_nonzero_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:

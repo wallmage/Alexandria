@@ -71,6 +71,14 @@ CLASS_LABELS = {"F": " (F)"}
 #: R29: the WARN tier is advice, so it prints one line per family. The first
 #: member carries the family's message and fix; `--verbose` expands the tier.
 WARN_MESSAGE_CHARS = 160
+WARN_FULL_FAMILIES = frozenset(
+    {
+        "fidelity/semantic",
+        "rewild/region",
+        "rewild/ai-vocabulary",
+        "rewild/length",
+    }
+)
 
 
 def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
@@ -85,7 +93,11 @@ def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
         return CLASS_LABELS["F"]
 
     def emit_compact(items):
-        for family, members in group(items).items():
+        full = [item for item in items if item.family in WARN_FULL_FAMILIES]
+        compact = [item for item in items if item.family not in WARN_FULL_FAMILIES]
+        if full:
+            emit(full)
+        for family, members in group(compact).items():
             first = members[0]
             # One line per family, so a message spanning several lines folds.
             message = " ".join(str(first.message).split())
@@ -101,7 +113,11 @@ def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
             lines.append(f"[{family}] {len(members)}{label(members)}")
             # Item 7: every schema line is distinct and names its own field, so
             # `ledger/schema` is never capped; the other families still are.
-            cap = len(members) if family == "ledger/schema" else per_family
+            cap = (
+                len(members)
+                if family == "ledger/schema" or family in WARN_FULL_FAMILIES
+                else per_family
+            )
             shown = members[:cap]
             for item in shown:
                 prefix = f"{', '.join(item.ids)}: " if item.ids else ""

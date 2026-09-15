@@ -459,3 +459,35 @@ class CompactWarnTierTests(unittest.TestCase):
         self.assertIn("[ledger/coverage] 7", rendered)
         self.assertIn("  +2 more", rendered)
         self.assertIn("  C0: coverage linkage is missing. Fix: alx check --fix.", rendered)
+
+    def test_rewild_and_semantic_warn_families_print_every_message_in_full(self):
+        families = (
+            "fidelity/semantic",
+            "rewild/region",
+            "rewild/ai-vocabulary",
+            "rewild/length",
+        )
+        findings = [
+            self._item(
+                family=family,
+                ids=[f"W{index}"],
+                message=f"{family} message {index}",
+                fix="alx check",
+            )
+            for family in families
+            for index in range(6)
+        ]
+        rendered = render_grouped(findings, per_family=5)
+        self.assertNotIn("more", rendered)
+        for family in families:
+            self.assertIn(f"[{family}] 6", rendered)
+            for index in range(6):
+                self.assertIn(
+                    f"W{index}: {family} message {index}. Fix: alx check.",
+                    rendered,
+                )
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = emit_findings(findings, ok_message="[OK] done")
+        self.assertEqual(0, code)
+        self.assertIn("WARNING: fidelity/semantic message 0", err.getvalue())

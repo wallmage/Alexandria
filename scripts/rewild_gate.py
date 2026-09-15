@@ -575,20 +575,26 @@ def _causal_phrases(text, report_lang):
     ]
 
 
+def _neutralize_label_punctuation(label):
+    """Commas/semicolons inside a citation or link label must not split clauses."""
+    return label.replace(",", " ").replace(";", " ")
+
+
 @lru_cache(maxsize=4096)
 def _clauses(text, report_lang):
-    """Split prose into sentences.
+    """Split prose on sentence terminators and intra-sentence cuts.
 
-    Commas, semicolons and subordinators used to split here too, which made a
-    clause shorter than one assertion: inserting a citation whose link text
-    contains a comma turned one sentence into two clauses and shifted every
-    index after it. A sentence is the smallest unit that carries a whole
-    claim, so sentence terminators are the only cut.
+    1edb929 split on commas, semicolons and subordinators; HEAD added the
+    ellipsis and CJK ``!?`` terminators. Label punctuation is neutralized
+    before the cut so a comma inside a citation title is not a clause.
     """
     if report_lang == "en":
-        parts = re.split(r"[.!?…\n]+", text.casefold())
+        parts = re.split(
+            r"[.!?…;,\n]+|\b(?:while|whereas|but)\b",
+            text.casefold(),
+        )
     else:
-        parts = re.split(r"[。！？!?…\n]+", text)
+        parts = re.split(r"[。！？!?…；，、,\n]+", text)
     return [re.sub(r"\s+", " ", part).strip() for part in parts if part.strip()]
 
 
@@ -922,15 +928,26 @@ def _fidelity_prose(text):
     for start, end, label in _markdown_link_spans(text):
         pieces.append(text[cursor:start])
         pieces.append(f"{_LINK_OPEN}{len(labels)}{_LINK_CLOSE}")
-        labels.append(label)
+        labels.append(_neutralize_label_punctuation(label))
         cursor = end
     pieces.append(text[cursor:])
     marked = _CITATION_GROUP.sub("", "".join(pieces))
     text = _LINK_SENTINEL.sub(lambda match: labels[int(match.group(1))], marked)
-    # Quoted spans are masked here for the same reason the style tiers mask
-    # them: a quotation added or rewritten during Rewild carries the source's
-    # negation, direction and causal words, not the writer's own claim.
-    return _mask_quoted_spans(_checker_prose(text))
+    for label in labels:
+        if not label:
+            continue
+        start = 0
+        while True:
+            pos = text.find(label, start)
+            if pos < 0:
+                break
+            cursor = pos
+            while cursor > 0 and text[cursor - 1] not in ".!?…\n。！？":
+                cursor -= 1
+            prefix = text[cursor:pos].replace(",", " ").replace(";", " ")
+            text = text[:cursor] + prefix + text[pos:]
+            start = cursor + len(prefix) + len(label)
+    return _checker_prose(text)
 
 
 #: Spans whose words belong to a source, not to the writer: CJK and curly
@@ -945,7 +962,13 @@ _QUOTED_SPAN = re.compile(
 
 
 def _mask_quoted_spans(text):
-    return _QUOTED_SPAN.sub(" ", text)
+    def replacer(match):
+        span = match.group(0)
+        if span.startswith('"') and len(span) - 2 < 4:
+            return span
+        return " "
+
+    return _QUOTED_SPAN.sub(replacer, text)
 
 
 def _style_prose(text):
@@ -1457,19 +1480,15 @@ def _checker_path(report_lang):
 
 
 def _run_rewild_checker(report_text, source_text, report_lang, timeout=CHECKER_TIMEOUT_S):
-    """Run the bundled checker on masked prose; return (result, errors)."""
+    """Run the bundled checker on checker prose; return (result, errors)."""
     _, checker_lang = PROFILES[report_lang]
     if not timeout:
         # D7: a caller that already paid for a stalled checker in this command
         # passes timeout=0 rather than spending the budget on it again.
         return None, ["Rewild checker timed out earlier in this command."]
-    report_prose = _style_prose(report_text)
-    source_prose = _style_prose(source_text)
+    report_prose = _checker_prose(report_text)
+    source_prose = _checker_prose(source_text)
     if not report_prose.strip() or not source_prose.strip():
-        # Everything the style tiers measure was quoted, quoted-block or
-        # heading text. There is no prose of the writer's own to screen; the
-        # length floor is what rejects a report made only of other people's
-        # sentences.
         return {"warnings": [], "sections": []}, []
     with tempfile.TemporaryDirectory(prefix="alexandria-rewild-") as directory:
         checker_report = Path(directory) / "report-body.txt"
@@ -1688,12 +1707,29 @@ def run_check(
     source_text = texts["pre-Rewild source"]
 
     findings.extend(_integrity_findings(report_text, source_text))
+    heuristic_exemptions = []
     findings.extend(
         _finding("fidelity/semantic", message)
         for message in _semantic_fidelity_errors(
-            _fidelity_prose(source_text), _fidelity_prose(report_text), lang
+            _fidelity_prose(source_text),
+            _fidelity_prose(report_text),
+            lang,
+            exemptions=heuristic_exemptions,
         )
     )
+    if len(heuristic_exemptions) > MAX_HEURISTIC_EXEMPTIONS:
+        findings.append(
+            _finding(
+                "fidelity/semantic",
+                (
+                    f"{len(heuristic_exemptions)} heuristic split-remnant "
+                    f"exemptions exceed the limit of {MAX_HEURISTIC_EXEMPTIONS}; "
+                    "a report with this much structural churn must be "
+                    "re-checked against the pre-Rewild source and re-drafted, "
+                    "not exempted."
+                ),
+            )
+        )
     findings.extend(
         _finding("rewild/length", message, fix="alx check")
         for message in _length_errors(report_text, lang)

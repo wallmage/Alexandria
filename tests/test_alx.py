@@ -136,6 +136,24 @@ REMEDY_SAMPLE = {
     "url": "https://example.org/study",
 }
 
+_EXTRACTABLE_PDF_CACHE = None
+
+
+def extractable_pdf_bytes(text="A" * 600):
+    """A one-page PDF whose extractable text is long enough to pass B6."""
+    global _EXTRACTABLE_PDF_CACHE
+    if text == "A" * 600 and _EXTRACTABLE_PDF_CACHE is not None:
+        return _EXTRACTABLE_PDF_CACHE
+    from weasyprint import HTML
+
+    data = HTML(string=f"<p>{text}</p>").write_pdf()
+    if text == "A" * 600:
+        _EXTRACTABLE_PDF_CACHE = data
+    return data
+
+
+EMPTY_PDF_BYTES = b"%PDF-1.7\n"
+
 CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+$"),
     re.compile(r"^set field \S+ in \S+, then alx claim add \S+$"),
@@ -157,6 +175,7 @@ CLOSED_IMPERATIVES = (
         r"^write \[C\d+\] at the end of the sentence that states claim C\d+ "
         r"in report\.md, then alx check --fix$"
     ),
+    re.compile(r"^deepen \(research, counterevidence, implications\), never pad$"),
 )
 
 
@@ -267,6 +286,30 @@ class AlxTestCase(unittest.TestCase):
         (self.dir / ".alx" / "state.json").write_text(
             json.dumps(state), encoding="utf-8"
         )
+
+    def pad_report(self, minimum=5100):
+        """Keep an issue-ready report at or above the two-thirds length floor."""
+        self.set_report_words(minimum)
+
+    def set_report_words(self, n):
+        path = self.dir / "report.md"
+        text = re.sub(r"(?:Context )+", "", path.read_text(encoding="utf-8"))
+        lang = self.state().get("lang", "en")
+        count, _ = alx.report_blocks.report_length(text, lang)
+        if count < n:
+            filler = "Context " * (n - count)
+            for heading in ("## Sources", "## 资料来源", "## 來源", "## 来源"):
+                if heading in text:
+                    text = text.replace(heading, filler + "\n\n" + heading, 1)
+                    break
+            else:
+                text = text.rstrip() + "\n\n" + filler + "\n"
+        path.write_text(text, encoding="utf-8")
+        count, _ = alx.report_blocks.report_length(text, lang)
+        if count > n:
+            extra = count - n
+            text = text.replace("Context ", "", extra)
+            path.write_text(text, encoding="utf-8")
 
 
 class InitTests(AlxTestCase):
@@ -828,7 +871,8 @@ class ClaimTests(AlxTestCase):
         self.assertIn("C9", {claim["claim_id"] for claim in self.ledger()["claims"]})
         _code, out = self.run_in("check")
         hard = out.split("=== WARN")[0]
-        self.assertNotIn("ledger/quantity", hard)
+        # R33: quantity is a would-be BLOCKED item; check still does not refuse.
+        self.assertIn("ledger/quantity", hard)
         self.assertIn("ledger/quantity", out)
 
     def test_omitted_kind_and_importance_warn_and_still_land(self):
@@ -988,6 +1032,7 @@ class CheckTests(AlxTestCase):
         """R30: `issue` restores the snapshot on fidelity/rewild, never ships it."""
         self.bootstrap()
         self.run_in("check", "--fix")
+        self.pad_report()
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertIn("1,204", report)
         code, out = self.run_in("snapshot")
@@ -1256,6 +1301,7 @@ class IssueTests(AlxTestCase):
     def prepared(self):
         self.bootstrap()
         self.run_in("check", "--fix")
+        self.pad_report()
         self.run_in("snapshot")
         reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
         reviews.dir = self.dir
@@ -1601,6 +1647,9 @@ class RenderTests(AlxTestCase):
         issue step and renders, instead of refusing.
         """
         self.bootstrap()
+        self.run_in("check", "--fix")
+        self.pad_report()
+        self.run_in("snapshot")
         code, out = self.run_in("render")
         self.assertEqual(0, code, out)
         self.assertIn("receipts/issue.json written", out)
@@ -1637,7 +1686,7 @@ class RenderTests(AlxTestCase):
 
             def fake_render_pdf(input_path, output_path, **kwargs):
                 rendered.append((Path(output_path).name, kwargs.get("template")))
-                Path(output_path).write_bytes(b"%PDF-1.7\n")
+                Path(output_path).write_bytes(extractable_pdf_bytes())
                 return Path(output_path)
 
             def fake_render_pages(pdf_path, output_dir, **kwargs):
@@ -1688,7 +1737,7 @@ class RenderTests(AlxTestCase):
             def strict_render(input_path, output_path, **kwargs):
                 if "rewild_receipt" not in kwargs:
                     raise ValueError("A Rewild gate receipt is required.")
-                Path(output_path).write_bytes(b"%PDF-1.7\n")
+                Path(output_path).write_bytes(extractable_pdf_bytes())
 
             stack.enter_context(
                 mock.patch.object(
@@ -1696,7 +1745,7 @@ class RenderTests(AlxTestCase):
                 )
             )
             code, out = self.run_in("render")
-        self.assertEqual(0, code, out)
+        self.assertEqual(1, code, out)
         self.assertIn("[tooling/render]", out)
         self.assertIn("=== WARN", out)
         notes = json.loads(
@@ -2740,6 +2789,7 @@ class DeliveryRoundTests(AlxTestCase):
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(0, code, out)
         self.run_in("check", "--fix")
+        self.pad_report()
         self.run_in("snapshot")
         reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
         for name in ("dir", "root", "run_alx", "run_in", "state", "ledger"):
@@ -2933,7 +2983,7 @@ class DeliveryRoundTests(AlxTestCase):
 
         def fake_render_pdf(input_path, output_path, **kwargs):
             rendered.append(kwargs.get("template"))
-            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            Path(output_path).write_bytes(extractable_pdf_bytes())
             return Path(output_path)
 
         def fake_render_pages(pdf_path, output_dir, **kwargs):
@@ -3074,6 +3124,7 @@ class RewildEffectiveSnapshotTests(AlxTestCase):
             ),
             encoding="utf-8",
         )
+        self.pad_report()
         self.run_in("snapshot")
         reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
         for name in ("dir", "root", "run_alx", "run_in", "state", "ledger"):
@@ -3424,6 +3475,7 @@ class RefreshedSourceReprobeTests(AlxTestCase):
         code, out = self.run_in("ledger", "merge", patch)
         self.assertEqual(0, code, out)
         code, out = self.run_in("check", "--fix")
+        self.pad_report()
         self.run_in("snapshot")
         reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
         for name in ("dir", "root", "run_alx", "run_in", "state", "ledger"):
@@ -4024,7 +4076,7 @@ class RenderDegradeTests(AlxTestCase):
             self.issued(stack)
 
             def fake_render_pdf(input_path, output_path, **kwargs):
-                Path(output_path).write_bytes(b"%PDF-1.7\n")
+                Path(output_path).write_bytes(extractable_pdf_bytes())
                 return Path(output_path)
 
             def dead_rasterizer(pdf_path, output_dir, **kwargs):
@@ -4072,7 +4124,7 @@ class RenderPdfkitVisibilityTests(AlxTestCase):
         from scripts import md_to_pdf, render_pdf_pages
 
         def fake_render_pdf(input_path, output_path, **kwargs):
-            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            Path(output_path).write_bytes(extractable_pdf_bytes())
             return Path(output_path)
 
         def fail_pdfkit(*args, **kwargs):
@@ -4119,7 +4171,7 @@ class RenderPdfkitVisibilityTests(AlxTestCase):
         from scripts import md_to_pdf, render_pdf_pages
 
         def fake_render_pdf(input_path, output_path, **kwargs):
-            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            Path(output_path).write_bytes(extractable_pdf_bytes())
             return Path(output_path)
 
         def succeed_pdfkit(pdf_path, output_dir, **kwargs):
@@ -4177,7 +4229,7 @@ class RenderPdfCheckTests(AlxTestCase):
             return ["PDF has 12 extracted text characters; minimum is 5000."]
 
         def fake_render_pdf(input_path, output_path, **kwargs):
-            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            Path(output_path).write_bytes(extractable_pdf_bytes())
             return Path(output_path)
 
         def fake_render_pages(pdf_path, output_dir, **kwargs):
@@ -4744,6 +4796,8 @@ class ClaimMarkerTests(AlxTestCase):
         ]
         self.assertTrue(excerpts)
         self.assertFalse([item for item in excerpts if "[C1" in item], excerpts)
+        self.pad_report()
+        self.run_in("snapshot")
         code, out = self.run_in("check")
         self.assertEqual(0, code, out)
         self.assertIn("=== HARD 0", out)
@@ -4873,6 +4927,8 @@ class MarkerFixtureTests(AlxTestCase):
         self.assertNotIn("[C1]", report)
         listing = report[report.index("## 资料来源") :]
         self.assertIn(f"- [{ledger['sources'][0]['title']}]({first})", listing)
+        self.pad_report()
+        self.run_in("snapshot")
         code, out = self.run_in("check")
         self.assertEqual(0, code, out)
         self.assertIn("=== HARD 0", out)
@@ -4900,7 +4956,7 @@ class RenderRepeatTests(AlxTestCase):
         from scripts import md_to_pdf, render_pdf_pages
 
         def fake_render_pdf(input_path, output_path, **kwargs):
-            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            Path(output_path).write_bytes(extractable_pdf_bytes())
             return Path(output_path)
 
         def strict_render_pages(pdf_path, output_dir, **kwargs):
@@ -5617,6 +5673,8 @@ class PartBFlowTests(AlxTestCase):
 
         self.bootstrap()
         self.run_in("check", "--fix")
+        self.pad_report()
+        self.run_in("snapshot")
         with ExitStack() as stack:
             helper = IssueTests("test_issue_writes_receipts_and_verification_note")
             helper.dir = self.dir
@@ -5750,7 +5808,7 @@ class DefectAuditTests(AlxTestCase):
             helper.stub_gates(stack)
 
             def fake_render_pdf(input_path, output_path, **kwargs):
-                Path(output_path).write_bytes(b"%PDF-1.7\n")
+                Path(output_path).write_bytes(extractable_pdf_bytes())
                 return Path(output_path)
 
             def fake_render_pages(pdf_path, output_dir, **kwargs):
@@ -5789,3 +5847,315 @@ class DefectAuditTests(AlxTestCase):
             "alx check --fix" in next_line or "alx issue" in next_line, next_line
         )
         self.assertNotIn("deliver report-", next_line)
+
+
+class HardRefuseTests(AlxTestCase):
+    """R33 / §X.A: HARD-refuse at issue/render; check stays non-blocking."""
+
+    BLOCKED = "=== BLOCKED (fix, then alx issue again) ==="
+
+    def helper(self):
+        issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state", "set_remaining",
+            "pad_report", "set_report_words",
+        ):
+            setattr(issue_tests, name, getattr(self, name))
+        return issue_tests
+
+    def ready(self):
+        helper = self.helper()
+        helper.prepared()
+        return helper
+
+    def receipts_written(self):
+        return (self.dir / "receipts" / "issue.json").exists()
+
+    def test_quantity_refuses_issue_then_accepts_after_the_fix(self):
+        from contextlib import ExitStack
+
+        self.ready()
+        batch = self.write_json(
+            "qty.json",
+            [dict(CLAIM_ONE, claim_id="C9",
+                  claim="The archive released 7,777 documents in March 2026.")],
+        )
+        self.assertEqual(0, self.run_in("claim", "add", batch)[0])
+        self.run_in("check", "--fix")
+        prior = list((self.dir / "receipts").glob("*"))
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn(self.BLOCKED, out)
+        self.assertIn("ledger/quantity", out)
+        self.assertIn("7,777", out)
+        self.assertFalse(self.receipts_written(), out)
+        self.assertEqual(prior, list((self.dir / "receipts").glob("*")))
+        ledger = self.ledger()
+        for claim in ledger["claims"]:
+            if claim["claim_id"] == "C9":
+                claim["claim"] = CLAIM_ONE["claim"]
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertNotIn(self.BLOCKED, out)
+        self.assertTrue(self.receipts_written(), out)
+
+    def test_semantic_reversal_refuses_issue_overcap_does_not(self):
+        from contextlib import ExitStack
+
+        self.ready()
+        reversal = alx.finding(
+            "fidelity/semantic",
+            "Semantic direction reversal in aligned claim: "
+            "'sales rose' → 'sales fell'.",
+            severity="warn",
+        )
+        overcap = alx.finding(
+            "fidelity/semantic",
+            "9 heuristic split-remnant exemptions exceed the limit of 8; "
+            "a report with this much structural churn must be re-checked "
+            "against the pre-Rewild source and re-drafted, not exempted.",
+            severity="warn",
+        )
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            stack.enter_context(
+                mock.patch.object(alx, "_rewild_findings", return_value=[reversal])
+            )
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn(self.BLOCKED, out)
+        self.assertIn("fidelity/semantic", out)
+        self.assertIn("sales rose", out)
+        self.assertIn("sales fell", out)
+        self.assertFalse(self.receipts_written(), out)
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            stack.enter_context(
+                mock.patch.object(alx, "_rewild_findings", return_value=[overcap])
+            )
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertTrue(self.receipts_written(), out)
+
+    def test_critical_finding_refuses_issue_until_disposition_is_fixed(self):
+        from contextlib import ExitStack
+
+        self.ready()
+        path = self.dir / "reviews" / "content.json"
+        note = json.loads(path.read_text(encoding="utf-8"))
+        note["findings"] = [
+            {
+                "finding_id": "F1",
+                "severity": "critical",
+                "category": "evidence",
+                "location": "Findings",
+                "finding": "The conclusion is unsupported.",
+                "disposition": "rejected",
+                "rationale": "The reviewer left this critical finding open.",
+                "report_disclosure_excerpt": "",
+            }
+        ]
+        path.write_text(json.dumps(note), encoding="utf-8")
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn(self.BLOCKED, out)
+        self.assertIn("content/critical-finding", out)
+        self.assertFalse(self.receipts_written(), out)
+        note["findings"][0]["disposition"] = "fixed"
+        path.write_text(json.dumps(note), encoding="utf-8")
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertTrue(self.receipts_written(), out)
+
+    def test_no_snapshot_refuses_issue_then_accepts_after_snapshot(self):
+        from contextlib import ExitStack
+
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.pad_report()
+        self.assertIsNone(alx.Workspace(self.dir).latest_snapshot())
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn(self.BLOCKED, out)
+        self.assertIn("no snapshot", out)
+        self.assertFalse(self.receipts_written(), out)
+        self.assertFalse((self.dir / "report.pre-rewild.md").exists())
+        self.run_in("snapshot")
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertTrue(self.receipts_written(), out)
+
+    def test_length_two_thirds_boundary(self):
+        from contextlib import ExitStack
+
+        self.ready()
+        self.set_report_words(4999)
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn(self.BLOCKED, out)
+        self.assertIn("integrity/length", out)
+        self.assertIn("never pad", out)
+        self.assertFalse(self.receipts_written(), out)
+        self.set_report_words(5000)
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertTrue(self.receipts_written(), out)
+
+    def test_encoding_refuses_when_restore_fails(self):
+        from contextlib import ExitStack
+
+        self.ready()
+        (self.dir / "report.md").write_bytes(b"\xff\xfe not utf-8")
+        (self.dir / "report.pre-rewild.md").write_bytes(b"\xff\xfe also broken")
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(1, code, out)
+        self.assertIn(self.BLOCKED, out)
+        self.assertIn("integrity/encoding", out)
+        self.assertFalse(self.receipts_written(), out)
+
+    def test_render_returns_1_when_issue_is_blocked(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.pad_report()
+        code, out = self.run_in("render")
+        self.assertEqual(1, code, out)
+        self.assertIn(self.BLOCKED, out)
+        self.assertFalse(list(self.dir.glob("report-*.pdf")), out)
+
+    def test_render_returns_1_on_empty_pdf_text(self):
+        from contextlib import ExitStack
+
+        from scripts import md_to_pdf, render_pdf_pages
+
+        helper = self.ready()
+        with ExitStack() as stack:
+            helper.stub_gates(stack)
+            code, out = self.run_in("issue")
+            self.assertEqual(0, code, out)
+
+            def empty_pdf(input_path, output_path, **kwargs):
+                Path(output_path).write_bytes(EMPTY_PDF_BYTES)
+                return Path(output_path)
+
+            def fake_pages(pdf_path, output_dir, **kwargs):
+                Path(output_dir).mkdir(parents=True, exist_ok=True)
+                page = Path(output_dir) / "page-001.png"
+                page.write_bytes(b"\x89PNG")
+                return [page]
+
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=empty_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_pages", side_effect=fake_pages
+                )
+            )
+            code, out = self.run_in("render", "--template", "executive")
+        self.assertEqual(1, code, out)
+        self.assertTrue((self.dir / "report-executive.pdf").exists())
+        self.assertIn("executive PDF check:", out)
+
+    def test_issue_deletes_leftover_prose(self):
+        from contextlib import ExitStack
+
+        owner = FixRoundTests("test_leftover_prose_of_a_dropped_claim_is_reported")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(owner, name, getattr(self, name))
+        owner.three_bound_paragraphs()
+        self.run_in("claim", "drop", "C1", "--apply")
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        restored = report.replace(
+            "The registry logged",
+            "The archive released 1,204 documents in March 2026, a release "
+            "recorded in the study that the registry confirmed.\n\n"
+            "The registry logged",
+        )
+        (self.dir / "report.md").write_text(restored, encoding="utf-8")
+        self.pad_report()
+        self.run_in("snapshot")
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertIn("leftover prose deleted", out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "The archive released 1,204 documents in March 2026, a release "
+            "recorded in the study that the registry confirmed.",
+            report,
+        )
+        self.assertTrue(self.receipts_written(), out)
+
+    def test_issue_drops_claims_on_cache_detached(self):
+        from contextlib import ExitStack
+
+        self.ready()
+        meta_path = self.dir / "sources" / "S1.meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["text_sha256"] = "0" * 64
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertIn("dropped C1 (fidelity/cache-detached)", out)
+        self.assertNotIn("C1", {c["claim_id"] for c in self.ledger()["claims"]})
+        self.assertTrue(self.receipts_written(), out)
+
+    def test_status_names_blocked_issue(self):
+        from contextlib import ExitStack
+
+        self.ready()
+        batch = self.write_json(
+            "qty.json",
+            [dict(CLAIM_ONE, claim_id="C9",
+                  claim="The archive released 7,777 documents in March 2026.")],
+        )
+        self.run_in("claim", "add", batch)
+        self.run_in("check", "--fix")
+        with ExitStack() as stack:
+            self.helper().stub_gates(stack)
+            self.run_in("issue")
+        code, out = self.run_in("status")
+        self.assertEqual(0, code, out)
+        self.assertRegex(out, r"Next: `alx issue` \(blocked: \d+ items\)")
+
+    def test_check_prints_refuse_items_under_hard_and_exits_0_for_quantity(self):
+        self.ready()
+        batch = self.write_json(
+            "qty.json",
+            [dict(CLAIM_ONE, claim_id="C9",
+                  claim="The archive released 7,777 documents in March 2026.")],
+        )
+        self.run_in("claim", "add", batch)
+        self.run_in("check", "--fix")
+        code, out = self.run_in("check")
+        hard = out.split("=== WARN")[0]
+        self.assertIn("ledger/quantity", hard)
+        self.assertEqual(0, code, out)

@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -425,6 +426,21 @@ WARN_FAMILIES = frozenset(
     }
 )
 
+#: R33: these families (and the B4/B5/B7 flow conditions) refuse `issue`.
+REFUSE_FAMILIES = frozenset(
+    {
+        "ledger/quantity",
+        "fidelity/semantic",
+        "content/critical-finding",
+    }
+)
+_SEMANTIC_REFUSE_RE = re.compile(
+    r"direction reversal|negation changed|Causal claim|Causal substitution|"
+    r"Unmatched directional",
+    re.I,
+)
+BLOCKED_HEADER = "=== BLOCKED (fix, then alx issue again) ==="
+
 
 def finding(family, message, *, severity="hard", ids=(), fix="", remove=""):
     if family in WARN_FAMILIES:
@@ -446,6 +462,132 @@ def hard_findings(findings):
 
 def class_f_findings(findings):
     return [item for item in hard_findings(findings) if item.klass == "F"]
+
+
+def _semantic_is_refuse(message):
+    return bool(_SEMANTIC_REFUSE_RE.search(str(message)))
+
+
+def _is_refuse_finding(item):
+    if item.family == "fidelity/semantic":
+        return _semantic_is_refuse(item.message)
+    return item.family in REFUSE_FAMILIES or item.family == "integrity/encoding"
+
+
+def _length_counts(ws, state):
+    lang = state.get("lang", "en")
+    try:
+        text = ws.report_text()
+    except UnicodeDecodeError:
+        return None
+    count, unit = report_blocks.report_length(text, lang)
+    floor, _ceiling, _unit = report_contract.report_length_policy(lang)
+    return count, floor, unit
+
+
+def _length_below_two_thirds(ws, state):
+    counts = _length_counts(ws, state)
+    if counts is None:
+        return False
+    count, floor, _unit = counts
+    return count < (floor * 2) // 3
+
+
+def _refuse_fix(item):
+    if item.family == "ledger/quantity":
+        claim_id = _pick_id(item, "C")
+        base = item.fix or "alx find S1 <figure> then correct the claim or extract"
+        drop = f", or {remedy('claim-drop', claim_id=claim_id)}" if claim_id else ""
+        if drop and "claim drop" not in base:
+            return base.rstrip(".") + drop
+        return base
+    if item.family == "fidelity/semantic":
+        return item.fix or str(item.message).rstrip(".")
+    if item.family == "content/critical-finding":
+        return (
+            "fix the report and record the disposition in reviews/content.json, "
+            "then alx review finish content"
+        )
+    if item.family == "integrity/encoding":
+        return item.fix or remedy("snapshot-restore")
+    if item.family == "integrity/length":
+        return "deepen (research, counterevidence, implications), never pad"
+    if item.family == "issue/snapshot":
+        return "alx snapshot"
+    return item.fix
+
+
+def _collect_refusals(ws, state, _ledger, findings):
+    items = []
+    for item in findings:
+        if _is_refuse_finding(item):
+            items.append(replace(item, fix=_refuse_fix(item), severity="hard"))
+    if ws.latest_snapshot() is None:
+        items.append(
+            finding(
+                "issue/snapshot",
+                "no snapshot; the Rewild step never started "
+                "(humanize, alx check, then alx issue).",
+                fix="alx snapshot",
+            )
+        )
+    if _length_below_two_thirds(ws, state):
+        count, floor, unit = _length_counts(ws, state)
+        if not any(item.family == "integrity/length" for item in items):
+            items.append(
+                finding(
+                    "integrity/length",
+                    f"Report has {count} {unit}; below two thirds of the floor "
+                    f"({floor} {unit}).",
+                    fix="deepen (research, counterevidence, implications), never pad",
+                )
+            )
+        else:
+            items = [
+                replace(
+                    item,
+                    fix="deepen (research, counterevidence, implications), never pad",
+                )
+                if item.family == "integrity/length"
+                else item
+                for item in items
+            ]
+    return items
+
+
+def _render_blocked(items):
+    lines = [BLOCKED_HEADER]
+    for family, members in gate_severity.group(items).items():
+        lines.append(f"[{family}] {len(members)}")
+        for item in members:
+            tail = str(item.message).rstrip(".") + "."
+            fix = item.fix or _refuse_fix(item)
+            if fix:
+                tail += f" Fix: {fix}."
+            lines.append(f"  {tail}")
+    return "\n".join(lines)
+
+
+def _check_display_findings(ws, state, findings):
+    shown = []
+    for item in findings:
+        promote = (
+            item.family == "integrity/length" and _length_below_two_thirds(ws, state)
+        ) or (_is_refuse_finding(item) and item.family != "integrity/encoding")
+        if promote:
+            shown.append(replace(item, severity="hard", fix=_refuse_fix(item)))
+        else:
+            shown.append(item)
+    if ws.latest_snapshot() is None:
+        shown.append(
+            finding(
+                "issue/snapshot",
+                "no snapshot; the Rewild step never started "
+                "(humanize, alx check, then alx issue).",
+                fix="alx snapshot",
+            )
+        )
+    return shown
 
 
 _ID_RE = {"C": re.compile(r"^C\d+$"), "S": re.compile(r"^S\d+$")}
@@ -2601,13 +2743,18 @@ def _ledger_findings(ws, ledger):
             )
             continue
         text, meta = entry
+        citing = [
+            claim.get("claim_id")
+            for claim in ledger.get("claims", [])
+            if source_id in (claim.get("source_ids") or []) and claim.get("claim_id")
+        ]
         if normalize_url(source.get("url", "")) not in cache_urls(meta):
             findings.append(
                 finding(
                     "fidelity/cache-detached",
                     f"{source_id} cache url {meta.get('url')} != ledger url "
                     f"{source.get('url')}.",
-                    ids=[source_id],
+                    ids=[source_id, *citing],
                 )
             )
         elif not cache_matches(text, meta):
@@ -2615,7 +2762,7 @@ def _ledger_findings(ws, ledger):
                 finding(
                     "fidelity/cache-detached",
                     f"{source_id} cache text sha256 does not match its meta record.",
-                    ids=[source_id],
+                    ids=[source_id, *citing],
                 )
             )
         if source.get("provenance") == "unverified" and source_id in key_source_ids:
@@ -3427,6 +3574,12 @@ def run_check(ws, state, ledger, *, fix=False, mapping_out=None):
         mechanical_fixes(ws, state, ledger)
     findings = []
     findings.extend(_integrity_findings(ws, state, ledger))
+    if any(
+        getattr(item, "family", "") == "integrity/encoding" for item in findings
+    ):
+        return adopt(
+            findings, paragraphs=0, claim_files=state.get("claim_files", {})
+        )
     findings.extend(_ledger_findings(ws, ledger))
     binding, mapping = _binding_findings(ws, state, ledger, fix=fix)
     if mapping_out is not None:
@@ -3503,7 +3656,9 @@ def cmd_check(args):
         "  " + " ".join(pairs[start : start + 8]) for start in range(0, len(pairs), 8)
     ]
     lines += [
-        render_grouped(findings, verbose=args.verbose),
+        render_grouped(
+            _check_display_findings(ws, state, findings), verbose=args.verbose
+        ),
         _status_line(state, findings, remaining),
     ]
     _record_last_check(state, findings)
@@ -3793,8 +3948,11 @@ def _auto_remedies(ws, state, ledger, findings, lines):
         }
     ]
     if restore and ws.latest_snapshot() is not None:
-        ws.report.write_text(_snapshot_text(ws, state), encoding="utf-8")
-        lines.append("auto-remedy: report.md restored from the latest snapshot.")
+        try:
+            ws.report.write_text(_snapshot_text(ws, state), encoding="utf-8")
+            lines.append("auto-remedy: report.md restored from the latest snapshot.")
+        except (UnicodeDecodeError, OSError):
+            lines.append("auto-remedy: snapshot restore failed.")
     # The Remove remedy of `binding/link-not-in-ledger`: the anchor text stays,
     # the URL goes, so a link to an unfetched source never withholds delivery.
     urls = []
@@ -3810,6 +3968,44 @@ def _auto_remedies(ws, state, ledger, findings, lines):
             text = re.sub(r"\[([^\]]*)\]\(\s*" + re.escape(url) + r"\s*\)", r"\1", text)
         ws.report.write_text(text, encoding="utf-8")
         lines.extend(f"link removed: {url}" for url in urls)
+    leftovers = [
+        item
+        for item in class_f_findings(findings)
+        if item.family == "binding/leftover-prose"
+    ]
+    if leftovers:
+        text = ws.report_text()
+        numbered = {
+            number: (start, end, block)
+            for number, start, end, block in body_paragraphs(text)
+        }
+        targets = []
+        for item in leftovers:
+            match = re.search(r"paragraph (\d+)", item.message)
+            if match:
+                targets.append(int(match.group(1)))
+        for number in sorted(set(targets), reverse=True):
+            if number not in numbered:
+                text = ws.report_text()
+                numbered = {
+                    n: (s, e, b) for n, s, e, b in body_paragraphs(text)
+                }
+            if number not in numbered:
+                continue
+            start, end, block = numbered[number]
+            state.setdefault("mechanical_deletions", []).append(_sha256_text(block))
+            text = re.sub(r"\n{3,}", "\n\n", text[:start] + text[end:])
+            prose = _sha256_text(masked_prose(block))
+            state.setdefault("mechanical_deletion_prose", {})[prose] = sum(
+                1
+                for _n, _s, _e, survivor in body_paragraphs(text)
+                if _sha256_text(masked_prose(survivor)) == prose
+            )
+            ws.report.write_text(text, encoding="utf-8")
+            _renumber_bindings(state, number)
+            lines.append(f"leftover prose deleted: paragraph {number}")
+            numbered = {n: (s, e, b) for n, s, e, b in body_paragraphs(text)}
+        ws.save_state(state)
     # C1: one line per removal, naming the family that asked for it.
     families = {}
     for item in class_f_findings(findings):
@@ -4071,17 +4267,21 @@ def cmd_issue(args):
     ws, state, ledger = _open(args)
     lines = []
     delivery_notes = []
-    if ws.latest_snapshot() is None:
-        shutil.copyfile(ws.report, ws.dir / "report.pre-rewild.md")
-        state["humanization"] = "none"
-        ws.save_state(state)
-        delivery_notes.append("humanization: none (issue created the snapshot)")
     findings = run_check(ws, state, ledger, fix=False)
     state, ledger, findings, dropped_for_delivery = _drop_hard(
         ws, state, ledger, findings, lines
     )
     # J7: `alx status` must report what `issue` just saw, remedies included.
     _record_last_check(state, findings)
+    ws.save_state(state)
+    refusals = _collect_refusals(ws, state, ledger, findings)
+    if refusals:
+        state["last_issue"] = {"blocked": len(refusals)}
+        ws.save_state(state)
+        lines.append(_render_blocked(refusals))
+        _emit(ws, state, "issue", f"blocked {len(refusals)}", lines)
+        return 1
+    state["last_issue"] = {"blocked": 0}
     ws.save_state(state)
     online_findings, _ok = _online_phase(
         ws, state, ledger, args, lines, delivery_notes
@@ -4207,6 +4407,20 @@ def _note_pdfkit_contact_fallback(ws, lines, template, selected, failures):
     )
 
 
+def _pdf_text_chars(path):
+    """Extractable text length for B6; 0 when the file is missing or unreadable."""
+    if not Path(path).is_file():
+        return 0
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return len(text.strip())
+    except Exception:
+        return 0
+
+
 def cmd_render(args):
     ws, state, ledger = _open(args)
     receipt_path = ws.receipts / "issue.json"
@@ -4215,11 +4429,13 @@ def cmd_render(args):
         "ledger_sha256"
     ) != file_sha256(ws.ledger_path):
         # C2: a missing or stale receipt is the issue step `render` runs itself.
-        cmd_issue(
+        issue_code = cmd_issue(
             argparse.Namespace(
                 dir=args.dir, deliver=False, sample_size=8, offline=False
             )
         )
+        if issue_code:
+            return issue_code
         ws, state, ledger = _open(args)
     from scripts import md_to_pdf, render_pdf_pages  # heavy import, render only
 
@@ -4230,6 +4446,8 @@ def cmd_render(args):
         else ["executive", md_to_pdf.select_adaptive_companion(subject)]
     )
     lines = []
+    written = 0
+    usable = 0
     for template in templates:
         output = ws.dir / f"report-{template}.pdf"
         kwargs = {
@@ -4259,6 +4477,7 @@ def cmd_render(args):
                 )
             )
             continue
+        written += 1
         pages = ws.dir / f"pages-{template}"
         lines.append(f"{template}: {output}")
         # README: "after generation, the PDF is reopened to check text, links,
@@ -4278,6 +4497,14 @@ def cmd_render(args):
             lines.append(f"{template} PDF check: {error}")
         if not pdf_errors:
             lines.append(f"{template} PDF check: passed (text, links, fonts, pages, overflow)")
+        chars = _pdf_text_chars(output)
+        if chars < 500:
+            lines.append(
+                f"{template} PDF: extractable text {chars} characters "
+                "(blocked below 500)."
+            )
+        else:
+            usable += 1
         # `alx` owns the contact-sheet directory: a second `render` refills it
         # instead of refusing because it is not empty.
         shutil.rmtree(pages, ignore_errors=True)
@@ -4306,6 +4533,16 @@ def cmd_render(args):
             selected, failures = _contact_sheet_status(result)
             _note_pdfkit_contact_fallback(ws, lines, template, selected, failures)
         lines.append(f"{template} contact sheet: {pages}")
+    if not written or not usable:
+        lines.append(BLOCKED_HEADER)
+        if not written:
+            lines.append("no PDF file produced by any template.")
+        else:
+            lines.append(
+                "produced PDF extractable text is under 500 characters."
+            )
+        _emit(ws, state, "render", "blocked", lines)
+        return 1
     _emit(ws, state, "render", f"{len(templates)} PDFs", lines)
     return 0
 
@@ -4346,6 +4583,9 @@ def cmd_status(args):
 
 
 def _next_command(ws, state, ledger):
+    blocked = (state.get("last_issue") or {}).get("blocked") or 0
+    if blocked:
+        return f"`alx issue` (blocked: {blocked} items)"
     if not ledger.get("sources"):
         return "`alx fetch <url>`"
     if not ledger.get("claims"):

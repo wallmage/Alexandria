@@ -706,6 +706,10 @@ class AsOfDriftTests(unittest.TestCase):
 class RecoveredSchemaWarnTests(unittest.TestCase):
     """B2-B6: restored schema shape stays WARN and never refuses."""
 
+    def test_schema_is_not_a_refuse_family(self):
+        self.assertTrue(hasattr(alx, "REFUSE_FAMILIES"))
+        self.assertNotIn("ledger/schema", alx.REFUSE_FAMILIES)
+
     def test_empty_arrays_and_hollow_brief_are_warn_only(self):
         findings = validate_ledger.collect_findings(
             {

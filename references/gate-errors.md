@@ -197,7 +197,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** two H1 headings.
 
 ### `integrity/date-line` — W
-- **rule:** strict-locale date line absent or ≠ `ledger.report_date`.
+- **rule:** strict-locale date line absent or ≠ `ledger.report_date`. Expected form: en `> 15 September 2026` (`DD Month YYYY`), zh-CN and zh-HK `> 2026年9月15日`.
 - **fix:** `alx check --fix` when only the whitespace of the line under the H1 is wrong; otherwise (placement or format) edit prose (warning; never blocks).
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.

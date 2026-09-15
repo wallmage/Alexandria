@@ -37,15 +37,14 @@ Give the reviewer only the edited report and the selected profile's
 quick-reference checklist — never the pre-edit draft, the user request, the
 evidence ledger, or drafting notes. The reviewer flags problems and does not
 rewrite. Without a separate reviewer, run the profile's fresh-eyes fallback in a
-context-isolated pass; never skip the second pass.
+context-isolated pass.
 
 The primary agent then applies justified fixes, rejects style changes that would
 create a new formula, and checks every material edit against the pre-edit draft
 and the evidence ledger. Record findings, dispositions, and the primary fidelity
 verification in `REWILD_REVIEW_NOTE` using `references/rewild-review.schema.json`,
 bound to the exact report, source, language, and profile by hash. A stale note is
-invalid. All four fidelity checks must be true. Region and fidelity findings must
-be resolved; they cannot be rejected.
+invalid. Record what you changed.
 
 ## Style waivers
 

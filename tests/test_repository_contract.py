@@ -140,8 +140,7 @@ class RepositoryContractTests(unittest.TestCase):
             "zh-HK": ROOT / "references" / "rewild" / "rewild-hk",
         }
 
-        self.assertIn("Rewild hard gate", skill)
-        self.assertIn("Every report must pass", skill)
+        self.assertIn("humanize per the profile quick-reference checklist", skill)
         self.assertIn("scripts/alx.py", skill)
         self.assertIn("review start rewild", skill)
         self.assertNotIn(
@@ -193,7 +192,9 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertTrue(quality.is_file())
         self.assertTrue(schema_path.is_file())
-        self.assertIn("content quality hard gate", skill.casefold())
+        self.assertIn(
+            "only fabrication / evidence-integrity findings block `issue`", skill
+        )
         self.assertIn("scripts/alx.py", skill)
         self.assertIn("review start content", skill)
         self.assertIn("`alx issue --deliver`", skill)

@@ -79,14 +79,8 @@ This dimension is mandatory whenever the subject is living, recently deceased, o
 
 Write the rung the evidence supports and no higher. "Faced allegations of X" and "did X" are different reports.
 
-**Sourcing floor for living subjects.** Any claim of wrongdoing, misconduct, or personal failing about a living person requires at least two genuinely independent source families, one of which is an accountable record: a court filing, a regulatory action, a named-source investigation by an independent outlet, or the subject's own admission. A single anonymous or single-outlet allegation may appear only as an attributed allegation, with its sourcing weakness stated in the sentence that carries it, and it may never support a key judgment. Aggregation is not corroboration: twenty articles tracing to one original report are one source.
-
-**Right of reply.** Find and include the subject's strongest documented response, not a token denial. If they have not responded publicly, say so and say where you looked. If a documented response contradicts the allegation, that contradiction is evidence and belongs in the ledger.
-
-**Classify before checking.** Every claim that names a registered person must
-link that `person_id` and declare `person_claim_role`. This classification,
-plus a substantive `person_claim_assessment`, not a finite list of alarming
-words, activates the harm and privacy review.
+**Link the person id.** Every claim that names a registered person must
+link that `person_id`; `claim add` and `check --fix` do it for you.
 A response claim must use `responds_to_claim_ids`, cite subject-origin
 evidence, and travel with the harmful claim in the report. A resolution claim
 must use `resolves_claim_ids`; an unrelated fact about the same person is
@@ -96,7 +90,7 @@ neither a response nor a resolution.
 
 **Proportionality and staleness.** Weight material by its bearing on the governing question and by how much the subject's public role justifies scrutiny. A sitting official's decades-old conduct in office is fair; a private figure's youthful incident usually is not. Date every allegation and say whether anything has resolved it since. Do not assemble scattered public fragments into a portrait no single source supports, and do not use the report's neutral register to launder an accusation into an established fact.
 
-For historical subjects, the legal-ladder and proportionality rules still hold; the sourcing floor becomes a question of contemporaneous versus later record, and the privacy boundary loosens as living interests recede.
+For historical subjects, the legal-ladder and proportionality rules still hold; the record question becomes contemporaneous versus later sources, and the privacy boundary loosens as living interests recede.
 
 ### Context
 

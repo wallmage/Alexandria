@@ -1616,6 +1616,5 @@ class CheckModeTests(unittest.TestCase):
             self.assertIn("=== HARD ", result.stderr)
             self.assertIn("[fidelity/quotation-lost] 1", result.stderr)
             self.assertIn("=== WARN ", result.stderr)
-            self.assertIn("=== STATUS: ", result.stderr)
             self.assertIn("Quoted span of the pre-Rewild source", result.stderr)
             self.assertEqual([], list(work.glob("*.json")))

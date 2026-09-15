@@ -1,20 +1,17 @@
 # Evidence recording
 
-For every consequential claim, add a ledger entry with:
+`claim add` validates four things, and only these:
 
-- a stable claim ID;
-- a precise claim;
-- fact, reported claim, estimate, or analysis;
-- source ID and public HTTP(S) URL;
-- publication and access dates;
-- `undated_reason` when a living source has no publication date;
-- one faithful `source_evidence` extract or source location for every direct
-  source; never reuse one source's wording as proof for another;
-- evidence type, source family, role, and independence.
+- a unique `claim_id`;
+- non-empty claim text;
+- a `source_id` that names a fetched source;
+- one faithful `source_evidence` extract or source location for that source;
+  never reuse one source's wording as proof for another.
 
-Every other field is optional and the gate never asks for it: importance,
-confidence, limitations, `decision_relevance`, `reasoning`, `what_would_change`,
-`assumptions`, triangulation status, and supporting or contradicting claim IDs.
+Every other field is optional and the gate never asks for it: `kind` (fact,
+reported claim, estimate, analysis), importance, confidence, limitations,
+`decision_relevance`, `reasoning`, `what_would_change`, `assumptions`,
+triangulation status, and supporting or contradicting claim IDs.
 Record them when they help the reader; never to satisfy a checker.
 
 A claim may not assert more than its per-source evidence carries. Figures,
@@ -26,12 +23,10 @@ the fact was true. `supports` points downward only, to the evidence a claim rest
 on; cycles are rejected.
 
 For reports centered on people, inventory known people through `people` and
-`person_ids`, and name the person id on the claims about them. There is no
-harm-review ceremony: `person_claim_role`, `person_claim_assessment` and
-`human_harm_review` are gone. What holds a claim about a person is the same
-thing that holds every other claim — an extract that carries it, the exact
-legal stage where a legal stage is asserted, and the subject's own answer
-quoted when one exists.
+`person_ids`, and name the person id on the claims about them. What holds a
+claim about a person is the same thing that holds every other claim — an
+extract that carries it, and the exact legal stage where a legal stage is
+asserted.
 
 Mark changing claims such as price, availability, leadership, policy, and
 current product behavior as `time_sensitive`, and record a non-null `as_of`

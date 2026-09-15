@@ -79,9 +79,7 @@ Body links are also underlined, so a link is identifiable in greyscale and to a 
 
 ## Imagery
 
-Use subject-relevant imagery when it materially improves the selected template. Prefer the assistant's built-in image generator: ask for a high-resolution, on-topic, positive, visually striking editorial image with professional art direction, clean composition, useful negative space for report typography, and no embedded words, logos, watermarks, or fabricated data. If generation is unavailable, use Google Images first and Bing Images as the fallback; verify the original source, resolution, relevance, and usage rights before downloading anything.
-
-Save the verified raster beside the report Markdown and pass `--cover-image`; the renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files. Never use a search thumbnail, an unclear license, a negative or alarming image merely for drama, or an image that implies evidence the report does not contain.
+Use the bundled template image; pass `--cover-image` only if the user supplies a file. The renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files.
 
 Do not delay delivery merely to obtain artwork. Six templates - Maison, Horizon, Terrain, Orbit, Current, and Apricot - ship a licensed photograph in `assets/`, listed in `BUNDLED_TEMPLATE_IMAGES`. The other five draw generated, template-native openers instead.
 

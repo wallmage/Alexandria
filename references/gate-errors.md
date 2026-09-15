@@ -1,12 +1,14 @@
 # Gate errors
 
-Family → class → rule → fix → remove → example. One section per family the code emits, grouped by the module that emits it. Class F never waived; Class A only via `alx issue --deliver`.
+Family → severity → rule → fix → remove → example. One section per family the code emits, grouped by the module that emits it.
+
+Severity is two-valued (ruling R28). **F = HARD**: fabrication or evidence integrity only — it blocks `alx issue`, and `alx issue --deliver` applies its Remove remedy (drop the claim or the paragraph) and then issues. **W = WARN**: printed with its fix, listed in the delivery notes, and never a block on `issue`, `render` or `claim add`. Class A no longer exists; `alx issue --deliver` is accepted as an alias of `alx issue` when nothing is hard.
 
 Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
-Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a Class A finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: (edit prose; waivable by alx issue --deliver)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
+Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
 
 ## Runtime (`alx`, before any command runs)
 
@@ -45,20 +47,20 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ### `ledger/date-granularity` — W
 - **rule:** bare year asserted where extracts offer year-month only (or the reverse).
 - **fix:** reword the claim to the granular form via `alx find`.
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** claim `1918`; extract `1918-01`.
 
-### `ledger/extract-length` — W/F
+### `ledger/extract-length` — W
 - **rule:** advice only (ruling R13): the whole extract is < 20 normalized chars (< 10 when it contains CJK). Never raised on an ellipsis-separated piece, and never blocks `claim add`. Length is not a fabrication check; `fidelity/mismatch` decides that. An empty `extract_or_location` is still hard.
 - **fix:** extend the quote in claims/<file>; widen with `alx find S<n> KEYWORD`.
-- **remove:** none (Class A).
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `extract_or_location: "short"` (5 chars, threshold 20).
 
 ### `ledger/claim-input` — F
-- **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch.
+- **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch, or has an empty `claim`, `source_evidence` or `extract_or_location`. Every conditional field — `reasoning`, `assumptions`, `responds_to_claim_ids`, `resolves_claim_ids`, `decision_relevance`, `what_would_change`, `limitations`, `confidence`, `triangulation` — is optional and never a finding (R28).
 - **fix:** set field `<name>` in `claims/<file>.json`, then `alx claim add claims/<file>.json` (the claim re-enters the ledger only through `claim add`, which upserts by `claim_id`).
 - **remove:** `alx claim drop C<n> --apply`
-- **example:** `kind: analysis` without `reasoning`.
+- **example:** `source_evidence: []`.
 
 ### `ledger/schema` — F
 - **rule:** ledger fails `evidence-ledger.schema.json`.
@@ -66,106 +68,100 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx claim drop C<n> --apply` if the invalid object is a claim.
 - **example:** missing `schema_version`.
 
-### `ledger/key-claim` — F
+### `ledger/key-claim` — W
 - **rule:** key/central claim rests on `unverified`/interested-only sources, or lacks `decision_relevance`/`what_would_change`. `unverified` counts as interested.
 - **fix:** `alx source set S<n> --provenance P`
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** C5 is central; S1 and S2 are both `unverified`.
 
-### `ledger/provenance` — F
+### `ledger/provenance` — W
 - **rule:** provenance/roles/accountability combination is not admissible for the claim's use.
 - **fix:** `alx source set S<n> --provenance P --role R`
-- **remove:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** subject-controlled page classified `primary_independent`.
 
-### `ledger/portfolio` — F
+### `ledger/portfolio` — W
 - **rule:** the source portfolio is not independent enough for the claim set (all sources interested, or one family only).
 - **fix:** `alx source set S<n> --provenance P`, or fetch an independent source. The message lists the allowed values, one line each:
   - `--provenance`: `primary_independent, primary_interested, secondary_independent, secondary_dependent, unverified`
   - `--type`: `accountable_record, peer_reviewed, preprint, official_documentation, dataset_or_test, reported_interview, news_report, opinion_or_forecast, marketing, anecdote`
   - `--role`: `subject_official, counterparty_official, independent_analysis, empirical_data, affected_stakeholder, expert_interpretation, historical_record`
-- **remove:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** 9 of 9 claims on one publisher.
 - **`--provenance`:** `primary_independent` `primary_interested` `secondary_independent` `secondary_dependent` `unverified`
 - **`--type`:** `accountable_record` `peer_reviewed` `preprint` `official_documentation` `dataset_or_test` `reported_interview` `news_report` `opinion_or_forecast` `marketing` `anecdote`
 - **`--role`:** `subject_official` `counterparty_official` `independent_analysis` `empirical_data` `affected_stakeholder` `expert_interpretation` `historical_record` (repeat the flag per role)
 
-### `ledger/triangulation` — F
+### `ledger/triangulation` — W
 - **rule:** `triangulation.status`/`rationale` contradicts the merged source families.
 - **fix:** set field triangulation in claims/<file>, then `alx claim add claims/<file>`
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `status: met` with one family.
 
-### `ledger/host-conflict` — F
+### `ledger/host-conflict` — W
 - **rule:** sources presented as independent share one host; reported in one pass with provenance per id.
 - **fix:** `alx source set S<n> --family-justification FILE` (free text via file, D10)
-- **remove:** n/a (the justification is the repair)
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** S3 and S7 both on `example.org`.
 
 ### `ledger/source-family` — W
 - **rule:** `source_family` label is not the registrable domain and no `family_justification` explains the split.
 - **fix:** `alx check --fix` (auto-derives from the domain).
-- **remove:** n/a
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** family `Example` for `records.example.org`.
 
-### `ledger/source-ids` — F/W
+### `ledger/source-ids` — W
 - **rule:** `source_ids` missing (warn; derived from `source_evidence`) or naming a source the evidence does not carry (hard).
 - **fix:** `alx check --fix` (derives `source_ids` from `source_evidence`)
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** C5 has extracts on S1,S2; `source_ids` empty.
 
-### `ledger/https` — F
+### `ledger/https` — W
 - **rule:** `source.url` is not https (aliases may be http).
 - **fix:** `alx fetch <https form of the url>` (`--refresh` re-fetches the http url and fails again).
-- **remove:** n/a
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `http://records.example.org/a`.
 
-### `ledger/freshness` — F
+### `ledger/freshness` — W
 - **rule:** a `time_sensitive` claim is older than its freshness window, or `verified_at` precedes `as_of`.
 - **fix:** `alx fetch --id S<n> --refresh`
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `as_of` 2026-09-14, `verified_at` 2026-09-13.
 
-### `ledger/undated-reason` — F
+### `ledger/undated-reason` — W
 - **rule:** an undated source has no accepted `undated_reason` phrasing.
 - **fix:** `alx source set S<n> --undated-reason FILE`
-- **remove:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** S4 has no `published` and no reason.
 
-### `ledger/person` — F/W
-- **rule:** person-linked claim without a registered person, or `living_status: unknown`. R15 (W): a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix` and warns; the harm rules then run on the linked claim and stay hard. R20 (F): both protected-person messages name the person (`P3 Yang (living_status living)`), one prints the allowed roles verbatim (`neutral|harmful|sensitive_private_fact|response|resolution`) with the got-value, the other the assessment shape (`{"classification": <person_claim_role>, "rationale": >=N chars}`) with the computed floor and the actual length; the remedy names the claim's own input file.
+### `ledger/person` — W
+- **rule:** a person-linked claim names an unregistered person id. R15: a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix`. The harm rules are deleted (R25/R28): `person_claim_role`, `person_claim_assessment` and `human_harm_review` are gone, and `living_status: unknown` is not a finding.
 - **fix:** `alx ledger merge people.json` (auto-link warn: `alx check --fix`)
-- **remove:** `alx claim drop C<n> --apply`
-- **example:** C3 names P1 while P1 status is `unknown`.
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** C3 names P9; no P9 in `people`.
 
-### `ledger/harm` — F
-- **rule:** living/recently_deceased/unknown person claim without a complete `human_harm_review`; the message lists the missing keys.
-- **fix:** `alx ledger merge people.json`, then re-add the claim with `human_harm_review`.
-- **remove:** `alx claim drop C<n> --apply`
-- **example:** missing `human_harm_review.right_of_reply`.
-
-### `ledger/excluded-supports` — F
+### `ledger/excluded-supports` — W
 - **rule:** a surviving claim's `supports` names a claim in `excluded_claims`.
 - **fix:** set field `supports` in `claims/<file>.json`, then `alx claim add claims/<file>.json`.
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** C4 supports C2, and C2 was dropped.
 
 ### `ledger/coverage` — W
 - **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims).
 - **fix:** `alx ledger merge coverage.json` (`--fix` repairs no coverage linkage)
-- **remove:** n/a (Class A)
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** area `supported` with an empty `claim_ids`.
 
-### `ledger/synthesis` — F
+### `ledger/synthesis` — W
 - **rule:** synthesis names a claim that does not exist, or a central judgment with no claim behind it.
 - **fix:** `alx ledger merge coverage.json`
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `central_judgment_claim_ids: ["C9"]`; C9 was dropped.
 
 ### `ledger/reference` — F/W
-- **rule:** cross-reference between claims, people or sources does not resolve. R22: two or more `source_evidence` entries with the same `source_id` are legitimate (two passages from one page) — no finding, and each entry is probed on its own. R23 (W): counterevidence with no adversarial test is a thin synthesis, not a fabrication. R24: `as_of` up to 1 day after `verified_at` is timezone drift (UTC fetch vs local date); past that the finding names both dates and the threshold.
+- **rule:** cross-reference between claims, people or sources does not resolve. R22: two or more `source_evidence` entries with the same `source_id` are legitimate (two passages from one page) — no finding, and each entry is probed on its own. R23: counterevidence with no adversarial test is a thin synthesis, not a fabrication (W). R24: `as_of` up to 1 day after `verified_at` is timezone drift (UTC fetch vs local date); past that the finding names both dates and the threshold.
 - **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`; untested counterevidence: `set field synthesis.adversarial_tests, then alx ledger merge synthesis`; as_of drift: set field as_of in claims/<file>, then `alx claim add claims/<file>`
-- **remove:** `alx claim drop C<n> --apply` (none on the Class A adversarial-test warn)
+- **remove:** `alx claim drop C<n> --apply` — hard half only (a `source_id` no fetched source carries); every other cross-reference is W and carries no remove
 - **example:** `responds_to_claim_ids: ["C12"]`; no C12.
 
 ## Integrity (`check` a / `validate_report`)
@@ -194,22 +190,22 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx snapshot --restore`
 - **example:** GBK bytes written into report.md.
 
-### `integrity/structure` — A
+### `integrity/structure` — W
 - **rule:** missing H1, standfirst blockquote, or Sources H2 last.
-- **fix:** (edit prose; waivable by alx issue --deliver) — `--fix` writes no headings.
-- **remove:** n/a
+- **fix:** edit prose (warning; never blocks) — `--fix` writes no headings.
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** two H1 headings.
 
-### `integrity/date-line` — A
+### `integrity/date-line` — W
 - **rule:** strict-locale date line absent or ≠ `ledger.report_date`.
-- **fix:** `alx check --fix` when only the whitespace of the line under the H1 is wrong; otherwise (placement or format) (edit prose; waivable by alx issue --deliver).
-- **remove:** n/a
+- **fix:** `alx check --fix` when only the whitespace of the line under the H1 is wrong; otherwise (placement or format) edit prose (warning; never blocks).
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.
 
-### `integrity/length` — F/A
-- **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. Below the floor arrives as a warning (Class A); above the ceiling is hard.
-- **fix:** extend the report body in report.md (below the floor; Class A).
-- **remove:** delete paragraph `<n>` of report.md (above the ceiling)
+### `integrity/length` — W
+- **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. Both ends are warnings (R28); SKILL.md keeps the target.
+- **fix:** extend the report body in report.md (below the floor), or delete a paragraph (above the ceiling).
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** 16,400 words; ceiling 15,000.
 
 ## Binding (`check` c / `validate_report`, `alx`)
@@ -220,16 +216,16 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** delete paragraph `<n>` of report.md
 - **example:** `https://blog.example.net/x` cited, never fetched.
 
-### `binding/claim-paragraph` — F
+### `binding/claim-paragraph` — W
 - **rule:** an `include_in_report` claim maps to zero or to more than one paragraph.
 - **fix:** `alx claim bind C<n> --paragraph N` — `N` is the body-paragraph number of `validate_report.split_body_paragraphs`, the one numbering `check`, `claim bind`, `claim drop` and the claim→paragraph table all print.
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** ambiguous: candidates 12, 19.
 
-### `binding/excerpt-missing` — F
+### `binding/excerpt-missing` — W
 - **rule:** an `include_in_report` claim has an empty `report_excerpts`.
 - **fix:** `alx claim bind C<n> --paragraph N` — `--fix` writes the excerpt of a bound claim in the same run, so a surviving finding is unbound. With no candidate paragraph the claim is cited nowhere: add the source link to paragraph `<n>` of report.md (ruling R9).
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** C6 bound to paragraph 8, `report_excerpts: []`.
 
 ### `binding/leftover-prose` — F
@@ -238,10 +234,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C8 dropped; paragraph 19 still present.
 
-### `binding/sources-section` — A
+### `binding/sources-section` — W
 - **rule:** Sources H2 is not last, or ≠ the cited-source list.
 - **fix:** `alx check --fix` (regenerates from the ledger).
-- **remove:** n/a
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** S5 cited, absent from Sources.
 
 ## Cache and fidelity (`check` b,d / `source_fidelity`, `alx`)
@@ -252,10 +248,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C2 extract "4,000 documents" not in S1.txt.
 
-### `fidelity/context-changed` — F
+### `fidelity/context-changed` — W
 - **rule:** the probe is present but a recorded probe-context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing.
 - **fix:** `alx fetch --id S<n> --refresh, then alx claim add claims/<file>` — the refresh alone keeps the recorded probe contexts; `claim add` re-confirms the extract and re-binds them.
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** S7 paragraph now begins "Correction:".
 
 ### `fidelity/cache-missing` — F
@@ -270,24 +266,24 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** n/a
 - **example:** S1.txt hand-edited after the fetch.
 
-### `fidelity/unreachable` — F offline / A online
-- **rule:** the source cannot be fetched (dns, timeout, tls, http-<status>, plaintext-http, oversize, redirect-loop, cross-domain-redirect). Offline, with a cache present, it is fabrication; live, beyond quorum, it is availability.
-- **fix:** `alx issue --deliver`
-- **remove:** `alx fetch --id S<n> --refresh`
+### `fidelity/unreachable` — W
+- **rule:** the source cannot be fetched (dns, timeout, tls, http-<status>, plaintext-http, oversize, redirect-loop, cross-domain-redirect). Availability, not fabrication, in both modes (R28): the cached text still decides fidelity.
+- **fix:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** S9 UNREACHABLE (timeout) at issue time.
 
-### `fidelity/undecodable` — F offline / A online
-- **rule:** the fetched bytes do not decode (U+FFFD ratio > 1% after the charset ladder).
-- **fix:** `alx issue --deliver`
-- **remove:** `alx fetch --id S<n> --refresh`
+### `fidelity/undecodable` — W
+- **rule:** the fetched bytes do not decode (U+FFFD ratio > 1% after the charset ladder). Availability, not fabrication, in both modes (R28).
+- **fix:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** S6 UNDECODABLE (gb2312).
 
 ## Rewild (`check` e / `rewild_gate`)
 
-### `fidelity/semantic` — F
+### `fidelity/semantic` — W
 - **rule:** negation, direction, causal or association drift between snapshot and report, measured on citation-stripped, quote-masked prose with monotonic clause alignment.
 - **fix:** `alx snapshot --restore`
-- **remove:** `alx snapshot --restore`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** snapshot "did not exceed"; report "exceeded".
 
 ### `fidelity/rewild` — F
@@ -296,118 +292,122 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx snapshot --restore`
 - **example:** figure 4,000 became 40,000 during humanize.
 
-### `rewild/region` — F
+### `rewild/region` — W
 - **rule:** the checker's "Region" section and every other hard checker error: wrong-region vocabulary or script.
 - **fix:** `alx snapshot --restore`
-- **remove:** `alx snapshot --restore`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** 簡體 vocabulary in a zh-HK report.
 
-### `rewild/ai-vocabulary` — A
+### `rewild/ai-vocabulary` — W
 - **rule:** the checker's "AI vocabulary" section, length-scaled, counted on quote-masked prose.
-- **fix:** (edit prose; waivable by alx issue --deliver)
-- **remove:** n/a — no Class A finding carries a remove remedy (ruling R8).
+- **fix:** edit prose (warning; never blocks)
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** "delve" ×7 at 8,000 words.
 
-### `rewild/style` — A (warn)
+### `rewild/style` — W
 - **rule:** every other checker section — Rhythm, Openers, Serial enumeration, Paragraphs, Paragraph closers, Punctuation.
-- **fix:** (edit prose; waivable by alx issue --deliver)
-- **remove:** n/a (ruling R8).
+- **fix:** edit prose (warning; never blocks)
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** 9 consecutive sentences open with the subject.
 
-### `rewild/length` — A
+### `rewild/length` — W
 - **rule:** length floor or ceiling, language and script checks (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), the same count as `integrity/length`, counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`).
-- **fix:** (edit prose; waivable by alx issue --deliver)
-- **remove:** n/a (ruling R8).
+- **fix:** edit prose (warning; never blocks)
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** report has 68 words; minimum is 7,500.
 
-### `rewild/checker` — A
+### `rewild/checker` — W
 - **rule:** bookkeeping: unreadable files, unsupported language, checker subprocess failure or timeout (120 s under `alx`, 300 s standalone).
-- **fix:** `alx issue --deliver`
-- **remove:** n/a (Class A)
+- **fix:** `alx check`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** Rewild checker timed out after 120 seconds.
 
-### `rewild/humanization` — A
+### `rewild/humanization` — W
 - **rule:** `issue` had to create the snapshot itself, so the report was never humanized (`humanization: none`).
-- **fix:** `alx issue --deliver`
-- **remove:** `alx snapshot --restore`
+- **fix:** `alx snapshot`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** issue run straight after drafting.
 
 ## Reviews (`check` f / `content_gate`, `rewild_gate`, `alx`)
 
-### `review/rewild` — A
+### `review/rewild` — W
 - **rule:** the blind-review note is missing, incomplete, or no longer matches the reviewed report/source/language/profile.
 - **fix:** `alx review start rewild --iter`
-- **remove:** `alx review start rewild`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** note does not match the reviewed report: report_sha256.
 
-### `review/content-missing` — F
+### `review/content-missing` — W
 - **rule:** no finished content review.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `reviews/content.json` absent.
 
-### `review/content-stale` — F
+### `review/content-stale` — W
 - **rule:** report or ledger changed beyond the §6.8 mechanical-delta allowlist since the content review.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** 2 paragraphs rewritten after `review finish content`.
 
-### `content/score` — F
+### `content/score` — W
 - **rule:** a content-review score is missing or below 4.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `scores.evidence.score = 3`.
 
-### `content/check` — F
+### `content/check` — W
 - **rule:** the content note fails `content-review.schema.json` or its completeness rules; the same family also carries the two claim-binding errors below.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** `status` is not `completed`.
 - **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → add the source link to paragraph `<n>` of report.md. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
 
-### `content/critical-finding` — F
+### `content/critical-finding` — W
 - **rule:** a critical review finding is not dispositioned `resolved`.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** findings[2] disposition `open`.
 
-### `content/disclosure` — F
+### `content/disclosure` — W
 - **rule:** a required disclosure excerpt cannot be located in `report.md`.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** disclosure quotes a sentence that was edited away.
 
-### `content/claim-support` — F
+### `content/claim-support` — W
 - **rule:** a retained claim→paragraph mapping has no support disposition in the note.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** C4 bound to paragraph 8, no `claim_support` entry.
 
 ### `content/claim-binding` — W
 - **rule:** the note's claim binding disagrees with the ledger's mapping.
 - **fix:** `alx claim bind C<n> --paragraph N`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** note says paragraph 7, ledger says 8.
 
-### `content/language` — F
+### `content/language` — W
 - **rule:** report language does not match the ledger's `report_language`.
 - **fix:** `alx review start content --iter`
-- **remove:** `alx review restore content`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** zh-CN ledger, English body.
 
 ## Tooling (`issue` / `render`)
 
-### `tooling/receipt` — A
-- **rule:** a receipt could not be issued or verified — rewild, content, source-fidelity, or `validate_report --fast --final-once`.
-- **fix:** `alx issue --deliver`
-- **remove:** `alx fetch --id S<n> --refresh`
+### `tooling/receipt` — W
+- **rule:** a receipt could not be issued or verified — rewild, content, source-fidelity, or `validate_report --fast --final-once`. `render` still runs on whatever `issue` produced.
+- **fix:** `alx issue`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** source-fidelity receipt not issued: network unavailable.
 
-### `tooling/render` — A
-- **rule:** md_to_pdf or the rasterizer failed or timed out (90 s each); the backend chain pdfkit → pdfium → poppler is already exhausted.
-- **fix:** `alx issue --deliver`
-- **remove:** n/a
+### `tooling/render` — W
+- **rule:** md_to_pdf or the rasterizer failed or timed out (90 s each); the backend chain pdfkit → pdfium → poppler is already exhausted. `render` keeps whatever PDFs it produced.
+- **fix:** `alx render`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** poppler timeout on page 41.
+
+## Removed families
+
+`ledger/harm` — deleted with the person harm rules (R25/R28). `human_harm_review` is no longer a field and no harm finding is raised; ignore any residual emission.
 
 ## Aliases
 

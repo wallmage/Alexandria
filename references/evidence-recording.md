@@ -10,31 +10,28 @@ For every consequential claim, add a ledger entry with:
 - `undated_reason` when a living source has no publication date;
 - one faithful `source_evidence` extract or source location for every direct
   source; never reuse one source's wording as proof for another;
-- evidence type, source family, role, and independence;
-- importance, confidence, limitations, and decision relevance;
-- the reasoning behind analysis and what would change it;
-- honest triangulation status;
-- reciprocal supporting or contradicting claim IDs and conflict resolution.
+- evidence type, source family, role, and independence.
+
+Every other field is optional and the gate never asks for it: importance,
+confidence, limitations, `decision_relevance`, `reasoning`, `what_would_change`,
+`assumptions`, triangulation status, and supporting or contradicting claim IDs.
+Record them when they help the reader; never to satisfy a checker.
 
 A claim may not assert more than its per-source evidence carries. Figures,
 dates, versions, scores, directions, and statuses must be traceable to
-`source_evidence`, `derived_assertions`, or — for original arithmetic —
-`kind: estimate` with `assumptions`. Record
+`source_evidence`, or to a `derived_assertions` entry that says what was
+computed. Record
 `verified_at`, the date you re-read the source, separately from `as_of`, the date
 the fact was true. `supports` points downward only, to the evidence a claim rests
 on; cycles are rejected.
 
-For reports centered on people or sensitive personal claims, inventory known
-people through `people` and `person_ids`. Classify every person-linked claim with
-`person_claim_role` and a substantive `person_claim_assessment`; do not rely
-on supplied IDs alone to decide whether a claim is harmful. Harmful claims
-about a living, recently
-deceased, or unknown-status person require
-`human_harm_review`: exact legal stage, accountable corroboration (or a limited
-single-source exception), attribution, resolution search, right of reply, and
-privacy relevance. A response must reciprocally name the harmful claim in
-`responds_to_claim_ids` and use subject-origin evidence; a resolution must use
-`resolves_claim_ids`. Carry either in the same report paragraph.
+For reports centered on people, inventory known people through `people` and
+`person_ids`, and name the person id on the claims about them. There is no
+harm-review ceremony: `person_claim_role`, `person_claim_assessment` and
+`human_harm_review` are gone. What holds a claim about a person is the same
+thing that holds every other claim — an extract that carries it, the exact
+legal stage where a legal stage is asserted, and the subject's own answer
+quoted when one exists.
 
 Mark changing claims such as price, availability, leadership, policy, and
 current product behavior as `time_sensitive`, and record a non-null `as_of`

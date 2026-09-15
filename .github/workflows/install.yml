@@ -45,42 +45,6 @@ jobs:
           $arguments = $runtime.command[1..($runtime.command.Count - 1)]
           & $program @arguments scripts/install_runtime.py --runtime $env:ALEXANDRIA_RUNTIME_DIR --verify-only
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Diagnose the Windows launcher layers
-        if: runner.os == 'Windows'
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $r = $env:ALEXANDRIA_RUNTIME_DIR
-          $b = $r -replace '/', '\'
-          $m = "$b\Library\bin\micromamba.exe"
-          $manifest = Get-Content .runtime.json | ConvertFrom-Json
-          Write-Output "manifest: $($manifest.command -join ' | ')"
-          Write-Output "--- A exact verify command line again (no pipe)"
-          & $manifest.command[0] @($manifest.command[1..5]) scripts/install_runtime.py --runtime $env:ALEXANDRIA_RUNTIME_DIR --verify-only
-          Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- B same program+args, alx.py --help (no pipe)"
-          & $manifest.command[0] @($manifest.command[1..5]) scripts/alx.py --help
-          Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- C micromamba --version"
-          & $m --version
-          Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- D micromamba run python -c (no pipe)"
-          & $m --no-rc run --prefix "$b\env" python -c "print('D ok')"
-          Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- E launcher (no pipe)"
-          & "$b\bin\python.cmd" -c "print('E ok')"
-          Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- F launcher via cmd /c (no pipe)"
-          cmd /c "`"$b\bin\python.cmd`" -c `"print('F ok')`""
-          Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- G root prefix probe"
-          Get-ChildItem "$env:USERPROFILE" -Force -Filter "*mamba*" | Out-String | Write-Output
-          Get-ChildItem "$env:LOCALAPPDATA" -Force -Filter "*mamba*" -ErrorAction SilentlyContinue | Out-String | Write-Output
-          $env:MAMBA_ROOT_PREFIX = "$b\mamba"
-          & $m --version
-          Write-Output "exit with MAMBA_ROOT_PREFIX=$LASTEXITCODE"
-          Write-Output "--- H env"
-          Get-ChildItem env: | Where-Object { $_.Name -match 'MAMBA|CONDA|PYTHON|COMSPEC|PATHEXT' } | Out-String | Write-Output
       - name: Run alx through the one-path launcher SKILL.md uses
         shell: pwsh
         run: |

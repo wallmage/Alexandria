@@ -472,11 +472,13 @@ _IDENTIFIER_RE = re.compile(
     + r"[A-Za-z]{2,}[-‑][0-9][0-9A-Za-z‑-]*"
     + _NOT_WORD_AFTER
 )
+#: 1949-12-1 is the same day as 1949-12-01: sources write the month and day
+#: unpadded as readily as padded, so both notations parse to one form.
 _ISO_DATE_RE = re.compile(
-    _NOT_WORD_BEFORE + r"([0-9]{4})-([0-9]{2})-([0-9]{2})" + _NOT_WORD_AFTER
+    _NOT_WORD_BEFORE + r"([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})" + _NOT_WORD_AFTER
 )
 _ISO_MONTH_RE = re.compile(
-    _NOT_WORD_BEFORE + r"([0-9]{4})-([0-9]{2})" + _NOT_WORD_AFTER
+    _NOT_WORD_BEFORE + r"([0-9]{4})-([0-9]{1,2})" + _NOT_WORD_AFTER
 )
 _VERSION_RE = re.compile(
     _NOT_WORD_BEFORE + r"[vV]?([0-9]+(?:\.[0-9]+){2,})" + _NOT_WORD_AFTER
@@ -829,6 +831,12 @@ _DOT_DATE_RE = re.compile(
 _CJK_DATE_RE = re.compile(
     r"([0-9]{4})\s*年\s*([0-9]{1,2})\s*月(?:\s*([0-9]{1,2})\s*日)?"
 )
+#: "1931年9月18-20日" (with any dash) names two days, not a 0918-20 token: the
+#: range is expanded into its two end dates before anything else reads them.
+_CJK_DATE_RANGE_RE = re.compile(
+    r"(?:([0-9]{4})\s*年\s*)?(?:([0-9]{1,2})\s*月\s*)?"
+    r"([0-9]{1,2})\s*[-‐‑‒–—~〜至]\s*([0-9]{1,2})\s*日"
+)
 
 
 def _duplicates(values):
@@ -869,7 +877,16 @@ def _normalize_number(raw):
     return text.lstrip("0") or "0"
 
 
+def _expand_date_ranges(match):
+    year = f"{match.group(1)}年" if match.group(1) else ""
+    month = f"{match.group(2)}月" if match.group(2) else ""
+    return (
+        f"{year}{month}{match.group(3)}日 {year}{month}{match.group(4)}日"
+    )
+
+
 def _normalize_dates(text):
+    text = _CJK_DATE_RANGE_RE.sub(_expand_date_ranges, text)
     text = _CJK_DATE_RE.sub(
         lambda match: (
             f"{match.group(1)}-{int(match.group(2)):02d}"
@@ -983,7 +1000,10 @@ def _year_documented_coverage(claim_forms, evidence_forms, source_text):
     text, title or published date). Without that text the rule is unchanged.
 
     R14b: the same holds for a year-month claim (`1945年8月`) against a
-    month-day fragment of that month (`8月2日`)."""
+    month-day fragment of that month (`8月2日`).
+
+    R29: a claim that names no year (`12月13日`) needs only its month
+    documented in the source to be covered by a bare `13日` extract."""
     if not source_text:
         return False
     for claim_form in claim_forms:
@@ -991,9 +1011,9 @@ def _year_documented_coverage(claim_forms, evidence_forms, source_text):
         if not parts:
             continue
         year, month, day = parts
-        if not (year and month):
+        if not month:
             continue
-        if not re.search(rf"(?<!\d){year}(?!\d)", source_text):
+        if year and not re.search(rf"(?<!\d){year}(?!\d)", source_text):
             continue
         if not day:
             if any(
@@ -1021,26 +1041,6 @@ def _claim_field_fix(field):
 ADVERSARIAL_TESTS_FIX = (
     "set field synthesis.adversarial_tests, then alx ledger merge synthesis"
 )
-
-
-def _date_fragment_offer(claim_forms, evidence_rows):
-    """Return (year, source form) when an extract offers the claim's date
-    without its year: `alx find` on the full date would match nothing."""
-    for form in sorted(claim_forms):
-        parts = _parse_date_form(form)
-        if not parts or not all(parts):
-            continue
-        year, month, day = parts
-        fragment = f"d:*-{int(month):02d}-{int(day):02d}"
-        for entry in evidence_rows or ():
-            if not isinstance(entry, dict):
-                continue
-            for display, _, forms, _ in _scan_quantities(
-                entry.get("extract_or_location")
-            ):
-                if fragment in forms:
-                    return year, display
-    return None
 
 
 def _scan_quantities(text):
@@ -1081,12 +1081,12 @@ def _scan_quantities(text):
 
     def iso_date(match):
         year, month, day = match.group(1), match.group(2), match.group(3)
-        form = f"d:{year}-{month}-{day}"
+        form = f"d:{year}-{int(month):02d}-{int(day):02d}"
         return (match.group(0), {form}, {form}, False)
 
     def iso_month(match):
         year, month = match.group(1), match.group(2)
-        form = f"d:{year}-{month}"
+        form = f"d:{year}-{int(month):02d}"
         return (match.group(0), {form}, {form}, False)
 
     def version(match):
@@ -1761,6 +1761,7 @@ def _evidence_coverage_findings(
             forms.update(expression_forms)
         derived_quantities.append((expression.casefold(), forms))
     used_expressions = set()
+    covering_forms = None
     for display, claim_forms in quantitative_obligations(claim_text):
         matching_expressions = [
             expression
@@ -1773,58 +1774,42 @@ def _evidence_coverage_findings(
         # R29: a quantity spelled with Han numerals raises no finding at all.
         if _is_cjk_numeral_token(display):
             continue
-        if _quantity_is_covered(claim_forms, evidence_forms):
+        if covering_forms is None:
+            # R29: the cited source's cached page, title and published date
+            # carry a figure as legitimately as the pasted extract does.
+            covering_forms = evidence_forms | quantitative_evidence(source_text)
+        if _quantity_is_covered(claim_forms, covering_forms):
             continue
-        if _year_documented_coverage(claim_forms, evidence_forms, source_text):
+        if _year_documented_coverage(claim_forms, covering_forms, source_text):
             continue
-        if _year_number_coverage(claim_forms, evidence_forms):
+        if _year_number_coverage(claim_forms, covering_forms):
             continue
-        evidence_rows = claim.get("source_evidence")
-        offered = []
-        find_id = None
-        if isinstance(evidence_rows, list):
-            for entry in evidence_rows:
-                if not isinstance(entry, dict):
-                    continue
-                source_id = entry.get("source_id")
-                if source_id and find_id is None:
-                    find_id = source_id
-                forms = quantitative_evidence(entry.get("extract_or_location"))
-                offered.append(
-                    f"{source_id or '?'} extracts offer "
-                    f"{', '.join(sorted(forms)) or 'none'}"
-                )
+        find_id = next(
+            (
+                entry.get("source_id")
+                for entry in claim.get("source_evidence") or []
+                if isinstance(entry, dict) and entry.get("source_id")
+            ),
+            None,
+        )
         if not find_id:
             linked = claim.get("source_ids")
             if isinstance(linked, list) and linked:
                 find_id = linked[0]
-        if not offered:
-            offered.append(
-                "extracts offer " + (", ".join(sorted(evidence_forms)) or "none")
-            )
-        fix = f"alx find {find_id} {display}" if find_id else "set field extract_or_location"
-        detail = (
-            f"Quote the figure from the source via `{fix}`, or record it in "
-            "derived_assertions with its derivation."
+        fix = (
+            f"alx find {find_id} {display}"
+            if find_id
+            else "set field extract_or_location"
         )
-        offer = _date_fragment_offer(
-            claim_forms, evidence_rows if isinstance(evidence_rows, list) else []
-        )
-        if offer and find_id:
-            offer_year, offer_form = offer
-            fix = (
-                f"add a second extract from {find_id} that states the year "
-                f"(alx find {find_id} {offer_year}), or reword the claim to "
-                f"the source's form ({offer_form})"
-            )
-            detail = "The extract states the month and day but not the year."
+        cjk_word = _is_cjk_numeral_token(display)
         errors.append(
             _f(
                 "ledger/quantity",
-                f"{claim_id}: quantity '{display}' appears in claim but not in "
-                f"extract_or_location (claim {', '.join(sorted(claim_forms))}; "
-                f"{'; '.join(offered)}). {detail}"
-                f" Remove: `{_drop(claim_id)}`.",
+                f"{claim_id}: '{display}' is in the claim but not in "
+                f"{find_id or 'the cited sources'} (extracts or cached page). "
+                f"Fix: {fix}, or reword the claim."
+                + ("" if cjk_word else f" Remove: `{_drop(claim_id)}`."),
+                severity="warn" if cjk_word else "hard",
                 ids=_ids_in(f"{claim_id} {find_id or ''}"),
                 fix=fix,
                 remove=_drop(claim_id),
@@ -3255,7 +3240,7 @@ def _cached_documents(claim, cache_dir):
     if not cache_dir:
         return []
     try:
-        from source_fidelity import normalize_text, read_cache, strip_markup
+        from source_fidelity import read_cache, strip_markup
     except ImportError:
         return []
     source_ids = list(claim.get("source_ids") or [])
@@ -3269,10 +3254,9 @@ def _cached_documents(claim, cache_dir):
         cached = read_cache(cache_dir, source_id)
         if cached is None:
             continue
-        text = cached[0]
-        documents.append(
-            strip_markup(text) if "<" in str(text or "") else normalize_text(text)
-        )
+        # Word spacing is kept here: the quantity scan reads this haystack and
+        # needs adjacent figures to stay apart.
+        documents.append(strip_markup(cached[0]))
     return documents
 
 

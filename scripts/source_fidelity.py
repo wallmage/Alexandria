@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from contextlib import suppress
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import date, datetime, timezone
@@ -737,9 +738,9 @@ def _request_pinned(target, *, timeout):
         connection.close()
 
 
-def normalize_text(value):
-    """Fold whitespace, quotation marks, and case for substring comparison."""
-    text = canonical_visible_text(value)
+def _folded_text(value):
+    """Fold width, whitespace, quotation marks, and case; keep word spacing."""
+    text = unicodedata.normalize("NFKC", canonical_visible_text(value))
     text = text.translate(
         str.maketrans(
             {
@@ -767,6 +768,15 @@ def normalize_text(value):
         )
     )
     return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def normalize_text(value):
+    """`_folded_text` with every space removed: spacing is never fidelity.
+
+    A page printing "认真 .从1915年" and an extract quoting "认真.从1915年" are
+    the same words, so both sides of every comparison drop whitespace.
+    """
+    return re.sub(r"\s+", "", _folded_text(value))
 
 
 def file_sha256(path):
@@ -871,7 +881,7 @@ def strip_markup(document):
     parser = _VisibleTextParser()
     parser.feed(str(document or ""))
     parser.close()
-    return normalize_text(" ".join(parser.parts))
+    return _folded_text(" ".join(parser.parts))
 
 
 def _probe_windows(text):
@@ -1136,7 +1146,7 @@ def _claim_weight(claim, central_ids):
 
 def _document(text):
     """The normalized haystack both recording and comparison must agree on."""
-    return strip_markup(text) if "<" in str(text or "") else normalize_text(text)
+    return normalize_text(strip_markup(text) if "<" in str(text or "") else text)
 
 
 def _probe_key(probe):
@@ -1292,7 +1302,7 @@ def _load_fetched(url, fetched):
             "content_type": "text/html",
             "byte_count": len(fetched.text.encode("utf-8", errors="replace")),
         }
-        return strip_markup(fetched.text), None, observation, None
+        return normalize_text(strip_markup(fetched.text)), None, observation, None
     if isinstance(fetched, FetchedDocument):
         observation = {
             "requested_url": url,
@@ -1302,8 +1312,8 @@ def _load_fetched(url, fetched):
             "content_type": fetched.content_type,
             "byte_count": fetched.byte_count,
         }
-        return strip_markup(fetched.text), None, observation, None
-    return strip_markup(fetched), None, None, None
+        return normalize_text(strip_markup(fetched.text)), None, observation, None
+    return normalize_text(strip_markup(fetched)), None, None, None
 
 
 def check_source_fidelity(

@@ -281,8 +281,8 @@ class ProbeTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                "mandatory tool confirmation, no auto-approve flag",
-                "and a short 'x' quote.",
+                "mandatorytoolconfirmation,noauto-approveflag",
+                "andashort'x'quote.",
             ],
             probes,
         )
@@ -293,8 +293,8 @@ class ProbeTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                "cloud environments page, network access section",
-                "short bit",
+                "cloudenvironmentspage,networkaccesssection",
+                "shortbit",
             ],
             probes,
         )
@@ -307,7 +307,7 @@ class ProbeTests(unittest.TestCase):
         )
 
         self.assertTrue(
-            any("customer records" in probe for probe in probes),
+            any("customerrecords" in probe for probe in probes),
             probes,
         )
         self.assertTrue(
@@ -315,7 +315,7 @@ class ProbeTests(unittest.TestCase):
             probes,
         )
         self.assertTrue(
-            any("genuine quoted observation" in probe for probe in probes),
+            any("genuinequotedobservation" in probe for probe in probes),
             probes,
         )
         self.assertTrue(
@@ -479,8 +479,8 @@ class SamplingTests(unittest.TestCase):
         }
         self.assertEqual(
             {
-                "S1": ["alpha evidence belongs to source one."],
-                "S2": ["beta evidence belongs to source two."],
+                "S1": ["alphaevidencebelongstosourceone."],
+                "S2": ["betaevidencebelongstosourcetwo."],
             },
             probes,
         )
@@ -645,7 +645,7 @@ class FidelityTests(unittest.TestCase):
         self.assertEqual("failed", result["status"], result["checks"])
         self.assertTrue(
             any(
-                "customer records" in check.get("detail", "")
+                "customerrecords" in check.get("detail", "")
                 for check in result["checks"]
             ),
             result["checks"],
@@ -1134,16 +1134,16 @@ class ProbeResilienceTests(unittest.TestCase):
             '"Alpha evidence belongs to source one. … Beta clause after ellipsis."'
         )
         joined = " ".join(probes)
-        self.assertIn("alpha evidence belongs to source one.", joined)
-        self.assertIn("beta clause after ellipsis.", joined)
+        self.assertIn("alphaevidencebelongstosourceone.", joined)
+        self.assertIn("betaclauseafterellipsis.", joined)
         self.assertFalse(any("…" in probe or "..." in probe for probe in probes))
 
     def test_quote_glyph_families_fold_on_both_sides(self):
         probes = source_fidelity.probe_strings(
             '「Alpha evidence belongs to source one。」'
         )
-        text = source_fidelity.strip_markup(
-            "<p>“Alpha evidence belongs to source one.”</p>"
+        text = source_fidelity.normalize_text(
+            source_fidelity.strip_markup("<p>“Alpha evidence belongs to source one.”</p>")
         )
         self.assertTrue(any(probe in text for probe in probes), (probes, text))
 
@@ -1498,7 +1498,7 @@ class CliResilienceTests(unittest.TestCase):
                 )
             self.assertEqual(0, code)
             fetch.assert_not_called()
-            self.assertIn("claude code: included", stdout.getvalue().casefold())
+            self.assertIn("claudecode:included", stdout.getvalue().casefold())
 
     def test_force_overwrites_receipt_after_printing_failures(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1987,3 +1987,40 @@ class TwoExtractsFromOneSourceTests(unittest.TestCase):
             recorded = meta["probe_contexts"]["C1"]
             self.assertIsInstance(recorded, dict)
             self.assertEqual(2, len(recorded))
+
+
+class WhitespaceFreeComparisonTests(unittest.TestCase):
+    """R29/B3: spacing and character width are never fidelity signals."""
+
+    def probe(self, extract, page):
+        return source_fidelity.probe_findings(
+            {"claim_id": "C1", "extract_or_location": extract},
+            {"source_id": "S3", "url": "https://example.org/diary"},
+            page,
+        )
+
+    def test_a_space_the_page_inserts_does_not_break_the_extract(self):
+        """C1 in miniature: the page prints "认真 .从", the extract "认真.从"."""
+        self.assertEqual(
+            [],
+            self.probe(
+                "蒋介石写日记,是出了名的认真.从1915年开始,写到1972年卧病才停下来.",
+                "怎么来的. 蒋介石写日记,是出了名的认真 .从1915年开始,写到1972年卧病才停下来.",
+            ),
+        )
+
+    def test_fullwidth_and_halfwidth_forms_fold_together(self):
+        self.assertEqual(
+            [],
+            self.probe(
+                "蒋介石(蒋中正)1949年12月10日抵台后,再也没有离开台湾.",
+                "陈仪深受访时说,蒋介石（蒋中正）１９４９年１２月１０日抵台后,再也没有离开台湾.",
+            ),
+        )
+
+    def test_a_fabricated_span_is_still_missing(self):
+        findings = self.probe(
+            "蒋介石写日记,是出了名的马虎.",
+            "怎么来的. 蒋介石写日记,是出了名的认真 .从1915年开始.",
+        )
+        self.assertEqual(["fidelity/mismatch"], [item.family for item in findings])

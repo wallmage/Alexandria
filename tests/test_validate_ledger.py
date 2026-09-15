@@ -289,7 +289,7 @@ class EvidenceCoverageTests(unittest.TestCase):
                 "extract_or_location": "Report dated 2026-07-28.",
             }
         )
-        self.assertTrue(any("quantity '28'" in error for error in errors), errors)
+        self.assertTrue(any("'28' is in the claim" in error for error in errors), errors)
 
     def test_spelled_count_is_an_evidence_obligation(self):
         errors = validate_ledger.evidence_coverage_errors(
@@ -403,7 +403,7 @@ class EvidenceCoverageTests(unittest.TestCase):
         )
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
-            any("quantity '47'" in error for error in errors),
+            any("'47' is in the claim" in error for error in errors),
             errors,
         )
 
@@ -663,8 +663,7 @@ class EvidenceCoverageTests(unittest.TestCase):
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
             any(
-                "quantity '400' appears in claim but not in "
-                "extract_or_location" in error
+                "'400' is in the claim but not in" in error
                 for error in errors
             ),
             errors,
@@ -761,7 +760,7 @@ class EvidenceCoverageTests(unittest.TestCase):
         errors = [
             error
             for error in validate_ledger.validate_references(data)
-            if "2026-07-28" in error and "quantity" in error
+            if "2026-07-28" in error and "is in the claim" in error
         ]
         self.assertEqual([], errors)
 
@@ -795,8 +794,7 @@ class DerivedAssertionTests(unittest.TestCase):
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
             any(
-                "quantity '20' appears in claim but not in "
-                "extract_or_location" in error
+                "'20' is in the claim but not in" in error
                 for error in errors
             ),
             errors,
@@ -1627,7 +1625,7 @@ class ChineseQuantityScanTests(unittest.TestCase):
             }
         )
         self.assertTrue(
-            any("6800" in error and "quantity" in error for error in errors),
+            any("6800" in error and "is in the claim" in error for error in errors),
             errors,
         )
 
@@ -1798,7 +1796,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                 "extract_or_location": "報告稱增長35%。",
             }
         )
-        self.assertTrue(any("quantity" in error for error in errors), errors)
+        self.assertTrue(
+            any("is in the claim but not in" in error for error in errors), errors
+        )
         self.assertFalse(any("direction" in error for error in errors), errors)
         # Digit-decimal claim, matching word-decimal evidence: symmetric.
         self.assertEqual(
@@ -1949,7 +1949,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                 "extract_or_location": "本期損失3.5元。",
             }
         )
-        self.assertTrue(any("quantity" in error for error in errors), errors)
+        self.assertTrue(
+            any("is in the claim but not in" in error for error in errors), errors
+        )
 
     def test_mixed_digit_and_han_compound_is_one_number(self):
         # "3萬5千" is 35,000. The digit scanner took "3萬" off the front and
@@ -1986,7 +1988,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                 "extract_or_location": "庫存為30000件，另有5件待驗。",
             }
         )
-        self.assertTrue(any("quantity" in error for error in errors), errors)
+        self.assertTrue(
+            any("is in the claim but not in" in error for error in errors), errors
+        )
 
     def test_an_abbreviated_compound_offers_both_readings(self):
         # Bare digits after a scale word are genuinely ambiguous in writing:
@@ -2030,7 +2034,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                 "extract_or_location": "庫存為30000件。",
             }
         )
-        self.assertTrue(any("quantity" in error for error in errors), errors)
+        self.assertTrue(
+            any("is in the claim but not in" in error for error in errors), errors
+        )
 
     def test_a_scale_word_without_a_leading_quantity_stays_silent(self):
         # The counterpart to the 十-leading fix: opening *on* the scale word,
@@ -2336,7 +2342,9 @@ class ChineseWordNumberScanTests(unittest.TestCase):
                         "extract_or_location": extract,
                     }
                 )
-                self.assertTrue(any("quantity" in error for error in errors), errors)
+                self.assertTrue(
+            any("is in the claim but not in" in error for error in errors), errors
+        )
 
     def test_a_swallowed_unit_prefix_only_reads_as_one_when_it_multiplies(self):
         # 百分點 is the one listed unit whose remainder after the prefix
@@ -2808,8 +2816,10 @@ class ResilienceLedgerApiTests(unittest.TestCase):
                 ],
             }
         )
-        self.assertTrue(any("quantity" in error for error in errors), errors)
-        self.assertTrue(any("n:12" in error for error in errors), errors)
+        self.assertTrue(
+            any("is in the claim but not in" in error for error in errors), errors
+        )
+        self.assertTrue(any("'12' is in the claim" in error for error in errors), errors)
 
     def test_bare_year_is_not_covered_by_year_month_and_names_both_forms(self):
         errors = validate_ledger.evidence_coverage_errors(
@@ -2827,9 +2837,7 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             }
         )
         joined = " ".join(errors)
-        self.assertIn("n:1918", joined)
-        self.assertIn("d:1918-01", joined)
-        self.assertIn("S16", joined)
+        self.assertIn("'1918' is in the claim but not in S16", joined)
 
     def test_bare_under_without_numeric_or_legal_carrier_is_not_a_direction(self):
         self.assertEqual(
@@ -2981,7 +2989,10 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         data["excluded_claims"] = [dropped]
         data["claims"][0]["supports"] = ["C9"]
         errors = validate_ledger.validate_references(data)
-        self.assertFalse(any("C9:" in error and "quantity" in error for error in errors), errors)
+        self.assertFalse(
+            any("C9:" in error and "is in the claim" in error for error in errors),
+            errors,
+        )
         self.assertTrue(
             any("excluded" in error.lower() and "C9" in error for error in errors),
             errors,
@@ -3401,7 +3412,11 @@ class ClaimRemedyTests(unittest.TestCase):
         ]
         self.assertEqual([], self._fixes(data, "source_evidence for S1"))
 
-    def test_month_day_extract_remedy_asks_for_the_year(self):
+    def test_month_day_extract_remedy_names_the_find(self):
+        """R29 restatement of test_month_day_extract_remedy_asks_for_the_year.
+
+        The year-fragment hint is gone: the remedy is the plain `alx find`.
+        """
         extract = "登記簿は12月10日に決定を記録した。"
         data = ledger_with_fact(
             claim="The registry recorded the decision on 1936-12-10.",
@@ -3409,12 +3424,118 @@ class ClaimRemedyTests(unittest.TestCase):
             source_evidence=[{"source_id": "S2", "extract_or_location": extract}],
         )
         self.assertEqual(
-            [
-                "add a second extract from S2 that states the year "
-                "(alx find S2 1936), or reword the claim to the source's "
-                "form (12月10日)"
+            ["alx find S2 1936-12-10"],
+            self._fixes(data, "'1936-12-10' is in the claim"),
+        )
+
+
+class DateFormResilienceTests(unittest.TestCase):
+    """R29/B2: the forms a Chinese source actually writes a date in."""
+
+    def forms(self, text):
+        return sorted(
+            form for _, claim_forms in validate_ledger.quantitative_obligations(text)
+            for form in claim_forms
+        )
+
+    def test_a_cjk_day_range_yields_its_two_end_dates(self):
+        self.assertEqual(
+            ["d:1931-09-18", "d:1931-09-20"], self.forms("1931年9月18–20日在南昌")
+        )
+
+    def test_a_day_range_never_leaves_a_glued_token(self):
+        for text in ("9月18—20日", "9月18-20日"):
+            with self.subTest(text=text):
+                self.assertEqual(["d:*-09-18", "d:*-09-20"], self.forms(text))
+        self.assertEqual(["d:*-*-18", "d:*-*-20"], self.forms("18–20日"))
+
+    def test_a_dotted_date_is_a_date_not_a_version(self):
+        self.assertEqual(["d:1948-11-24"], self.forms("1948.11.24发布"))
+
+    def test_an_unpadded_iso_date_is_the_same_day_as_the_padded_one(self):
+        self.assertEqual(["d:1949-12-01"], self.forms("(1949-12-1)"))
+        self.assertEqual(["d:1950-01-10"], self.forms("(1950-1-10)"))
+
+
+class PageLevelCoverageTests(unittest.TestCase):
+    """R29/B1: the cited source's cached page covers a figure the pasted
+    extract omits; a figure on neither stays hard."""
+
+    def cache(self, directory, text):
+        Path(directory, "S2.txt").write_text(text, encoding="utf-8")
+        Path(directory, "S2.meta.json").write_text(
+            json.dumps({"probe_contexts": {}}), encoding="utf-8"
+        )
+        return directory
+
+    def claim(self, claim_text, extract):
+        return {
+            "claim_id": "C90",
+            "claim": claim_text,
+            "kind": "fact",
+            "importance": "supporting",
+            "source_ids": ["S2"],
+            "source_evidence": [
+                {"source_id": "S2", "extract_or_location": extract}
             ],
-            self._fixes(data, "quantity '1936-12-10' appears in claim"),
+        }
+
+    def findings(self, claim_text, extract, page):
+        with tempfile.TemporaryDirectory() as directory:
+            cache_dir = self.cache(directory, page) if page is not None else None
+            return [
+                item
+                for item in validate_ledger.claim_findings(
+                    self.claim(claim_text, extract),
+                    valid_quality_ledger(),
+                    cache_dir=cache_dir,
+                )
+                if item.family == "ledger/quantity"
+            ]
+
+    def test_a_range_is_covered_by_the_two_dates_on_the_page(self):
+        """C13 in miniature."""
+        self.assertEqual(
+            [],
+            self.findings(
+                "研究者据蒋1931年9月18–20日的行止记录推断。",
+                "从上述引证蒋氏日记分析,可以得出一个重要结论。",
+                "1931年9月18日在南昌,9月19日,9月20日在舰上。",
+            ),
+        )
+
+    def test_a_day_extract_is_covered_when_the_page_states_the_month(self):
+        """C19 in miniature."""
+        self.assertEqual(
+            [],
+            self.findings(
+                "12月13日日记表白生而辱不如死而荣。",
+                "他在13日的日记中表白生而辱不如死而荣。",
+                "12月的日记记载了当天的行程与会见安排。",
+            ),
+        )
+
+    def test_a_figure_on_neither_the_extract_nor_the_page_stays_hard(self):
+        item = self.findings(
+            "1945年10月毛泽东回延安当天蒋在日记中评价毛。",
+            "杨天石：这个错误,最大的误判应该是这一次。",
+            "杨天石谈蒋介石日记的史料价值。",
+        )[0]
+        self.assertEqual("hard", item.severity)
+        self.assertEqual(
+            "C90: '1945-10' is in the claim but not in S2 (extracts or cached "
+            "page). Fix: alx find S2 1945-10, or reword the claim. "
+            "Remove: `alx claim drop C90 --apply`.",
+            item.message,
+        )
+
+    def test_without_a_cache_only_the_extract_covers(self):
+        self.assertTrue(
+            self.findings(
+                "12月13日日记表白生而辱不如死而荣。",
+                "他在13日的日记中表白生而辱不如死而荣。",
+                None,
+            )
         )
 
 

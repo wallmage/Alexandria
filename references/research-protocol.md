@@ -152,13 +152,13 @@ The failure this prevents is specific and real: a faithful quote covering the
 figures, with an unevidenced clause ("all since patched") appended to the
 claim string.
 
-One narrow exit exists. `derived_assertions` records a computed or inferred
-expression with a stated derivation (40 characters is the useful length, CJK minimum 20);
-the expression must appear in the claim and must not already appear in the
-extract. A derivation asserting what no source offers is fabrication and stays
-hard; one that only excuses a gap is a warning. `assumptions` on a
-`kind: estimate` claim is optional and never a finding: write it when the
-arithmetic is not obvious from the extracts.
+Two narrow exits exist. `derived_assertions` records a computed or inferred
+expression with a stated derivation of at least 40 characters (CJK minimum 20); the expression
+must appear in the claim, must not already appear in the extract, and must
+actually excuse something. A claim carrying more than two is a claim that
+should be split. Original arithmetic belongs in `kind: estimate`, whose
+`assumptions` state the inputs and the steps; the numbers an estimate derives
+are checked against those assumptions.
 
 ### Verification is not re-dating
 

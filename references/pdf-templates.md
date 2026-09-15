@@ -79,7 +79,7 @@ Body links are also underlined, so a link is identifiable in greyscale and to a 
 
 ## Imagery
 
-Use the bundled template image; pass `--cover-image` only if the user supplies a file. The renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files.
+Use the bundled template image; pass `--cover-image` only if the user supplies a file. The renderer accepts PNG, JPEG, GIF, or WebP inside the report directory and blocks remote or out-of-directory files. For a user-supplied cover image, verify the original source, resolution, relevance, and usage rights before downloading anything. Never use a search thumbnail, an unclear license, a negative or alarming image merely for drama, or an image that implies evidence the report does not contain.
 
 Do not delay delivery merely to obtain artwork. Six templates - Maison, Horizon, Terrain, Orbit, Current, and Apricot - ship a licensed photograph in `assets/`, listed in `BUNDLED_TEMPLATE_IMAGES`. The other five draw generated, template-native openers instead.
 

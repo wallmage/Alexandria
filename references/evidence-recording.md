@@ -8,6 +8,18 @@
 - one faithful `source_evidence` extract or source location for that source;
   never reuse one source's wording as proof for another.
 
+A complete entry records the following, though the gate still asks only for the four fields:
+
+- a stable claim ID;
+- a precise claim;
+- fact, reported claim, estimate, or analysis;
+- source ID and public HTTP(S) URL;
+- publication and access dates;
+- `undated_reason` when a living source has no publication date;
+- one faithful `source_evidence` extract or source location for every direct
+  source; never reuse one source's wording as proof for another;
+- evidence type, source family, role, and independence.
+
 Every other field is optional and the gate never asks for it: `kind` (fact,
 reported claim, estimate, analysis), importance, confidence, limitations,
 `decision_relevance`, `reasoning`, `what_would_change`, `assumptions`,

@@ -302,14 +302,94 @@ class EvidenceCoverageTests(unittest.TestCase):
         )
         self.assertTrue(any("three" in error for error in errors), errors)
 
-    # deleted: test_negated_status_and_direction_do_not_support_affirmative_claims
-    # deleted: test_status_evidence_must_match_subject_and_polarity
-    # deleted: test_status_evidence_rejects_a_different_named_carrier
-    # deleted: test_direction_evidence_must_match_the_same_subject
-    # deleted: test_partial_word_cannot_be_a_derived_status_expression
+    def test_negated_status_and_direction_do_not_support_affirmative_claims(self):
+        patched = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "The defect was patched.",
+                "extract_or_location": "The defect was not patched.",
+            }
+        )
+        increased = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C901",
+                "kind": "fact",
+                "claim": "Revenue increased by 12%.",
+                "extract_or_location": "Revenue did not increase by 12%.",
+            }
+        )
+        self.assertTrue(patched, patched)
+        self.assertTrue(increased, increased)
+
+    def test_status_evidence_must_match_subject_and_polarity(self):
+        extracts = (
+            "The advisory rejects the claim that the defect was patched.",
+            "It is false that the defect was patched.",
+            "The patch proposal was rejected.",
+            "The vendor disputed reports that the defect was patched.",
+            "Claims that the defect was patched are incorrect.",
+        )
+        for extract in extracts:
+            with self.subTest(extract=extract):
+                errors = validate_ledger.evidence_coverage_errors(
+                    {
+                        "claim_id": "C900",
+                        "kind": "fact",
+                        "claim": "The defect was patched.",
+                        "extract_or_location": extract,
+                    }
+                )
+                self.assertTrue(
+                    any("patched" in error for error in errors), errors
+                )
+
+    def test_status_evidence_rejects_a_different_named_carrier(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "The alpha defect was patched.",
+                "extract_or_location": "The beta defect was patched.",
+            }
+        )
+        self.assertTrue(
+            any("patched" in error for error in errors),
+            errors,
+        )
+
+    def test_direction_evidence_must_match_the_same_subject(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "Revenue increased.",
+                "extract_or_location": "Costs increased.",
+            }
+        )
+        self.assertTrue(
+            any("direction" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_partial_word_cannot_be_a_derived_status_expression(self):
+        claim = {
+            "claim_id": "C900",
+            "kind": "fact",
+            "claim": "The defect was patched.",
+            "extract_or_location": "The advisory describes the defect.",
+            "derived_assertions": [
+                {
+                    "expression": "patch",
+                    "derivation": "A sufficiently long but invalid derivation." * 2,
+                }
+            ],
+        }
+        self.assertTrue(validate_ledger.derived_assertion_errors(claim))
+        self.assertTrue(validate_ledger.evidence_coverage_errors(claim))
 
     def test_claim_summary_cannot_replace_per_source_evidence(self):
-        claim = fact_claim(
+        data = ledger_with_fact(
             claim="The vendor recorded a 47% failure rate.",
             extract_or_location="The vendor recorded a 47% failure rate.",
             source_evidence=[
@@ -321,14 +401,25 @@ class EvidenceCoverageTests(unittest.TestCase):
                 }
             ],
         )
-        errors = validate_ledger.evidence_coverage_errors(claim)
+        errors = validate_ledger.validate_references(data)
         self.assertTrue(
             any("'47' is in the claim" in error for error in errors),
             errors,
         )
-        self.assertTrue(all(error.startswith("WARNING:") for error in errors), errors)
 
-    # deleted: test_opposite_direction_is_not_evidence
+    def test_opposite_direction_is_not_evidence(self):
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "Revenue increased by 12%.",
+                "extract_or_location": "Revenue decreased by 12%.",
+            }
+        )
+        self.assertTrue(
+            any("direction" in error.lower() for error in errors),
+            errors,
+        )
 
     def test_analysis_cannot_launder_an_unsupported_assertion(self):
         # Relabelling a claim 'analysis' used to skip evidence coverage
@@ -379,7 +470,6 @@ class EvidenceCoverageTests(unittest.TestCase):
             any("extract_or_location is empty" in error for error in errors),
             errors,
         )
-        self.assertFalse(any(error.startswith("WARNING:") for error in errors), errors)
 
     def test_spelled_out_magnitude_is_covered_by_digits_in_the_extract(self):
         # The word form and the digit form are the same figure.
@@ -567,11 +657,10 @@ class EvidenceCoverageTests(unittest.TestCase):
                 )
 
     def test_number_in_claim_must_appear_in_the_extract(self):
-        errors = validate_ledger.evidence_coverage_errors(
-            fact_claim(
-                claim="The vendor recorded a 12.5% failure rate and 400 incidents.",
-            )
+        data = ledger_with_fact(
+            claim="The vendor recorded a 12.5% failure rate and 400 incidents.",
         )
+        errors = validate_ledger.validate_references(data)
         self.assertTrue(
             any(
                 "'400' is in the claim but not in" in error
@@ -579,10 +668,44 @@ class EvidenceCoverageTests(unittest.TestCase):
             ),
             errors,
         )
-        self.assertTrue(all(error.startswith("WARNING:") for error in errors), errors)
 
-    # deleted: test_appended_status_assertion_without_evidence_is_rejected
-    # deleted: test_status_evidence_requires_a_complete_token_with_matching_polarity
+    def test_appended_status_assertion_without_evidence_is_rejected(self):
+        data = ledger_with_fact(
+            claim=(
+                "Researchers disclosed three chained CVEs (CVSS 7.8 to 9.9), "
+                "all since patched."
+            ),
+            extract_or_location=(
+                "Advisory: CVE-2026-35020 (CVSS 7.8), CVE-2026-35022 "
+                "(up to 9.9 in non-interactive mode)."
+            ),
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "C2: claim asserts 'patched'" in error
+                and "records no evidence of it" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_status_evidence_requires_a_complete_token_with_matching_polarity(self):
+        cases = (
+            ("The defect was patched.", "The dispatch occurred on Tuesday."),
+            ("The product was approved.", "The proposal was disapproved."),
+        )
+        for claim, extract in cases:
+            with self.subTest(claim=claim):
+                errors = validate_ledger.evidence_coverage_errors(
+                    {
+                        "claim_id": "C909",
+                        "kind": "fact",
+                        "claim": claim,
+                        "extract_or_location": extract,
+                    }
+                )
+                self.assertTrue(errors, (claim, extract))
 
     def test_equivalent_number_forms_do_not_raise_false_positives(self):
         data = ledger_with_fact(
@@ -668,7 +791,7 @@ class DerivedAssertionTests(unittest.TestCase):
                 }
             ],
         )
-        errors = validate_ledger.evidence_coverage_errors(data["claims"][-1])
+        errors = validate_ledger.validate_references(data)
         self.assertTrue(
             any(
                 "'20' is in the claim but not in" in error
@@ -676,7 +799,6 @@ class DerivedAssertionTests(unittest.TestCase):
             ),
             errors,
         )
-        self.assertTrue(all(error.startswith("WARNING:") for error in errors), errors)
 
     def test_declared_derivation_excuses_an_uncovered_quantity(self):
         data = ledger_with_fact(
@@ -693,17 +815,69 @@ class DerivedAssertionTests(unittest.TestCase):
         )
         errors = [
             error
-            for error in validate_ledger.evidence_coverage_errors(data["claims"][-1])
-            if error.startswith("C2:") or error.startswith("WARNING: C2:")
+            for error in validate_ledger.validate_references(data)
+            if error.startswith("C2:")
         ]
         self.assertEqual([], errors)
 
-    # deleted: test_escape_hatch_cannot_be_a_rubber_stamp
+    def test_escape_hatch_cannot_be_a_rubber_stamp(self):
+        data = ledger_with_fact(
+            claim="The vendor recorded a 12.5% failure rate over 400 runs.",
+            derived_assertions=[
+                {"expression": "900", "derivation": "x" * 40},
+                {
+                    "expression": "12.5%",
+                    "derivation": "Quoted straight from the status page text.",
+                },
+                {"expression": "400", "derivation": "too short"},
+            ],
+        )
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("does not appear in claim", joined)
+        self.assertIn("already appears in extract_or_location", joined)
+        self.assertIn("at least 40 characters", joined)
+        self.assertIn("derived assertions on a fact claim", joined)
 
 
-# deleted: SupportDirectionTests.test_mutual_supports_pair_is_rejected
-# deleted: SupportDirectionTests.test_longer_support_cycle_is_rejected
-# deleted: SupportDirectionTests.test_triangulation_counts_only_one_declared_support_level
+class SupportDirectionTests(unittest.TestCase):
+    def test_mutual_supports_pair_is_rejected(self):
+        data = valid_quality_ledger()
+        data["claims"].append(fact_claim(supports=["C1"]))
+        data["claims"][0]["supports"] = ["C2"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("circular support: C1 -> C2 -> C1" in error for error in errors),
+            errors,
+        )
+
+    def test_longer_support_cycle_is_rejected(self):
+        data = valid_quality_ledger()
+        data["claims"].append(fact_claim(claim_id="C2", supports=["C3"]))
+        data["claims"].append(fact_claim(claim_id="C3", supports=["C1"]))
+        data["claims"][0]["supports"] = ["C2"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "circular support: C1 -> C2 -> C3 -> C1" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_triangulation_counts_only_one_declared_support_level(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["source_ids"] = ["S1"]
+        data["claims"][0]["supports"] = ["C2"]
+        data["claims"].append(
+            fact_claim(claim_id="C2", source_ids=[], supports=["C3"])
+        )
+        data["claims"].append(fact_claim(claim_id="C3", source_ids=["S2"]))
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("1 normalized source family" in error for error in errors),
+            errors,
+        )
 
 
 class SourceFamilyTests(unittest.TestCase):
@@ -715,59 +889,261 @@ class SourceFamilyTests(unittest.TestCase):
         errors = validate_ledger.validate_references(data)
         self.assertEqual([], errors)
 
-    # deleted: test_one_domain_split_across_two_families_is_flagged
-    # deleted: test_split_labels_on_one_host_stay_a_single_family
-    # deleted: test_same_host_pages_cannot_split_into_two_independence_classes
-    # deleted: test_same_publisher_cannot_be_split_into_two_families
+    def test_one_domain_split_across_two_families_is_flagged(self):
+        data = valid_quality_ledger()
+        data["sources"].append(
+            dict(
+                data["sources"][0],
+                source_id="S3",
+                url="https://records.example.org/blog/why-we-win",
+                source_family="example-registry-blog",
+            )
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("is split across 2 source families" in error for error in errors),
+            errors,
+        )
+
+    def test_split_labels_on_one_host_stay_a_single_family(self):
+        # The exploit: two pages on one host given different family labels to
+        # fake triangulation. The domain merge must defeat it.
+        data = valid_quality_ledger()
+        data["sources"][1]["url"] = "https://records.example.org/blog/why-we-win"
+        data["sources"][1]["publisher"] = "Example Registry"
+        data["sources"][1]["source_family"] = "example-registry-blog"
+        data["sources"][1]["provenance"] = "primary_interested"
+        families = validate_ledger._source_family_index(
+            {source["source_id"]: source for source in data["sources"]}
+        )
+        self.assertEqual(
+            1,
+            len(set(families.values())),
+            "pages on one registrable domain must collapse to one family",
+        )
+
+    def test_same_host_pages_cannot_split_into_two_independence_classes(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["url"] = "https://acme.example.com/pricing"
+        data["sources"][0]["source_family"] = "example.com"
+        data["sources"][1]["url"] = "https://acme.example.com/blog/why-we-win"
+        data["sources"][1]["source_family"] = "example.com"
+        data["sources"][1]["publisher"] = "Acme"
+        data["sources"][0]["publisher"] = "Acme"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "Sources on host acme.example.com declare different "
+                "independence classes" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_same_publisher_cannot_be_split_into_two_families(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["url"] = "https://blog.example.org/why-we-win"
+        data["sources"][1]["source_family"] = "example.org"
+        data["sources"][1]["publisher"] = "Example Registry"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("1 normalized source family" in error for error in errors),
+            errors,
+        )
 
 
-# deleted: AbsenceRecordTests.test_negative_existence_claim_needs_a_search_record
-# deleted: AbsenceRecordTests.test_absence_search_must_be_inside_the_freshness_window
-# deleted: AbsenceRecordTests.test_a_current_absence_search_passes
+class AbsenceRecordTests(unittest.TestCase):
+    def test_negative_existence_claim_needs_a_search_record(self):
+        for wording in (
+            "No independent benchmark of any kind exists for this product.",
+            "No published source measures the per-change cost.",
+            "No public equivalent appears to exist for the rival product.",
+            "None was located in the regulator's public register.",
+            "We found no third-party audit of the pipeline.",
+        ):
+            with self.subTest(wording=wording):
+                data = ledger_with_fact(claim=wording, extract_or_location="Searches")
+                errors = validate_ledger.validate_references(data)
+                self.assertTrue(
+                    any(
+                        "records no evidence_of_absence" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_absence_search_must_be_inside_the_freshness_window(self):
+        data = ledger_with_fact(
+            claim="No independent benchmark exists for this product.",
+            extract_or_location="Searches run against the public registers.",
+            evidence_of_absence={
+                "queries": ["independent benchmark"],
+                "expected_locations": ["public register"],
+                "searched_at": "2019-01-01",
+            },
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("the absence search ran" in error for error in errors),
+            errors,
+        )
+
+    def test_a_current_absence_search_passes(self):
+        data = ledger_with_fact(
+            claim="No independent benchmark exists for this product.",
+            extract_or_location="Searches run against the public registers.",
+            evidence_of_absence={
+                "queries": ["independent benchmark"],
+                "expected_locations": ["public register"],
+                "searched_at": "2026-07-27",
+            },
+        )
+        errors = [
+            error
+            for error in validate_ledger.validate_references(data)
+            if "evidence_of_absence" in error or "absence search" in error
+        ]
+        self.assertEqual([], errors)
 
 
-# deleted: EvidenceFreshnessTests.test_time_sensitive_claim_rejects_stale_access_and_publication
-# deleted: EvidenceFreshnessTests.test_undated_reason_must_name_a_continuously_updated_page
+class EvidenceFreshnessTests(unittest.TestCase):
+    def test_time_sensitive_claim_rejects_stale_access_and_publication(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = "2026-07-28"
+        data["claims"][0]["verified_at"] = "2026-07-28"
+        for source in data["sources"]:
+            source["published"] = "2019-04-01"
+            source["accessed"] = "2020-05-02"
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("was last accessed", joined)
+        self.assertIn("not published inside the freshness window", joined)
+
+    def test_undated_reason_must_name_a_continuously_updated_page(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = "2026-07-28"
+        data["claims"][0]["verified_at"] = "2026-07-28"
+        data["sources"][0]["published"] = None
+        data["sources"][0]["undated_reason"] = "no date shown on the page"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "undated_reason does not state that the page is "
+                "continuously updated" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+        data["sources"][0]["undated_reason"] = (
+            "This is a living pricing page that the vendor updates in place."
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertFalse(
+            any("continuously updated" in error for error in errors), errors
+        )
 
 
-# deleted: VerificationDateTests.test_time_sensitive_claim_must_record_verified_at
-# deleted: VerificationDateTests.test_verified_at_cannot_outrun_the_report_or_the_source_reading
+class VerificationDateTests(unittest.TestCase):
+    def test_time_sensitive_claim_must_record_verified_at(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = "2026-07-28"
+        data["claims"][0].pop("verified_at")
+        data["sources"][0]["undated_reason"] = (
+            "Continuously updated official documentation page."
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "a time-sensitive claim needs verified_at" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_verified_at_cannot_outrun_the_report_or_the_source_reading(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["verified_at"] = "2026-08-30"
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("verified_at is after the report date", joined)
+        self.assertIn("later than the most recent source access", joined)
 
 
-# deleted: KeyClaimFoundationTests.test_key_claim_cannot_rest_only_on_interested_sources
-# deleted: KeyClaimFoundationTests.test_key_claim_without_any_foundation_is_reported
-# deleted: KeyClaimFoundationTests.test_key_claim_needs_a_source_outside_the_subject_role
+class KeyClaimFoundationTests(unittest.TestCase):
+    def test_key_claim_cannot_rest_only_on_interested_sources(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["provenance"] = "secondary_dependent"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "C1: key claim rests only on interested" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_key_claim_without_any_foundation_is_reported(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["source_ids"] = []
+        data["claims"][0]["supports"] = []
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "C1: key claim has no direct source" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_key_claim_needs_a_source_outside_the_subject_role(self):
+        data = valid_quality_ledger()
+        for source in data["sources"]:
+            source["roles"] = ["subject_official"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "every source under this key claim is subject_official"
+                in error
+                for error in errors
+            ),
+            errors,
+        )
 
 
 class AccountabilityNoteFloorTests(unittest.TestCase):
     def test_accountability_note_has_a_script_aware_prose_floor(self):
         """H7: schema floor 20 fits CJK; Latin notes still owe 40 characters."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "accountability_note": {"type": "string", "minLength": 20}
-            },
-        }
-        errors = validate_ledger.prose_floor_errors(
-            {"accountability_note": "A signed docket entry."}, schema
-        )
+        data = living_harm_ledger()
+        data["sources"][0]["accountability_note"] = "A signed docket entry."
+        errors = validate_ledger.validate_references(data)
         joined = " ".join(errors)
         self.assertIn("accountability_note", joined)
         self.assertIn("threshold 40, actual 22", joined)
-        self.assertEqual(
-            [],
-            validate_ledger.prose_floor_errors(
-                {"accountability_note": "监管机构在其案卷中公布了签署的执法记录。"},
-                schema,
-            ),
+        data["sources"][0]["accountability_note"] = "监管机构在其案卷中公布了签署的执法记录。"
+        self.assertNotIn(
+            "accountability_note", " ".join(validate_ledger.validate_references(data))
         )
 
 
 class EstimateTests(unittest.TestCase):
-    # deleted: test_estimate_requires_assumptions_in_the_ledger
+    def test_estimate_requires_assumptions_in_the_ledger(self):
+        data = ledger_with_fact(
+            kind="estimate",
+            claim="A team of 12 engineers costs about 4800 per month.",
+            extract_or_location="Pricing page: 400 per seat per month.",
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("an estimate must record its assumptions" in error for error in errors),
+            errors,
+        )
 
     def test_assumptions_carry_the_arithmetic_behind_an_estimate(self):
-        claim = fact_claim(
+        data = ledger_with_fact(
             kind="estimate",
             claim="A team of 12 engineers costs about 4800 per month.",
             extract_or_location="Pricing page: 400 per seat per month.",
@@ -777,8 +1153,8 @@ class EstimateTests(unittest.TestCase):
         )
         errors = [
             error
-            for error in validate_ledger.evidence_coverage_errors(claim)
-            if "C2:" in error
+            for error in validate_ledger.validate_references(data)
+            if error.startswith("C2:")
         ]
         self.assertEqual([], errors)
 
@@ -803,17 +1179,50 @@ class LedgerReferenceTests(unittest.TestCase):
                 "extract_or_location": "Evidence from an unrelated source.",
             },
         ]
-        self.assertEqual([], validate_ledger.validate_references(data))
-        data["claims"][0]["source_ids"] = ["S1", "S2", "S9"]
         errors = validate_ledger.validate_references(data)
-        self.assertEqual(
-            ["C1 references unknown source S9."],
-            [error for error in errors if "unknown source" in error],
+        joined = " ".join(errors)
+        self.assertNotIn("duplicate source_evidence", joined)
+        self.assertIn("source_evidence references S9", joined)
+        self.assertIn("extra source_ids", joined)
+
+    def test_v3_ledger_requires_an_independent_source_portfolio(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["provenance"] = "primary_interested"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("portfolio has no independent source" in error.lower() for error in errors),
+            errors,
         )
 
-    # deleted: test_v3_ledger_requires_an_independent_source_portfolio
-    # deleted: test_supported_coverage_cannot_rely_only_on_interested_sources
-    # deleted: test_high_confidence_inference_requires_independent_foundation
+    def test_supported_coverage_cannot_rely_only_on_interested_sources(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["source_ids"] = ["S1"]
+        data["claims"][0]["triangulation"] = {
+            "status": "limited",
+            "rationale": "Only the subject's record was available.",
+        }
+        data["claims"][0]["confidence"] = "medium"
+        data["claims"][0]["limitations"] = "No independent corroboration was found."
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("supported coverage decision relies only on interested sources" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_high_confidence_inference_requires_independent_foundation(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["status"] = "inference"
+        data["claims"][0]["source_ids"] = ["S1"]
+        data["claims"][0]["triangulation"] = {
+            "status": "limited",
+            "rationale": "Only the subject's record was available.",
+        }
+        data["claims"][0]["limitations"] = "No independent corroboration was found."
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("high-confidence inference" in error.lower() for error in errors),
+            errors,
+        )
 
     def test_schema_requires_the_research_brief_and_synthesis_contract(self):
         schema = json.loads(
@@ -874,12 +1283,19 @@ class LedgerReferenceTests(unittest.TestCase):
             ],
         }
         errors = validate_ledger.validate_references(data)
-        self.assertEqual(
-            ["C1 references unknown source S2."],
-            [error for error in errors if "unknown source" in error],
+        self.assertTrue(any("Duplicate source ID" in error for error in errors))
+        self.assertTrue(any("Duplicate claim ID" in error for error in errors))
+        self.assertTrue(any("unknown source S2" in error for error in errors))
+        self.assertTrue(any("unknown claim C9" in error for error in errors))
+
+        data["coverage"] = [{"area": "current", "claim_ids": ["C8"]}]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any(
+                "Coverage current references unknown claim C8" in error
+                for error in errors
+            )
         )
-        self.assertFalse(any("Duplicate" in error for error in errors), errors)
-        self.assertFalse(any("unknown claim" in error for error in errors), errors)
 
     def test_cross_reference_check_tolerates_schema_invalid_shapes(self):
         self.assertEqual([], validate_ledger.validate_references([]))
@@ -890,19 +1306,218 @@ class LedgerReferenceTests(unittest.TestCase):
             ),
         )
 
-    # deleted: test_rejects_circular_analysis_without_sourced_foundation
-    # deleted: test_high_priority_coverage_must_finish_or_state_the_gap_impact
-    # deleted: test_key_analysis_must_have_honest_source_family_triangulation
-    # deleted: test_triangulation_normalizes_families_and_requires_independent_evidence
-    # deleted: test_duplicate_source_urls_are_rejected_after_normalization
-    # deleted: test_disputed_claims_need_reciprocal_contradictions_and_resolution
-    # deleted: test_synthesis_must_use_included_key_claims_and_known_foundations
-    # deleted: test_source_dates_cannot_postdate_the_report_or_access
-    # deleted: test_time_sensitive_claims_need_current_dates_and_dated_sources
-    # deleted: test_stale_time_sensitive_claim_is_reported
-    # deleted: test_gap_coverage_cannot_hide_claims
-    # deleted: test_coverage_status_must_match_the_referenced_claims
-    # deleted: test_implications_and_takeaways_must_connect_to_the_central_judgment
+    def test_rejects_circular_analysis_without_sourced_foundation(self):
+        data = {
+            "sources": [{"source_id": "S1"}],
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "kind": "analysis",
+                    "source_ids": [],
+                    "supports": ["C2"],
+                    "contradicts": [],
+                    "include_in_report": True,
+                },
+                {
+                    "claim_id": "C2",
+                    "kind": "analysis",
+                    "source_ids": [],
+                    "supports": ["C1"],
+                    "contradicts": [],
+                    "include_in_report": True,
+                },
+            ],
+        }
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("circular support" in error for error in errors))
+        self.assertTrue(any("no sourced foundation" in error for error in errors))
+
+    def test_high_priority_coverage_must_finish_or_state_the_gap_impact(self):
+        data = valid_quality_ledger()
+        data["coverage"][0]["status"] = "in_progress"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("High-priority coverage decision is unresolved" in error for error in errors),
+            errors,
+        )
+
+        data["coverage"][0]["status"] = "gap"
+        data["coverage"][0]["claim_ids"] = []
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("Coverage decision is a gap but has no gap impact" in error for error in errors),
+            errors,
+        )
+
+    def test_key_analysis_must_have_honest_source_family_triangulation(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["source_ids"] = ["S1"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("declares triangulation met but has 1 normalized source family" in error for error in errors),
+            errors,
+        )
+
+        data["claims"][0]["triangulation"] = {
+            "status": "limited",
+            "rationale": "Only the vendor record was available.",
+        }
+        data["claims"][0]["limitations"] = "No independent test was available."
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("high-confidence key judgment cannot use limited triangulation" in error for error in errors),
+            errors,
+        )
+
+    def test_triangulation_normalizes_families_and_requires_independent_evidence(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["source_family"] = " Same-Family "
+        data["sources"][1]["source_family"] = "same family"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("1 normalized source family" in error for error in errors),
+            errors,
+        )
+
+        data = valid_quality_ledger()
+        data["sources"][1]["provenance"] = "secondary_dependent"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("no independent source" in error for error in errors),
+            errors,
+        )
+
+    def test_duplicate_source_urls_are_rejected_after_normalization(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["url"] = "HTTPS://records.example.org/result/"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("Duplicate source URL" in error for error in errors), errors)
+
+    def test_disputed_claims_need_reciprocal_contradictions_and_resolution(self):
+        data = valid_quality_ledger()
+        data["claims"].append(
+            {
+                "claim_id": "C2",
+                "kind": "fact",
+                "importance": "supporting",
+                "source_ids": ["S2"],
+                "supports": [],
+                "contradicts": [],
+                "confidence": "medium",
+                "status": "supported",
+                "include_in_report": False,
+            }
+        )
+        data["claims"][0]["status"] = "disputed"
+        data["claims"][0]["contradicts"] = ["C2"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("C1 is disputed but has no resolution" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("C1 contradicts C2, but the relationship is not reciprocal" in error for error in errors),
+            errors,
+        )
+
+    def test_synthesis_must_use_included_key_claims_and_known_foundations(self):
+        data = valid_quality_ledger()
+        data["synthesis"]["central_judgment_claim_ids"] = ["C9"]
+        data["synthesis"]["counterevidence_claim_ids"] = ["C6"]
+        data["synthesis"]["implications"][0]["claim_ids"] = ["C8"]
+        data["synthesis"]["decisions_or_takeaways"][0]["rationale_claim_ids"] = ["C7"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("unknown central judgment C9" in error for error in errors), errors)
+        self.assertTrue(any("unknown counterevidence C6" in error for error in errors), errors)
+        self.assertTrue(any("unknown implication claim C8" in error for error in errors), errors)
+        self.assertTrue(any("unknown takeaway rationale C7" in error for error in errors), errors)
+
+        data = valid_quality_ledger()
+        data["synthesis"]["central_judgment_claim_ids"] = []
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("Key report claim C1 is missing from the central synthesis" in error for error in errors),
+            errors,
+        )
+
+    def test_source_dates_cannot_postdate_the_report_or_access(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["published"] = "2026-07-29"
+        data["sources"][1]["accessed"] = "2026-07-20"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("S1 is published after the report date" in error for error in errors), errors)
+        self.assertTrue(any("S2 is published after it was accessed" in error for error in errors), errors)
+
+        data = valid_quality_ledger()
+        data["sources"][0]["accessed"] = "2026-07-29"
+        data["claims"][0]["as_of"] = "2026-07-30"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("S1 is accessed after the report date" in error for error in errors), errors)
+        self.assertTrue(any("C1 is dated after the report date" in error for error in errors), errors)
+
+    def test_time_sensitive_claims_need_current_dates_and_dated_sources(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = None
+        data["sources"][0]["published"] = None
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("time-sensitive", joined)
+        self.assertIn("undated_reason", joined)
+
+        data["claims"][0]["as_of"] = "2026-07-28"
+        data["sources"][0]["undated_reason"] = (
+            "This is a continuously updated official documentation page."
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertFalse(any("time-sensitive" in error for error in errors), errors)
+        self.assertFalse(any("undated_reason" in error for error in errors), errors)
+
+    def test_stale_time_sensitive_claim_is_reported(self):
+        data = valid_quality_ledger()
+        data["report_date"] = "2026-07-28"
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = "2026-05-01"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("88 days before" in error for error in errors), errors)
+
+    def test_gap_coverage_cannot_hide_claims(self):
+        data = valid_quality_ledger()
+        data["coverage"][0]["status"] = "gap"
+        data["coverage"][0]["gap_impact"] = "The decision remains uncertain."
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("gap but still references claims" in error for error in errors), errors)
+
+    def test_coverage_status_must_match_the_referenced_claims(self):
+        data = valid_quality_ledger()
+        data["coverage"][0]["status"] = "supported"
+        data["claims"][0]["status"] = "disputed"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("supported but references no supported claim" in error for error in errors),
+            errors,
+        )
+
+    def test_implications_and_takeaways_must_connect_to_the_central_judgment(self):
+        data = valid_quality_ledger()
+        data["claims"].append(
+            {
+                "claim_id": "C2",
+                "kind": "fact",
+                "importance": "supporting",
+                "source_ids": ["S2"],
+                "supports": [],
+                "contradicts": [],
+                "confidence": "medium",
+                "status": "supported",
+                "include_in_report": False,
+            }
+        )
+        data["synthesis"]["implications"][0]["claim_ids"] = ["C2"]
+        data["synthesis"]["decisions_or_takeaways"][0]["rationale_claim_ids"] = ["C2"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("Implication is not linked" in error for error in errors), errors)
+        self.assertTrue(any("Takeaway is not linked" in error for error in errors), errors)
 
     def test_adversarial_tests_are_required_and_reference_known_claims(self):
         data = valid_quality_ledger()
@@ -913,7 +1528,11 @@ class LedgerReferenceTests(unittest.TestCase):
             )
         )
         self.assertTrue(validate_ledger.validate_schema(data, schema))
-        # deleted: unknown adversarial-test claim C9 (ledger/reference WARN half)
+
+        data = valid_quality_ledger()
+        data["synthesis"]["adversarial_tests"][0]["claim_ids"] = ["C9"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("unknown adversarial-test claim C9" in error for error in errors), errors)
 
 
 class ChineseQuantityScanTests(unittest.TestCase):
@@ -1855,22 +2474,84 @@ class DirectionCarrierIgnoresNumeralNoiseTests(unittest.TestCase):
                     ),
                 )
 
-    # deleted: test_a_genuinely_unsupported_direction_is_still_rejected
-    # deleted: test_carrier_tokens_exclude_numeral_characters
+    def test_a_genuinely_unsupported_direction_is_still_rejected(self):
+        # The fix must not turn the direction check into a no-op: a claim
+        # asserting an increase against evidence with no increase language at
+        # all (and a different, unrelated subject) is still flagged.
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C922",
+                "kind": "fact",
+                "claim": "營收增長百分之三十五。",
+                "extract_or_location": "成本下降三成。",
+            }
+        )
+        self.assertTrue(any("direction" in error for error in errors), errors)
+
+    def test_carrier_tokens_exclude_numeral_characters(self):
+        # Direct check on the mechanism itself: a sentence built entirely
+        # from a Han-numeral phrase yields no carrier tokens at all, exactly
+        # as a digit-form figure already does, rather than numeral bigrams.
+        match = next(re.finditer("增長", "增長百分之三十五。"))
+        self.assertEqual(
+            set(),
+            validate_ledger._assertion_carrier_tokens(
+                "增長百分之三十五。", match
+            ),
+        )
 
 
 class ResilienceLedgerApiTests(unittest.TestCase):
     """Spec §7.1 / §6.4 / §9 — findings, severities, quantities, claim-input."""
 
     def test_families_constant_is_exported(self):
-        self.assertEqual(
-            frozenset(
-                {"ledger/quantity", "ledger/claim-input", "ledger/reference"}
-            ),
-            validate_ledger.FAMILIES,
-        )
+        emitted = {item.family for item in self._family_fixture_findings()}
+        self.assertEqual(validate_ledger.FAMILIES, emitted)
+        self.assertTrue(emitted <= validate_ledger.FAMILIES)
 
-    # deleted: test_r28_downgraded_families_are_warn
+    #: R28: every ledger family the severity table downgrades. The fixture
+    #: above emits all of them (the assertion right here pins that), so one
+    #: pass over it proves each one warns instead of refusing.
+    R28_WARN_FAMILIES = frozenset(
+        {
+            "ledger/coverage",
+            "ledger/excluded-supports",
+            "ledger/freshness",
+            "ledger/host-conflict",
+            "ledger/https",
+            "ledger/key-claim",
+            "ledger/person",
+            "ledger/portfolio",
+            "ledger/provenance",
+            "ledger/source-family",
+            "ledger/source-ids",
+            "ledger/synthesis",
+            "ledger/triangulation",
+            "ledger/undated-reason",
+            # R29: lexical/semantic heuristics and ledger shape warn too.
+            "ledger/direction",
+            "ledger/schema",
+            "ledger/status",
+        }
+    )
+    R28_HARD_FAMILIES = frozenset()
+
+    def test_r28_downgraded_families_are_warn(self):
+        by_family = {}
+        for item in self._family_fixture_findings():
+            by_family.setdefault(item.family, []).append(item)
+        for family in sorted(self.R28_WARN_FAMILIES):
+            with self.subTest(family=family):
+                items = by_family.get(family, [])
+                self.assertTrue(items, f"{family} is not exercised")
+                self.assertEqual(
+                    {"warn"}, {item.severity for item in items}
+                )
+        for family in sorted(self.R28_HARD_FAMILIES):
+            with self.subTest(family=family):
+                self.assertIn(
+                    "hard", {item.severity for item in by_family.get(family, [])}
+                )
 
     def test_r28_reference_is_hard_only_for_an_unfetched_source(self):
         data = valid_quality_ledger()
@@ -1883,9 +2564,168 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(unfetched))
         self.assertEqual("hard", unfetched[0].severity)
-        self.assertEqual("C1 references unknown source S99.", unfetched[0].message)
+        others = [
+            item
+            for item in self._family_fixture_findings()
+            if item.family == "ledger/reference"
+        ]
+        self.assertTrue(others)
+        self.assertEqual("warn", {item.severity for item in others}.pop())
 
-    # deleted: test_threshold_messages_keep_their_own_family
+    def _family_fixture_findings(self):
+        findings = []
+        data = valid_quality_ledger()
+        data["claims"][0]["claim"] = "Revenue increased by 12%."
+        data["claims"][0]["extract_or_location"] = "Revenue decreased by 12%."
+        data["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
+        data["claims"][0]["source_evidence"][1]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
+        findings.extend(validate_ledger.collect_findings(data))
+        https = valid_quality_ledger()
+        https["sources"][0]["url"] = "http://records.example.org/result"
+        findings.extend(validate_ledger.collect_findings(https))
+        missing = valid_quality_ledger()
+        missing["claims"][0].pop("source_ids")
+        findings.extend(validate_ledger.collect_findings(missing))
+        extras = valid_quality_ledger()
+        extras["claims"][0]["source_ids"] = ["S1", "S2", "S3"]
+        extras["sources"].append(
+            {
+                "source_id": "S3",
+                "url": "https://other.example.net/x",
+                "publisher": "Other",
+                "source_family": "other.example.net",
+                "provenance": "secondary_independent",
+                "roles": ["independent_analysis"],
+                "accountability_basis": "none",
+                "published": "2026-07-21",
+                "accessed": "2026-07-28",
+            }
+        )
+        findings.extend(validate_ledger.collect_findings(extras))
+        unverified = valid_quality_ledger()
+        unverified["sources"][1]["provenance"] = "unverified"
+        findings.extend(validate_ledger.collect_findings(unverified))
+        findings.extend(
+            validate_ledger.claim_findings(
+                {
+                    "claim_id": "C5",
+                    "claim": "Revenue increased by 12%.",
+                    "kind": "analysis",
+                    "importance": "supporting",
+                    "source_evidence": [
+                        {"source_id": "S2", "extract_or_location": "short"},
+                    ],
+                    "person_ids": ["P9"],
+                },
+                valid_quality_ledger(),
+            )
+        )
+        # R28: a claim input is refused for an empty extract, not for a missing
+        # conditional field, so that is what now raises ledger/claim-input.
+        findings.extend(
+            validate_ledger.claim_findings(
+                {
+                    "claim_id": "C6",
+                    "claim": "Revenue increased by 12%.",
+                    "kind": "fact",
+                    "importance": "supporting",
+                    "source_evidence": [
+                        {"source_id": "S2", "extract_or_location": ""},
+                    ],
+                },
+                valid_quality_ledger(),
+            )
+        )
+        unknown = valid_quality_ledger()
+        unknown["people"] = [
+            {
+                "person_id": "P1",
+                "name": "Alex Doe",
+                "aliases": ["Doe"],
+                "living_status": "unknown",
+                "public_role": "public",
+                "relationship": "primary_subject",
+            }
+        ]
+        unknown["claims"][0]["person_ids"] = ["P1"]
+        unknown["claims"][0]["person_claim_role"] = "neutral"
+        unknown["claims"][0]["person_claim_assessment"] = {
+            "classification": "neutral",
+            "rationale": "x" * 40,
+        }
+        findings.extend(validate_ledger.collect_findings(unknown))
+        dropped = fact_claim(claim_id="C9")
+        dropped["reason"] = "drop"
+        dropped["dropped_at"] = "2026-09-14T00:00:00Z"
+        excluded = valid_quality_ledger()
+        excluded["excluded_claims"] = [dropped]
+        excluded["claims"][0]["supports"] = ["C9"]
+        findings.extend(validate_ledger.collect_findings(excluded))
+        host = valid_quality_ledger()
+        host["sources"][1]["url"] = "https://records.example.org/other"
+        host["sources"][1]["source_family"] = "example.org"
+        findings.extend(validate_ledger.collect_findings(host))
+        schema = validate_ledger.collect_findings({})
+        findings.extend(schema)
+        coverage = valid_quality_ledger()
+        coverage["coverage"][0]["claim_ids"] = ["C2"]
+        coverage["claims"].append(fact_claim(status="inference"))
+        findings.extend(validate_ledger.collect_findings(coverage))
+        derived = ledger_with_fact(
+            claim="The vendor recorded a 12.5% failure rate.",
+            derived_assertions=[{"expression": "failure rate", "derivation": "x" * 40}],
+        )
+        findings.extend(validate_ledger.collect_findings(derived))
+        status = {
+            "claim_id": "C70",
+            "kind": "fact",
+            "claim": "The defect was patched.",
+            "extract_or_location": "The page describes the product.",
+            "source_evidence": [
+                {"source_id": "S2", "extract_or_location": "The page describes the product."}
+            ],
+        }
+        findings.extend(validate_ledger.collect_findings(ledger_with_fact(**status)))
+        fresh = valid_quality_ledger()
+        fresh["claims"][0]["time_sensitive"] = True
+        fresh["claims"][0]["as_of"] = "2025-01-01"
+        findings.extend(validate_ledger.collect_findings(fresh))
+        undated = valid_quality_ledger()
+        undated["claims"][0]["time_sensitive"] = True
+        undated["claims"][0]["as_of"] = "2026-07-28"
+        undated["sources"][0]["published"] = None
+        undated["sources"][0]["undated_reason"] = "no date shown on the page"
+        findings.extend(validate_ledger.collect_findings(undated))
+        syn = valid_quality_ledger()
+        syn["synthesis"]["central_judgment_claim_ids"] = ["C1", "C9"]
+        findings.extend(validate_ledger.collect_findings(syn))
+        dup = valid_quality_ledger()
+        dup["sources"].append(dict(dup["sources"][0], source_id="S1", url="https://dup.example.org/x"))
+        findings.extend(validate_ledger.collect_findings(dup))
+        harm = living_harm_ledger()
+        harm["claims"][-1]["person_claim_role"] = "neutral"
+        findings.extend(validate_ledger.collect_findings(harm))
+        return findings
+
+    def test_threshold_messages_keep_their_own_family(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["url"] = "http://records.example.org/result"
+        data["claims"][0].pop("source_ids")
+        families = {item.family for item in validate_ledger.collect_findings(data)}
+        self.assertIn("ledger/https", families)
+        self.assertIn("ledger/source-ids", families)
+        self.assertNotIn(
+            "ledger/quantity",
+            {
+                item.family
+                for item in validate_ledger.collect_findings(data)
+                if "https" in item.message or "source_ids" in item.message
+            },
+        )
 
     def test_bare_year_is_covered_by_any_date_of_that_year(self):
         """A5: the date-granularity family is gone; the year is simply covered."""
@@ -2027,16 +2867,163 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             ),
         )
 
-    # deleted: test_increased_versus_decreased_is_a_warn
-    # deleted: test_unverified_provenance_is_interested_in_portfolio_and_key_claim
-    # deleted: test_missing_source_ids_are_derived_as_a_warning
-    # deleted: test_extras_on_source_ids_are_one_error_per_claim
-    # deleted: test_http_source_url_is_hard_but_http_alias_is_allowed
-    # deleted: test_cjk_derivation_minimum_is_20_with_threshold_in_message
-    # deleted: test_undated_reason_failure_prints_accepted_phrasings
-    # deleted: test_host_conflicts_include_provenance_per_id
-    # deleted: test_excluded_claims_are_not_validated_and_supports_to_them_are_hard
-    # deleted: test_excuses_nothing_and_coverage_linkage_are_warnings
+    def test_increased_versus_decreased_is_a_warn(self):
+        """R29: a direction heuristic is not verbatim fidelity."""
+        errors = validate_ledger.evidence_coverage_errors(
+            {
+                "claim_id": "C900",
+                "kind": "fact",
+                "claim": "Revenue increased by 12%.",
+                "extract_or_location": "Revenue decreased by 12%.",
+            }
+        )
+        self.assertTrue(any("direction" in error.lower() for error in errors), errors)
+        self.assertTrue(all(error.startswith("WARNING:") for error in errors), errors)
+
+    def test_unverified_provenance_is_interested_in_portfolio_and_key_claim(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["provenance"] = "unverified"
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("portfolio has no independent source" in error.lower() for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("unverified" in error.lower() or "interested" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_missing_source_ids_are_derived_as_a_warning(self):
+        data = valid_quality_ledger()
+        data["claims"][0].pop("source_ids")
+        errors = validate_ledger.validate_references(data)
+        warns = [error for error in errors if error.startswith("WARNING:")]
+        self.assertTrue(any("source_ids" in error for error in warns), errors)
+
+    def test_extras_on_source_ids_are_one_error_per_claim(self):
+        data = valid_quality_ledger()
+        data["sources"].append(
+            {
+                "source_id": "S3",
+                "url": "https://other.example.net/x",
+                "publisher": "Other",
+                "source_family": "other.example.net",
+                "provenance": "secondary_independent",
+                "roles": ["independent_analysis"],
+                "accountability_basis": "none",
+                "published": "2026-07-21",
+                "accessed": "2026-07-28",
+            }
+        )
+        data["claims"][0]["source_ids"] = ["S1", "S2", "S3"]
+        errors = [
+            error
+            for error in validate_ledger.validate_references(data)
+            if "C1" in error and "extra" in error.lower()
+        ]
+        self.assertEqual(1, len(errors), errors)
+
+    def test_http_source_url_is_hard_but_http_alias_is_allowed(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["url"] = "http://records.example.org/result"
+        data["sources"][0]["aliases"] = ["http://records.example.org/old"]
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(any("https" in error.lower() and "S1" in error for error in errors), errors)
+        data["sources"][0]["url"] = "https://records.example.org/result"
+        errors = validate_ledger.validate_references(data)
+        self.assertFalse(
+            any("https" in error.lower() and "alias" in error.lower() for error in errors),
+            errors,
+        )
+
+    def test_cjk_derivation_minimum_is_20_with_threshold_in_message(self):
+        claim = {
+            "claim_id": "C900",
+            "kind": "fact",
+            "claim": "营收增长12%。",
+            "extract_or_location": "页面描述了产品。",
+            "derived_assertions": [
+                {"expression": "12%", "derivation": "推算说明偏短"},
+            ],
+        }
+        errors = validate_ledger.derived_assertion_errors(claim)
+        joined = " ".join(errors)
+        self.assertIn("20", joined)
+        self.assertRegex(joined, r"actual[: ]+\d+")
+
+    def test_undated_reason_failure_prints_accepted_phrasings(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["time_sensitive"] = True
+        data["claims"][0]["as_of"] = "2026-07-28"
+        data["sources"][0]["published"] = None
+        data["sources"][0]["undated_reason"] = "no date shown on the page"
+        errors = validate_ledger.validate_references(data)
+        joined = " ".join(errors)
+        self.assertIn("undated_reason", joined)
+        self.assertTrue(
+            "continuously" in joined.lower() or "持续更新" in joined,
+            joined,
+        )
+
+    def test_host_conflicts_include_provenance_per_id(self):
+        data = valid_quality_ledger()
+        data["sources"][1]["url"] = "https://records.example.org/other"
+        data["sources"][1]["source_family"] = "example.org"
+        data["sources"][1]["provenance"] = "primary_independent"
+        data["sources"][0]["family_justification"] = ""
+        data["sources"][1]["family_justification"] = ""
+        errors = validate_ledger.validate_references(data)
+        host_errors = [error for error in errors if "host" in error.lower()]
+        self.assertTrue(host_errors, errors)
+        joined = " ".join(host_errors)
+        self.assertIn("S1", joined)
+        self.assertIn("S2", joined)
+        self.assertIn("primary_interested", joined)
+        self.assertIn("primary_independent", joined)
+
+    def test_excluded_claims_are_not_validated_and_supports_to_them_are_hard(self):
+        data = valid_quality_ledger()
+        dropped = fact_claim(claim_id="C9", claim="Dropped 999 units.")
+        dropped["extract_or_location"] = "no figure here"
+        dropped["source_evidence"][0]["extract_or_location"] = "no figure here"
+        dropped["reason"] = "Class F drop"
+        dropped["dropped_at"] = "2026-09-14T00:00:00Z"
+        data["excluded_claims"] = [dropped]
+        data["claims"][0]["supports"] = ["C9"]
+        errors = validate_ledger.validate_references(data)
+        self.assertFalse(
+            any("C9:" in error and "is in the claim" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("excluded" in error.lower() and "C9" in error for error in errors),
+            errors,
+        )
+
+    def test_excuses_nothing_and_coverage_linkage_are_warnings(self):
+        data = ledger_with_fact(
+            claim="The vendor recorded a 12.5% failure rate.",
+            derived_assertions=[
+                {
+                    "expression": "failure rate",
+                    "derivation": "x" * 40,
+                }
+            ],
+        )
+        data["coverage"][0]["status"] = "supported"
+        data["coverage"][0]["claim_ids"] = ["C2"]
+        data["claims"][1]["status"] = "inference"
+        errors = validate_ledger.validate_references(data)
+        excuses = [error for error in errors if "excuses nothing" in error]
+        linkage = [
+            error
+            for error in errors
+            if "supported but references no supported claim" in error
+        ]
+        self.assertTrue(excuses, errors)
+        self.assertTrue(all(error.startswith("WARNING:") for error in excuses), excuses)
+        self.assertTrue(linkage, errors)
+        self.assertTrue(all(error.startswith("WARNING:") for error in linkage), linkage)
 
     def test_collect_findings_and_grouped_main(self):
         import io
@@ -2045,20 +3032,29 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         from pathlib import Path
 
         data = valid_quality_ledger()
-        data["claims"][0]["source_ids"] = ["S1", "S2", "S99"]
+        data["claims"][0]["claim"] = "Revenue increased by 12%."
+        data["claims"][0]["extract_or_location"] = "Revenue decreased by 12%."
+        data["claims"][0]["source_evidence"][0]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
+        data["claims"][0]["source_evidence"][1]["extract_or_location"] = (
+            "Revenue decreased by 12%."
+        )
         findings = validate_ledger.collect_findings(data)
+        self.assertTrue(findings)
         self.assertTrue(all(hasattr(item, "family") for item in findings))
-        self.assertEqual(["ledger/reference"], [item.family for item in findings])
-        self.assertEqual("hard", findings[0].severity)
+        self.assertTrue(any(item.family in validate_ledger.FAMILIES for item in findings))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ledger.json"
             path.write_text(json.dumps(data), encoding="utf-8")
             err = io.StringIO()
             with redirect_stderr(err), redirect_stdout(io.StringIO()):
                 code = validate_ledger.main([str(path)])
-        self.assertEqual(1, code)
+        # R29: a direction heuristic warns, so the grouped output carries it
+        # in the WARN tier and the command no longer refuses.
+        self.assertEqual(0, code)
         self.assertIn("=== HARD", err.getvalue())
-        self.assertIn("C1 references unknown source S99.", err.getvalue())
+        self.assertIn("=== WARN", err.getvalue())
 
     def test_expanded_key_claim_input_validates_against_the_ledger_schema(self):
         """Pinned contract: claim-input -> full v4 claim (spec §6.4, §9)."""
@@ -2142,12 +3138,13 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         self.assertTrue((expanded.get("triangulation") or {}).get("rationale"))
         findings = validate_ledger.claim_findings(item, data)
         families = {item.family for item in findings}
-        self.assertGreaterEqual(len(findings), 1)
+        self.assertGreaterEqual(len(findings), 2)
+        # R28 restatement: this analysis carries no `reasoning`, which used to
+        # raise ledger/claim-input. Every conditional field is optional now, so
+        # the remaining families must still all report.
         self.assertNotIn("ledger/claim-input", families)
-        self.assertIn("ledger/quantity", families)
-        quantity = [item for item in findings if item.family == "ledger/quantity"]
-        self.assertEqual({"warn"}, {item.severity for item in quantity})
-        self.assertFalse(any("Remove:" in item.message for item in quantity))
+        self.assertIn("ledger/extract-length", families)
+        self.assertIn("ledger/person", families)
 
     def test_person_unknown_status_raises_no_person_finding(self):
         """R25 restatement of test_person_unknown_status_refuses_linked_claim.
@@ -2293,11 +3290,26 @@ class OfflineContextChangeTests(unittest.TestCase):
 
 
 class SchemaRemedyTests(unittest.TestCase):
-    """J2: schema_remedy names the field the schema error named."""
+    """J2: a schema finding's remedy names the field the schema error named."""
+
+    def _schema_findings(self, ledger):
+        return [
+            item
+            for item in validate_ledger.collect_findings(ledger)
+            if item.family == "ledger/schema"
+        ]
+
+    def _fix_for(self, ledger, location, needle=""):
+        for item in self._schema_findings(ledger):
+            if item.message.startswith(f"{location}:") and needle in item.message:
+                return item.fix
+        self.fail(f"no schema finding for {location} {needle}")
 
     def test_short_claim_rationale_points_at_that_claim_path(self):
+        ledger = living_harm_ledger()
+        ledger["claims"][-1]["triangulation"]["rationale"] = ""
         path = "claims.1.triangulation.rationale"
-        fix = validate_ledger.schema_remedy(path)
+        fix = self._fix_for(ledger, path)
         self.assertEqual(
             f"set field {path} in claims/*.json, then alx claim add claims/*.json",
             fix,
@@ -2305,42 +3317,34 @@ class SchemaRemedyTests(unittest.TestCase):
         self.assertNotIn("schema_version", fix)
 
     def test_bad_top_level_field_points_at_that_field(self):
+        ledger = living_harm_ledger()
+        ledger.pop("unresolved_questions", None)
         self.assertEqual(
             "set field unresolved_questions in ledger.json",
-            validate_ledger.schema_remedy(
-                "<root>", "'unresolved_questions' is a required property"
-            ),
+            self._fix_for(ledger, "<root>", "unresolved_questions"),
         )
 
     def test_mergeable_section_path_points_at_ledger_merge(self):
+        ledger = living_harm_ledger()
+        ledger["people"][0].pop("name", None)
         self.assertEqual(
             "set field people.0.name in people via alx ledger merge",
-            validate_ledger.schema_remedy(
-                "people.0", "'name' is a required property"
-            ),
+            self._fix_for(ledger, "people.0"),
         )
 
     def test_no_finding_names_a_field_its_message_did_not(self):
-        schema = json.loads(
-            (ROOT / "references" / "evidence-ledger.schema.json").read_text(
-                encoding="utf-8"
-            )
-        )
         ledger = living_harm_ledger()
         ledger["claims"][-1]["triangulation"]["rationale"] = ""
-        for error in validate_ledger.validate_schema(ledger, schema):
-            location, _, detail = error.partition(": ")
-            fix = validate_ledger.schema_remedy(location, detail)
-            if not fix:
-                continue
-            named = re.match(r"^set field (\S+) ", fix)
-            with self.subTest(message=error):
-                self.assertIsNotNone(named, fix)
+        for item in self._schema_findings(ledger):
+            location = item.message.split(":", 1)[0]
+            named = re.match(r"^set field (\S+) ", item.fix)
+            with self.subTest(message=item.message):
+                self.assertIsNotNone(named, item.fix)
                 field = named.group(1)
                 self.assertTrue(
-                    field in error
+                    field in item.message
                     or (location != "<root>" and field.startswith(f"{location}.")),
-                    fix,
+                    item.fix,
                 )
 
 
@@ -2351,10 +3355,54 @@ VERBATIM_CJK = (
 )
 
 
-# deleted: ExtractLengthVerbatimTests.test_verbatim_window_with_in_source_ellipses_passes
-# deleted: ExtractLengthVerbatimTests.test_short_piece_after_author_ellipsis_is_never_flagged
-# deleted: ExtractLengthVerbatimTests.test_short_whole_extract_is_a_warn_not_a_hard_finding
-# deleted: ExtractLengthVerbatimTests.test_twelve_character_cjk_extract_carries_no_warn
+class ExtractLengthVerbatimTests(unittest.TestCase):
+    @staticmethod
+    def _claim(extract):
+        return {
+            "claim_id": "C21",
+            "source_evidence": [
+                {"source_id": "S11", "extract_or_location": extract}
+            ],
+        }
+
+    def test_verbatim_window_with_in_source_ellipses_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            source_fidelity.write_cache(
+                cache, "S11", _cache_result(f"背景。{VERBATIM_CJK}，反思与改革。")
+            )
+            self.assertEqual(
+                [],
+                validate_ledger._extract_length_findings(
+                    self._claim(VERBATIM_CJK), cache_dir=cache
+                ),
+            )
+
+    def test_short_piece_after_author_ellipsis_is_never_flagged(self):
+        # R13: pieces carry no length floor; only the whole extract warns.
+        self.assertEqual(
+            [],
+            validate_ledger._extract_length_findings(
+                self._claim("A genuine quoted observation … short")
+            ),
+        )
+
+    def test_short_whole_extract_is_a_warn_not_a_hard_finding(self):
+        findings = validate_ledger._extract_length_findings(self._claim("short"))
+        self.assertEqual(["ledger/extract-length"], [i.family for i in findings])
+        self.assertEqual("warn", findings[0].severity)
+        self.assertEqual("A", findings[0].klass)
+        self.assertIn("threshold 20", findings[0].message)
+        self.assertIn("length 5", findings[0].message)
+        self.assertEqual("extend the quote in claims/<file>", findings[0].fix)
+
+    def test_twelve_character_cjk_extract_carries_no_warn(self):
+        self.assertEqual(
+            [], validate_ledger._extract_length_findings(self._claim("一二三四五六七八九十十一"))
+        )
+        short = validate_ledger._extract_length_findings(self._claim("一二三四五"))
+        self.assertEqual(["ledger/extract-length"], [i.family for i in short])
+        self.assertIn("threshold 10", short[0].message)
 
 class ClaimRemedyTests(unittest.TestCase):
     def _fixes(self, data, needle):
@@ -2364,7 +3412,18 @@ class ClaimRemedyTests(unittest.TestCase):
             if needle in item.message
         ]
 
-    # deleted: test_unregistered_person_remedy_is_the_ledger_merge
+    def test_unregistered_person_remedy_is_the_ledger_merge(self):
+        """R25 restatement of test_unlinked_person_remedy_is_the_mechanical_link.
+
+        The auto-link is silent now; the only person finding left is an id
+        that names nobody in `ledger.people`.
+        """
+        data = valid_quality_ledger()
+        data["claims"][0]["person_ids"] = ["P9"]
+        self.assertEqual(
+            ["alx ledger merge people.json"],
+            self._fixes(data, "not in ledger.people"),
+        )
 
     def test_two_extracts_from_one_source_raise_no_reference_finding(self):
         # R22 restatement of test_duplicate_evidence_remedy_names_source_
@@ -2387,10 +3446,9 @@ class ClaimRemedyTests(unittest.TestCase):
             extract_or_location=extract,
             source_evidence=[{"source_id": "S2", "extract_or_location": extract}],
         )
-        findings = validate_ledger.claim_findings(data["claims"][-1], data)
         self.assertEqual(
             ["alx find S2 1936-12-10"],
-            [item.fix for item in findings if "'1936-12-10' is in the claim" in item.message],
+            self._fixes(data, "'1936-12-10' is in the claim"),
         )
 
 
@@ -2517,7 +3575,12 @@ class R29SeverityTests(unittest.TestCase):
                 self.assertEqual("warn", item.severity)
                 self.assertEqual("", item.remove)
 
-    # deleted: test_a_schema_defect_never_blocks
+    def test_a_schema_defect_never_blocks(self):
+        findings = validate_ledger.collect_findings({})
+        schema = [item for item in findings if item.family == "ledger/schema"]
+        self.assertTrue(schema)
+        self.assertEqual({"warn"}, {item.severity for item in schema})
+        self.assertEqual([], [item for item in findings if item.severity == "hard"])
 
     def test_a_han_numeral_quantity_raises_nothing_while_a_digit_stays_hard(self):
         han = validate_ledger.evidence_coverage_errors(
@@ -2539,57 +3602,3 @@ class R29SeverityTests(unittest.TestCase):
         )
         self.assertTrue(digits)
         self.assertTrue(all(error.startswith("WARNING:") for error in digits), digits)
-
-
-class A1A2LedgerContractTests(unittest.TestCase):
-    def test_empty_extract_emits_claim_input(self):
-        findings = validate_ledger.claim_findings(
-            {
-                "claim_id": "C6",
-                "claim": "Revenue increased by 12%.",
-                "kind": "fact",
-                "source_evidence": [
-                    {"source_id": "S2", "extract_or_location": ""},
-                ],
-            },
-            valid_quality_ledger(),
-        )
-        self.assertIn(
-            "ledger/claim-input", {item.family for item in findings}
-        )
-
-    def test_quantity_is_warn_and_message_has_no_remove(self):
-        findings = [
-            item
-            for item in validate_ledger.claim_findings(
-                fact_claim(
-                    claim="The vendor recorded 28 incidents.",
-                    extract_or_location="Report dated 2026-07-28.",
-                    source_evidence=[
-                        {
-                            "source_id": "S2",
-                            "extract_or_location": "Report dated 2026-07-28.",
-                        }
-                    ],
-                ),
-                valid_quality_ledger(),
-            )
-            if item.family == "ledger/quantity"
-        ]
-        self.assertTrue(findings)
-        self.assertEqual({"warn"}, {item.severity for item in findings})
-        self.assertFalse(any("Remove:" in item.message for item in findings))
-        self.assertEqual({""}, {item.remove for item in findings})
-
-    def test_families_are_the_three_keepers(self):
-        self.assertEqual(
-            frozenset(
-                {"ledger/quantity", "ledger/claim-input", "ledger/reference"}
-            ),
-            validate_ledger.FAMILIES,
-        )
-
-    def test_warn_families_is_quantity_only(self):
-        self.assertEqual(
-            frozenset({"ledger/quantity"}), validate_ledger.WARN_FAMILIES
-        )

@@ -9,7 +9,7 @@ import unicodedata
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -29,14 +29,37 @@ CLAIM_INPUT_SCHEMA = REFERENCES / "claim-input.schema.json"
 FAMILIES = frozenset(
     {
         "ledger/quantity",
+        "ledger/status",
+        "ledger/direction",
+        "ledger/schema",
+        "ledger/source-ids",
+        "ledger/https",
+        "ledger/provenance",
+        "ledger/key-claim",
+        "ledger/portfolio",
+        "ledger/coverage",
+        "ledger/synthesis",
+        "ledger/source-family",
+        "ledger/derived",
+        "ledger/person",
+        "ledger/excluded-supports",
+        "ledger/undated-reason",
+        "ledger/host-conflict",
         "ledger/claim-input",
+        "ledger/extract-length",
+        "ledger/triangulation",
+        "ledger/freshness",
         "ledger/reference",
     }
 )
 
 
-#: Quantity scan is a heuristic; the verbatim extract is the fabrication gate.
-WARN_FAMILIES = frozenset({"ledger/quantity"})
+#: R29: lexical and semantic heuristics and ledger shape are not verbatim
+#: fidelity, and the ledger is machine-written, so these are printed with
+#: their fix and never block.
+WARN_FAMILIES = frozenset(
+    {"ledger/status", "ledger/direction", "ledger/schema", "ledger/quantity"}
+)
 
 
 def _ids_in(message):
@@ -57,6 +80,19 @@ def _f(family, message, *, severity="hard", ids=None, fix="", remove=""):
     )
 
 
+#: R28: a cross-reference is bookkeeping, not fabrication. Every legacy string
+#: raised here is a WARN; the one hard case (a source_id no fetched source
+#: carries) says so at its own call site.
+def _ref(message, *, family="ledger/reference", severity="warn", ids=None, fix="", remove=""):
+    if isinstance(message, Finding):
+        return message
+    text = str(message)
+    if text.startswith("WARNING: "):
+        severity = "warn"
+        text = text[len("WARNING: "):]
+    return _f(family, text, severity=severity, ids=ids, fix=fix, remove=remove)
+
+
 def _as_legacy(items):
     out = []
     for item in items:
@@ -69,11 +105,20 @@ def _as_legacy(items):
 
 def _drop(claim_id):
     return f"alx claim drop {claim_id} --apply" if claim_id else ""
-
-
 _CJK_SENTENCE_PUNCT = "，、！？：；。"
+_NUMERIC_OR_LEGAL_CARRIER = re.compile(
+    r"(?i)\d|percent|%|million|billion|thousand|dollar|usd|court|decree|"
+    r"lawsuit|settlement|agreement|judgment|verdict|indict|charge|fine|"
+    r"penalty|consent|判决|和解|协议|訴訟|诉讼|赔偿|賠償"
+)
 _CJK_PROSE_MIN = 20
 _LATIN_PROSE_MIN = 40
+
+#: Days a time-sensitive record may lag the report date before it is stale.
+FRESHNESS_WINDOW_DAYS = 30
+
+#: R24: days as_of may run ahead of verified_at (UTC fetch vs local date).
+AS_OF_DRIFT_DAYS = 1
 
 #: Registrable-domain suffixes that occupy two labels.
 MULTI_LABEL_SUFFIXES = frozenset(
@@ -90,6 +135,96 @@ MULTI_LABEL_SUFFIXES = frozenset(
         "medium.com", "wordpress.com", "blogspot.com",
     }
 )
+
+#: Prose that genuinely explains a continuously updated, undated page.
+CONTINUOUS_UPDATE_PATTERN = re.compile(
+    r"(?i)continuous(?:ly)?[ -]updat|updated continuously|"
+    r"living [a-z ]{0,24}(?:page|document|record|reference)|"
+    r"rolling(?:ly)? updat|maintained in place|updated in place|"
+    r"no publication date (?:is |was )?(?:shown|published|given|displayed)|"
+    r"current release page|current version of the page|"
+    r"持续更新|持續更新|滚动更新|滾動更新"
+)
+
+#: Claim prose that asserts something does not exist or was not found.
+NEGATIVE_EXISTENCE_PATTERN = re.compile(
+    r"(?i)"
+    r"\bno\b[^.;]{0,60}\b(?:exists?|existed|appears? to exist|seems? to exist|"
+    r"is available|are available|was available|is published|are published|"
+    r"was published|were published|has been published|have been published|"
+    r"is documented|is disclosed|is known|was found|were found|"
+    r"could be found|was located|were located|could be located|"
+    r"measures?|tracks?|reports?|benchmarks?)\b"
+    r"|\bno\s+(?:published|public|independent|official|documented|verifiable|"
+    r"credible|comparable|equivalent|third[- ]party|peer[- ]reviewed)\s+\w+"
+    r"|\bnone\b[^.;]{0,40}\b(?:was|were|could be)\s+"
+    r"(?:found|located|identified|published|available)\b"
+    r"|\b(?:does|do|did)\s+not\s+(?:exist|appear to exist|publish|disclose)\b"
+    r"|\b(?:we\s+|i\s+)?(?:found|located|identified)\s+no\b"
+    r"|\bnothing\b[^.;]{0,40}\b(?:was|were|could be)\s+(?:found|located)\b"
+    r"|\bnever\s+been\s+(?:published|disclosed|released|documented|measured)\b"
+    r"|\bnot\s+publicly\s+(?:available|documented|disclosed|published)\b"
+    r"|\blacks?\s+any\s+(?:public|published|independent|documented)\b"
+    r"|\bno\s+(?:such|known)\s+\w+"
+    r"|未找到|沒有找到|没有找到|找不到|未發現|未发现|并不存在|並不存在|"
+    r"尚未公(?:布|開|开)|未(?:公開|公开)(?:過|过)?|沒有公(?:開|开)|没有公(?:開|开)"
+)
+
+#: Status assertions that must be evidenced, not appended to a faithful quote.
+#: Each entry is (label, pattern in claim, pattern that would evidence it).
+STATUS_ASSERTIONS = (
+    ("patched", r"\b(?:since\s+)?patch(?:ed|es|ing)?\b",
+     r"\b(?:patch(?:ed|es|ing)?|hotfix(?:es)?|fix(?:ed|es)?|"
+     r"remediat(?:ed|ion)|resolved in|corrected in|addressed in)\b|"
+     r"已修(?:复|復)"),
+    ("unpatched", r"\b(?:unpatched|not patched|remains? unfixed)\b",
+     r"unpatched|not patched|no patch|unfixed|未修(?:复|復)"),
+    ("deprecated", r"\bdeprecat(?:ed|ion)\b",
+     r"deprecat|superseded|legacy|no longer recommended"),
+    ("discontinued", r"\b(?:discontinued|sunset|shut down|end[- ]of[- ]life)\b",
+     r"discontinu|sunset|shut down|shutdown|end[- ]of[- ]life|retir"),
+    ("recalled", r"\brecalled?\b", r"recall"),
+    ("retracted", r"\bretract(?:ed|ion)\b", r"retract|withdraw"),
+    ("settled", r"\bsettled?\b(?! (?:on|into))",
+     r"settle|consent decree|resolution agreement"),
+    ("acquired", r"\bacquired\b", r"acquir|acquisition|purchase[ds]?\b|bought"),
+    ("approved", r"\bapproved\b",
+     r"\b(?:approv(?:ed|al)|authoriz(?:ed|ation)|cleared|granted)\b"),
+    ("banned", r"\b(?:banned|prohibited|outlawed)\b",
+     r"ban(?:ned|s)?\b|prohibit|outlaw|forbidden"),
+    ("certified", r"\b(?:certified|accredited)\b",
+     r"certif|accredit|attestation|audit report"),
+    ("open source", r"\bopen[- ]sourced?\b",
+     r"open[- ]source|MIT licen|Apache-2|GPL|BSD licen|source available"),
+)
+
+DIRECTION_ASSERTIONS = (
+    (
+        "increase",
+        r"\b(?:increase[ds]?|increasing|growth|grew|grown|rise|rose|risen|higher)\b|"
+        r"增加|增長|增长|上升|提高",
+        r"\b(?:increase[ds]?|increasing|growth|grew|grown|rise|rose|risen|higher)\b|"
+        r"增加|增長|增长|上升|提高",
+    ),
+    (
+        "decrease",
+        r"\b(?:decrease[ds]?|decreasing|decline[ds]?|reduction|fell|fallen|lower)\b|"
+        r"減少|减少|下降|降低",
+        r"\b(?:decrease[ds]?|decreasing|decline[ds]?|reduction|fell|fallen|lower)\b|"
+        r"減少|减少|下降|降低",
+    ),
+    (
+        "above",
+        r"\b(?:above|exceeded?)\b|高於|高于|超過|超过",
+        r"\b(?:above|exceeded?)\b|高於|高于|超過|超过",
+    ),
+    (
+        "below",
+        r"\b(?:below|under)\b|低於|低于",
+        r"\b(?:below|under)\b|低於|低于",
+    ),
+)
+
 
 def mentions_person_alias(text, person):
     """Match a registered name or alias without substringing another word."""
@@ -706,6 +841,11 @@ _CJK_DATE_RANGE_RE = re.compile(
 )
 
 
+def _duplicates(values):
+    seen = set()
+    return sorted({value for value in values if value in seen or seen.add(value)})
+
+
 def _normalized_family(value):
     return " ".join(
         re.sub(r"[\W_]+", " ", str(value or ""), flags=re.UNICODE).split()
@@ -786,6 +926,11 @@ def _prose_minimum(text):
         return _LATIN_PROSE_MIN
     cjk = sum(1 for char in value if "\u3400" <= char <= "\u9fff")
     return _CJK_PROSE_MIN if cjk * 2 >= len(value) else _LATIN_PROSE_MIN
+
+
+def _trigger_has_carrier(text, match):
+    window = text[max(0, match.start() - 48) : match.end() + 48]
+    return bool(_NUMERIC_OR_LEGAL_CARRIER.search(window))
 
 
 def _parse_date_form(form):
@@ -887,6 +1032,17 @@ def _year_documented_coverage(claim_forms, evidence_forms, source_text):
             return True
     return False
 
+
+
+def _claim_field_fix(field):
+    """A claim field re-enters the ledger only through `claim add`."""
+    return f"set field {field} in claims/*.json, then alx claim add claims/*.json"
+
+
+#: R23: the synthesis field is merged, not re-added with a claim.
+ADVERSARIAL_TESTS_FIX = (
+    "set field synthesis.adversarial_tests, then alx ledger merge synthesis"
+)
 
 
 def _scan_quantities(text):
@@ -1177,6 +1333,23 @@ def _quantity_is_covered(claim_forms, evidence_forms):
     return False
 
 
+def _normalized_url(value):
+    try:
+        parts = urlsplit(str(value or "").strip())
+    except ValueError:
+        return str(value or "").strip().casefold()
+    path = parts.path.rstrip("/") or "/"
+    return urlunsplit(
+        (
+            parts.scheme.casefold(),
+            parts.netloc.casefold(),
+            path,
+            parts.query,
+            "",
+        )
+    )
+
+
 def _text(value):
     return str(value or "").strip()
 
@@ -1216,6 +1389,326 @@ def _derived_entries(claim):
     ) else []
 
 
+def _derived_findings(claim):
+    """Keep the derived-assertion escape hatch from becoming a rubber stamp."""
+    claim_id = claim.get("claim_id", "<unknown>")
+    entries = _derived_entries(claim)
+    if not entries:
+        return []
+    errors = []
+    fix = "set field derived_assertions"
+    claim_text = _text(claim.get("claim")).casefold()
+    extract = _claim_evidence_text(claim).casefold()
+    seen = set()
+    for entry in entries:
+        expression = _text(entry.get("expression"))
+        derivation = _text(entry.get("derivation"))
+        if not expression:
+            errors.append(
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived_assertions entry has no expression; "
+                    "name the exact wording in claim that is derived.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
+            )
+            continue
+        folded = expression.casefold()
+        if not _exact_expression_in_text(expression, claim_text):
+            errors.append(
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' does not appear "
+                    "in claim; the expression must be quoted from the claim text.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
+            )
+        if extract and folded in extract:
+            errors.append(
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' already appears "
+                    "in extract_or_location; it is quoted evidence, not a "
+                    "derivation. Remove the derived_assertions entry.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
+            )
+        if folded in seen:
+            errors.append(
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' is declared twice.",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
+            )
+        seen.add(folded)
+        needed = _prose_minimum(derivation) if derivation else _prose_minimum(
+            expression
+        )
+        if len(derivation) < needed:
+            errors.append(
+                _f(
+                    "ledger/derived",
+                    f"{claim_id}: derived assertion '{expression}' needs a "
+                    f"derivation of at least {needed} characters stating how it "
+                    f"was computed or inferred (threshold: {needed}; actual: "
+                    f"{len(derivation)}).",
+                    fix=fix,
+                    remove=_drop(claim_id),
+                )
+            )
+    if claim.get("kind") != "estimate" and len(entries) > 2:
+        errors.append(
+            _f(
+                "ledger/derived",
+                f"{claim_id}: {len(entries)} derived assertions on a "
+                f"{claim.get('kind')} claim. Split the claim, or record the "
+                "arithmetic as kind 'estimate' with assumptions.",
+                fix=fix,
+                remove=_drop(claim_id),
+            )
+        )
+    return errors
+
+
+def derived_assertion_errors(claim):
+    return _as_legacy(_derived_findings(claim))
+
+
+def _is_negated(text, index):
+    """Report whether a status word is denied rather than asserted."""
+    window = text[max(0, index - 32) : index].casefold()
+    return bool(
+        re.search(
+            r"\b(?:not|no|never|nor|without|n't|isn't|aren't|wasn't|weren't|"
+            r"cannot|hardly|fails? to|denies|denied)\b[^.;]*$",
+            window,
+        )
+        # R17: scraped Chinese pages often punctuate with ASCII "." and ";".
+        # Without them in the stop set a negation leaked across sentences and
+        # denied an assertion two sentences later.
+        or re.search(r"[不未沒没非][^。；.;]*$", window)
+    )
+
+
+def _has_affirmative_match(pattern, text):
+    return any(
+        not _is_negated(text, match.start())
+        for match in re.finditer(pattern, text, re.IGNORECASE)
+    )
+
+
+_ASSERTION_CARRIER_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "been", "being", "by",
+    "for", "from", "had", "has", "have", "in", "is", "it", "of", "on",
+    "or", "that", "the", "this", "to", "was", "were", "will", "with",
+    "according", "advisory", "claim", "notes", "report", "reported",
+    "reports", "says", "said", "states", "stated",
+}
+_ASSERTION_MEASURE_WORDS = {
+    "percent", "percentage", "point", "points", "dollar", "dollars",
+    "euro", "euros", "pound", "pounds", "yen", "yuan", "usd", "eur",
+    "gbp", "jpy", "cny", "hundred", "thousand", "million", "billion",
+    "trillion", "bn", "mn",
+}
+
+#: The Latin-script carrier branch above already drops English number and
+#: measure words before comparing subjects; the CJK-bigram fallback needs the
+#: same exclusion; otherwise a spelled-out Chinese figure ("百分之三十五") is
+#: pure CJK and reads as carrier vocabulary in its own right, while the same
+#: figure in digit form ("35%") contributes nothing to the fallback's
+#: `[㐀-鿿]` scan. Two claim/evidence pairs that state the same
+#: figure in different notation then compare a numeral-bigram carrier against
+#: an unrelated preamble ("報告稱") and never overlap. Excluding every
+#: character _scan_quantities treats as part of a Chinese number keeps the
+#: fallback comparing actual subject words on both sides, matching how a
+#: digit-form figure was already excluded for free.
+_CJK_CARRIER_NOISE_CHARS = frozenset(
+    _HAN_NUMERAL_CHARS
+    + _CJK_ORDINAL_MARKER
+    + _CJK_PERCENT_MARKER
+    + _CJK_FRACTION_CONNECTOR
+    + _CJK_CHENG_MARKER
+    + _HAN_DECIMAL_MARKER_CHARS
+)
+
+
+def _assertion_match_is_affirmative(text, match):
+    """Reject denied assertions and status words used only as proposal nouns."""
+    if _is_negated(text, match.start()):
+        return False
+    sentence_start = max(
+        text.rfind(".", 0, match.start()),
+        text.rfind(";", 0, match.start()),
+        text.rfind("。", 0, match.start()),
+        text.rfind("；", 0, match.start()),
+    ) + 1
+    prefix = text[sentence_start : match.start()].casefold()
+    if re.search(
+        r"\b(?:rejects?|rejected|denies?|denied|disputes?|disputed)\s+"
+        r"(?:the\s+)?(?:claims?|assertions?|reports?)\s+that\b"
+        r"|\b(?:it\s+is\s+|is\s+)?(?:false|incorrect|untrue)\s+that\b",
+        prefix,
+    ):
+        return False
+    tail = text[match.end() : match.end() + 80].casefold()
+    if re.search(
+        r"\b(?:is|are|was|were)\s+"
+        r"(?:false|incorrect|untrue|disputed|denied|rejected)\b",
+        tail,
+    ):
+        return False
+    return not (
+        match.group(0).casefold() in {"patch", "fix", "approval", "recall"}
+        and re.match(r"\s+(?:proposal|plan|request|candidate|idea)\b", tail)
+        and re.search(r"\b(?:reject(?:ed|s)?|denied|withdrawn)\b", tail)
+    )
+
+
+def _assertion_sentence(text, match):
+    """The sentence holding an assertion, with the assertion word removed."""
+    start = max(
+        text.rfind(".", 0, match.start()),
+        text.rfind(";", 0, match.start()),
+        text.rfind("。", 0, match.start()),
+        text.rfind("；", 0, match.start()),
+    ) + 1
+    ends = [
+        index
+        for token in (".", ";", "。", "；")
+        if (index := text.find(token, match.end())) >= 0
+    ]
+    end = min(ends) if ends else len(text)
+    return text[start:match.start()] + " " + text[match.end():end]
+
+
+#: R17: the shortest CJK run that identifies a carrier on its own.
+_CJK_CARRIER_PHRASE_CHARS = 4
+
+
+def _assertion_carrier_cjk(text, match):
+    """The carrier's CJK characters, in order, numerals and noise removed."""
+    return "".join(
+        char
+        for char in re.findall(r"[㐀-鿿]", _assertion_sentence(text, match))
+        if char not in _CJK_CARRIER_NOISE_CHARS
+    )
+
+
+def _shares_cjk_phrase(claim_cjk, evidence_cjk):
+    """R17: CJK carriers agree on a phrase, not on 75% of their bigrams.
+
+    The bigram ratio below is calibrated for Latin sentences, which yield a
+    handful of content words. A Chinese clause yields one bigram per character,
+    so two sentences naming the same subject in different surrounding prose
+    ("公告中必须增加中国主席" against "要求公告列名增加中国主席且置于英国首相之前")
+    overlap far below 0.75 while plainly carrying the same assertion. A shared
+    run of four characters is the phrase-level evidence that ratio was after.
+    """
+    size = _CJK_CARRIER_PHRASE_CHARS
+    if len(claim_cjk) < size or len(evidence_cjk) < size:
+        return False
+    grams = {
+        claim_cjk[index : index + size]
+        for index in range(len(claim_cjk) - size + 1)
+    }
+    return any(
+        evidence_cjk[index : index + size] in grams
+        for index in range(len(evidence_cjk) - size + 1)
+    )
+
+
+def _assertion_carrier_tokens(text, match):
+    """Extract the subject/carrier around an assertion occurrence."""
+    def normalize_word(word):
+        if len(word) > 4 and word.endswith("ies"):
+            return word[:-3] + "y"
+        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            return word[:-1]
+        return word
+
+    sentence = _assertion_sentence(text, match)
+    words = {
+        normalize_word(word)
+        for word in re.findall(r"[a-z][a-z0-9'-]*", sentence.casefold())
+        if word not in _ASSERTION_CARRIER_STOPWORDS and len(word) > 1
+        and word not in _NUMBER_WORDS
+        and word not in _ASSERTION_MEASURE_WORDS
+    }
+    if words:
+        return words
+    cjk = _assertion_carrier_cjk(text, match)
+    return {
+        cjk[index : index + 2]
+        for index in range(max(0, len(cjk) - 1))
+    }
+
+
+def _evidence_carries_assertion(
+    claim_text, claim_matches, evidence_text, evidence_pattern
+):
+    """Bind an assertion to affirmative evidence about the same carrier."""
+    def anaphoric_quantity_binding(claim_match, evidence_match):
+        claim_prefix = claim_text[
+            max(0, claim_match.start() - 80) : claim_match.start()
+        ]
+        if re.search(
+            r"\b(?:it|them|they|those|these)\b", claim_prefix, re.IGNORECASE
+        ) is None:
+            return False
+        evidence_prefix = evidence_text[
+            max(0, evidence_match.start() - 80) : evidence_match.start()
+        ]
+        return bool(
+            quantitative_evidence(claim_prefix).intersection(
+                quantitative_evidence(evidence_prefix)
+            )
+        )
+
+    claim_carriers = [
+        _assertion_carrier_tokens(claim_text, match)
+        for match in claim_matches
+    ]
+    claim_phrases = [
+        _assertion_carrier_cjk(claim_text, match) for match in claim_matches
+    ]
+    for evidence_match in re.finditer(
+        evidence_pattern, evidence_text, re.IGNORECASE
+    ):
+        if not _assertion_match_is_affirmative(
+            evidence_text, evidence_match
+        ):
+            continue
+        evidence_carrier = _assertion_carrier_tokens(
+            evidence_text, evidence_match
+        )
+        evidence_phrase = _assertion_carrier_cjk(evidence_text, evidence_match)
+        if any(
+            (
+                not claim_carrier
+                or not evidence_carrier
+                or (
+                    len(claim_carrier.intersection(evidence_carrier))
+                    / min(len(claim_carrier), len(evidence_carrier))
+                    >= 0.75
+                )
+                or _shares_cjk_phrase(claim_phrase, evidence_phrase)
+                or anaphoric_quantity_binding(
+                    claim_match, evidence_match
+                )
+            )
+            for claim_match, claim_carrier, claim_phrase in zip(
+                claim_matches, claim_carriers, claim_phrases, strict=True
+            )
+        ):
+            return True
+    return False
+
+
 def _evidence_coverage_findings(
     claim, dated_fields=(), inherited_evidence="", source_text=""
 ):
@@ -1244,7 +1737,7 @@ def _evidence_coverage_findings(
         # which made a blank field the cheapest way to assert anything.
         return [
             _f(
-                "ledger/claim-input",
+                "ledger/extract-length",
                 f"{claim_id}: extract_or_location is empty, so nothing in the claim "
                 "is evidenced. Quote the source wording or its precise location.",
                 fix="set field extract_or_location",
@@ -1255,7 +1748,7 @@ def _evidence_coverage_findings(
     if not extract:
         return [
             _f(
-                "ledger/claim-input",
+                "ledger/extract-length",
                 f"{claim_id}: analysis rests on no recorded evidence. Quote its "
                 "reasoning basis, or link the claims it is derived from.",
                 fix="set field extract_or_location",
@@ -1335,6 +1828,96 @@ def _evidence_coverage_findings(
                 fix=fix,
             )
         )
+    folded_extract = extract.casefold()
+    folded_claim = claim_text.casefold()
+    for label, claim_pattern, evidence_pattern in DIRECTION_ASSERTIONS:
+        asserted = [
+            match
+            for match in re.finditer(claim_pattern, folded_claim, re.IGNORECASE)
+            if not _is_negated(folded_claim, match.start())
+            and (label != "below" or _trigger_has_carrier(folded_claim, match))
+        ]
+        if not asserted or (
+            _has_affirmative_match(evidence_pattern, folded_extract)
+            if kind == "analysis"
+            else _evidence_carries_assertion(
+                folded_claim, asserted, folded_extract, evidence_pattern
+            )
+        ):
+            continue
+        matching_expressions = [
+            _text(entry.get("expression")).casefold()
+            for entry in derived_entries
+            if re.search(
+                claim_pattern,
+                _text(entry.get("expression")),
+                re.IGNORECASE,
+            )
+        ]
+        if matching_expressions:
+            used_expressions.update(matching_expressions)
+            continue
+        errors.append(
+            _f(
+                "ledger/direction",
+                f"{claim_id}: claim asserts the {label!r} direction but the "
+                "recorded evidence does not.",
+                fix="set field claim",
+                remove=_drop(claim_id),
+            )
+        )
+    for label, claim_pattern, evidence_pattern in STATUS_ASSERTIONS:
+        asserted = [
+            match
+            for match in re.finditer(claim_pattern, folded_claim, re.IGNORECASE)
+            if not _is_negated(folded_claim, match.start())
+            and (label != "settled" or _trigger_has_carrier(folded_claim, match))
+        ]
+        if not asserted:
+            # A denied status ("not open source") is not an appended status
+            # assertion; the negative-existence rule governs those.
+            continue
+        if _evidence_carries_assertion(
+            folded_claim, asserted, folded_extract, evidence_pattern
+        ):
+            continue
+        matching_expressions = [
+            _text(entry.get("expression")).casefold()
+            for entry in derived_entries
+            if re.search(
+                claim_pattern,
+                _text(entry.get("expression")),
+                re.IGNORECASE,
+            )
+        ]
+        if matching_expressions:
+            used_expressions.update(matching_expressions)
+            continue
+        errors.append(
+            _f(
+                "ledger/status",
+                f"{claim_id}: claim asserts '{label}' but extract_or_location "
+                "records no evidence of it. Quote the source wording that "
+                "establishes the status, or declare it in derived_assertions.",
+                fix="set field extract_or_location",
+                remove=_drop(claim_id),
+            )
+        )
+    for entry in derived_entries:
+        expression = _text(entry.get("expression"))
+        folded = expression.casefold()
+        if not expression or folded in used_expressions:
+            continue
+        errors.append(
+            _f(
+                "ledger/derived",
+                f"{claim_id}: derived assertion '{expression}' excuses nothing; "
+                "the escape hatch is only for quantities or status assertions "
+                "that the extract does not carry.",
+                severity="warn",
+                fix="set field derived_assertions",
+            )
+        )
     return errors
 
 
@@ -1355,19 +1938,296 @@ def _as_date(value):
         return None
 
 
+def _absence_errors(claim, report_day):
+    """Require a bounded search record behind every negative-existence claim."""
+    claim_id = claim.get("claim_id", "<unknown>")
+    claim_text = _text(claim.get("claim"))
+    if not claim_text or not NEGATIVE_EXISTENCE_PATTERN.search(claim_text):
+        return []
+    record = claim.get("evidence_of_absence")
+    if not isinstance(record, dict):
+        return [
+            f"{claim_id}: claim asserts that something does not exist or was "
+            "not found but records no evidence_of_absence. Record the "
+            "queries, the expected locations, and searched_at."
+        ]
+    errors = []
+    for field in ("queries", "expected_locations"):
+        values = record.get(field)
+        if not isinstance(values, list) or not [
+            item for item in values if _text(item)
+        ]:
+            errors.append(
+                f"{claim_id}: evidence_of_absence.{field} is empty; a bounded "
+                "search result needs the searches run and the places checked."
+            )
+    searched_day = _as_date(record.get("searched_at"))
+    if searched_day is None:
+        errors.append(
+            f"{claim_id}: evidence_of_absence.searched_at is missing or not a "
+            "date."
+        )
+    elif report_day:
+        if searched_day > report_day:
+            errors.append(
+                f"{claim_id}: evidence_of_absence.searched_at is after the "
+                "report date."
+            )
+        elif (report_day - searched_day).days > FRESHNESS_WINDOW_DAYS:
+            errors.append(
+                f"{claim_id}: the absence search ran "
+                f"{(report_day - searched_day).days} days before the report "
+                f"date. Re-run it inside the {FRESHNESS_WINDOW_DAYS}-day "
+                "freshness window; absence decays faster than presence."
+            )
+    return errors
+
+
+def _verification_errors(
+    claim, claim_day, report_day, direct_foundations, sources_by_id
+):
+    """Keep verified_at meaning re-read, not re-dated."""
+    claim_id = claim.get("claim_id", "<unknown>")
+    raw = claim.get("verified_at")
+    verified_day = _as_date(raw)
+    errors = []
+    if raw is not None and verified_day is None:
+        errors.append(f"{claim_id}: verified_at is not a date.")
+        return errors
+    if verified_day is None:
+        if claim.get("time_sensitive") is True:
+            errors.append(
+                f"{claim_id}: a time-sensitive claim needs verified_at, the "
+                "date its extract was last re-read against the live source. "
+                "Re-dating as_of is not re-verification."
+            )
+        return errors
+    if report_day and verified_day > report_day:
+        errors.append(f"{claim_id}: verified_at is after the report date.")
+    # R24: verified_at is the UTC fetch date and as_of is often the local one,
+    # so a single day of drift is a timezone, not a claim about the future.
+    if claim_day and (claim_day - verified_day).days > AS_OF_DRIFT_DAYS:
+        errors.append(
+            _f(
+                "ledger/reference",
+                f"{claim_id}: as_of {claim_day.isoformat()} is "
+                f"{(claim_day - verified_day).days} days after verified_at "
+                f"{verified_day.isoformat()} (threshold {AS_OF_DRIFT_DAYS} "
+                "day); a claim cannot be verified before the state it describes.",
+                severity="warn",
+                ids=[claim_id],
+                fix="set field as_of",
+                remove=_drop(claim_id),
+            )
+        )
+    accessed_days = [
+        _as_date(sources_by_id[source_id].get("accessed"))
+        for source_id in direct_foundations
+        if source_id in sources_by_id
+    ]
+    accessed_days = [day for day in accessed_days if day]
+    if accessed_days and verified_day > max(accessed_days):
+        errors.append(
+            f"{claim_id}: verified_at ({verified_day.isoformat()}) is later "
+            f"than the most recent source access ({max(accessed_days).isoformat()}). "
+            "Re-access the source, or correct the date."
+        )
+    if (
+        claim.get("time_sensitive") is True
+        and report_day
+        and (report_day - verified_day).days > FRESHNESS_WINDOW_DAYS
+    ):
+        errors.append(
+            f"{claim_id}: a time-sensitive claim was last verified "
+            f"{(report_day - verified_day).days} days before the report date."
+        )
+    return errors
+
+
+def _source_family_index(sources_by_id):
+    """Merge sources into real independence families.
+
+    A declared family can only ever be coarser than the evidence: sources
+    sharing a registrable domain or a publisher are one family whatever they
+    call themselves, and a shared declared family merges different domains.
+    """
+    parent = {source_id: source_id for source_id in sources_by_id}
+
+    def find(source_id):
+        while parent[source_id] != source_id:
+            parent[source_id] = parent[parent[source_id]]
+            source_id = parent[source_id]
+        return source_id
+
+    def union(left, right):
+        left, right = find(left), find(right)
+        if left != right:
+            parent[max(left, right)] = min(left, right)
+
+    groups = {}
+    for source_id, source in sources_by_id.items():
+        keys = set()
+        domain = _registrable_domain(source.get("url"))
+        if domain:
+            keys.add(("domain", domain))
+        declared = _normalized_family(source.get("source_family"))
+        if declared:
+            keys.add(("family", declared))
+        publisher = _normalized_family(source.get("publisher"))
+        if publisher:
+            keys.add(("publisher", publisher))
+        for key in keys:
+            if key in groups:
+                union(groups[key], source_id)
+            else:
+                groups[key] = source_id
+    return {source_id: find(source_id) for source_id in sources_by_id}
+
+
+def _source_family_errors(sources_by_id):
+    """Tie source_family and provenance to the publisher and the URL host."""
+    errors = []
+    independent = {"primary_independent", "secondary_independent"}
+    interested = {"primary_interested", "secondary_dependent", "unverified"}
+    hosts = {}
+    for source_id, source in sorted(sources_by_id.items()):
+        try:
+            host = urlsplit(str(source.get("url") or "")).hostname or ""
+        except ValueError:
+            host = ""
+        if host:
+            hosts.setdefault(host.casefold(), []).append(source_id)
+    # A descriptive label like 'anthropic-docs' is more useful than 'claude.com'
+    # and is never itself an error: _source_family_index already merges by
+    # registrable domain, so a label cannot manufacture a second family. What
+    # does need flagging is one domain wearing several labels, because that is
+    # the shape of deliberate family inflation and it misleads every human
+    # reader of the ledger even though the counting defeats it.
+    by_domain = {}
+    for source_id, source in sorted(sources_by_id.items()):
+        domain = _registrable_domain(source.get("url"))
+        declared = _normalized_family(source.get("source_family"))
+        if domain and declared:
+            by_domain.setdefault(domain, {}).setdefault(declared, []).append(source_id)
+    for domain, labels in sorted(by_domain.items()):
+        if len(labels) < 2:
+            continue
+        unjustified = sorted(
+            source_id
+            for ids in labels.values()
+            for source_id in ids
+            if len(_text(sources_by_id[source_id].get("family_justification")))
+            < _prose_minimum(sources_by_id[source_id].get("family_justification"))
+        )
+        if unjustified:
+            sid = unjustified[0]
+            errors.append(
+                _f(
+                    "ledger/source-family",
+                    f"Domain {domain} is split across {len(labels)} source families "
+                    f"({', '.join(sorted(labels))}): {', '.join(unjustified)}. "
+                    "Use one family per domain, or record a family_justification "
+                    f"of at least {_CJK_PROSE_MIN} characters (CJK) / "
+                    f"{_LATIN_PROSE_MIN} characters explaining the genuine "
+                    f"independence. Fix: `alx source set {sid}`.",
+                    severity="warn",
+                    ids=unjustified,
+                    fix=f"alx source set {sid}",
+                )
+            )
+    for host, source_ids in sorted(hosts.items()):
+        if len(source_ids) < 2:
+            continue
+        classes = set()
+        for source_id in source_ids:
+            provenance = sources_by_id[source_id].get("provenance")
+            if provenance in independent:
+                classes.add("independent")
+            elif provenance in interested:
+                classes.add("interested")
+            elif provenance:
+                classes.add(str(provenance))
+        unjustified = [
+            source_id
+            for source_id in source_ids
+            if len(_text(sources_by_id[source_id].get("family_justification")))
+            < _prose_minimum(
+                sources_by_id[source_id].get("family_justification")
+            )
+        ]
+        provenances = ", ".join(
+            f"{source_id}={sources_by_id[source_id].get('provenance')}"
+            for source_id in source_ids
+        )
+        if len(classes) > 1 and unjustified:
+            sid = unjustified[0]
+            errors.append(
+                _f(
+                    "ledger/host-conflict",
+                    f"Sources on host {host} declare different independence "
+                    f"classes ({', '.join(sorted(classes))}) without a "
+                    f"family_justification ({', '.join(unjustified)}): "
+                    f"{provenances}. Pages on one host are one interested "
+                    "party unless the difference is justified.",
+                    severity="warn",
+                    ids=source_ids,
+                    fix=f"alx source set {sid}",
+                    remove="",
+                )
+            )
+    return errors
+
+
+def _supports_cycles(claims_by_id):
+    """Return every cycle in the supports graph; supports must point down."""
+    cycles = set()
+    state = {}
+
+    def walk(claim_id, path):
+        state[claim_id] = 1
+        claim = claims_by_id.get(claim_id, {})
+        supports = claim.get("supports", [])
+        if isinstance(supports, list):
+            for related_id in supports:
+                if related_id not in claims_by_id:
+                    continue
+                if state.get(related_id) == 1:
+                    start = path.index(related_id)
+                    cycles.add(tuple(path[start:] + [related_id]))
+                elif state.get(related_id) is None:
+                    walk(related_id, path + [related_id])
+        state[claim_id] = 2
+
+    for claim_id in claims_by_id:
+        if state.get(claim_id) is None:
+            walk(claim_id, [claim_id])
+    return sorted(cycles)
+
+
 def _reference_findings(data, cache_dir=None):
-    """Unknown source_id (hard) plus the quantity/empty-extract scan."""
+    """Check ID uniqueness and links that JSON Schema cannot express."""
     if not isinstance(data, dict):
         return []
+    errors = []
     sources = data.get("sources", [])
     claims = data.get("claims", [])
     if not isinstance(sources, list) or not isinstance(claims, list):
         return []
-    source_set = {
+    coverage = data.get("coverage", [])
+    if not isinstance(coverage, list):
+        coverage = []
+    source_ids = [
         source.get("source_id")
         for source in sources
         if isinstance(source, dict) and source.get("source_id")
-    }
+    ]
+    claim_ids = [
+        claim.get("claim_id")
+        for claim in claims
+        if isinstance(claim, dict) and claim.get("claim_id")
+    ]
+    source_set = set(source_ids)
+    claim_set = set(claim_ids)
     sources_by_id = {
         source.get("source_id"): source
         for source in sources
@@ -1378,29 +2238,291 @@ def _reference_findings(data, cache_dir=None):
         for claim in claims
         if isinstance(claim, dict) and claim.get("claim_id")
     }
-    findings = []
+    people = data.get("people", [])
+    people = people if isinstance(people, list) else []
+    person_ids = [
+        person.get("person_id")
+        for person in people
+        if isinstance(person, dict) and person.get("person_id")
+    ]
+    people_by_id = {
+        person.get("person_id"): person
+        for person in people
+        if isinstance(person, dict) and person.get("person_id")
+    }
+    independent_provenance = {
+        "primary_independent",
+        "secondary_independent",
+    }
+    interested_provenance = {
+        "primary_interested",
+        "secondary_dependent",
+        "unverified",
+    }
+
+    excluded_claims = data.get("excluded_claims")
+    excluded_claims = excluded_claims if isinstance(excluded_claims, list) else []
+    excluded_ids = {
+        item.get("claim_id")
+        for item in excluded_claims
+        if isinstance(item, dict) and item.get("claim_id")
+    }
+
+    if data.get("schema_version") in {3, 4} and sources_by_id and not any(
+        source.get("provenance") in independent_provenance
+        for source in sources_by_id.values()
+    ):
+        errors.append(
+            _f(
+                "ledger/portfolio",
+                "Evidence portfolio has no independent source; unverified "
+                "counts as interested. Record affected coverage as a gap "
+                "rather than supported.\n"
+                "  --provenance: primary_independent, primary_interested, "
+                "secondary_independent, secondary_dependent, unverified\n"
+                "  --type: accountable_record, peer_reviewed, preprint, "
+                "official_documentation, dataset_or_test, reported_interview, "
+                "news_report, opinion_or_forecast, marketing, anecdote\n"
+                "  --role: subject_official, counterparty_official, "
+                "independent_analysis, empirical_data, affected_stakeholder, "
+                "expert_interpretation, historical_record",
+                # R27: unclassified sourcing is a judgment about the portfolio,
+                # not a fabrication; triangulation still computes from whatever
+                # classification is set.
+                severity="warn",
+                fix="alx source set S1",
+            )
+        )
+
+    errors.extend(f"Duplicate source ID: {item}" for item in _duplicates(source_ids))
+    errors.extend(f"Duplicate claim ID: {item}" for item in _duplicates(claim_ids))
+    errors.extend(f"Duplicate person ID: {item}" for item in _duplicates(person_ids))
+    source_urls = [
+        _normalized_url(source.get("url"))
+        for source in sources
+        if isinstance(source, dict) and source.get("url")
+    ]
+    errors.extend(
+        f"Duplicate source URL: {item}" for item in _duplicates(source_urls)
+    )
+
+    for item in coverage:
+        if not isinstance(item, dict):
+            continue
+        area = item.get("area", "<unknown>")
+        coverage_claims = item.get("claim_ids", [])
+        if not isinstance(coverage_claims, list):
+            continue
+        for claim_id in coverage_claims:
+            if claim_id not in claim_set:
+                errors.append(
+                    f"Coverage {area} references unknown claim {claim_id}."
+                )
+        if (
+            item.get("priority") == "high"
+            and item.get("status") in {"unstarted", "in_progress"}
+        ):
+            errors.append(f"High-priority coverage {area} is unresolved.")
+        if item.get("status") == "gap" and not str(
+            item.get("gap_impact") or ""
+        ).strip():
+            errors.append(f"Coverage {area} is a gap but has no gap impact.")
+        if item.get("status") == "gap" and coverage_claims:
+            errors.append(f"Coverage {area} is a gap but still references claims.")
+        if item.get("status") == "disputed" and not any(
+            claims_by_id.get(claim_id, {}).get("status") == "disputed"
+            for claim_id in coverage_claims
+        ):
+            errors.append(
+                _f(
+                    "ledger/coverage",
+                    f"Coverage {area} is disputed but references no disputed claim.",
+                    severity="warn",
+                    fix="alx check --fix",
+                )
+            )
+        if item.get("status") == "supported" and not any(
+            claims_by_id.get(claim_id, {}).get("status") == "supported"
+            for claim_id in coverage_claims
+        ):
+            errors.append(
+                _f(
+                    "ledger/coverage",
+                    f"Coverage {area} is supported but references no supported claim.",
+                    severity="warn",
+                    fix="alx check --fix",
+                )
+            )
+
+    report_date_value = data.get("report_date")
+    try:
+        report_day = (
+            date.fromisoformat(report_date_value)
+            if isinstance(report_date_value, str)
+            else None
+        )
+    except ValueError:
+        report_day = None
+    for source_id, source in sources_by_id.items():
+        try:
+            published = (
+                date.fromisoformat(source["published"])
+                if isinstance(source.get("published"), str)
+                else None
+            )
+            accessed = (
+                date.fromisoformat(source["accessed"])
+                if isinstance(source.get("accessed"), str)
+                else None
+            )
+        except ValueError:
+            continue
+        if published and report_day and published > report_day:
+            errors.append(f"{source_id} is published after the report date.")
+        if accessed and report_day and accessed > report_day:
+            errors.append(f"{source_id} is accessed after the report date.")
+        if published and accessed and published > accessed:
+            errors.append(f"{source_id} is published after it was accessed.")
+        url = _text(source.get("url"))
+        if url and not url.lower().startswith("https://"):
+            errors.append(
+                _f(
+                    "ledger/https",
+                    f"{source_id}: source.url must be https "
+                    f"(threshold: https; actual: {url}). "
+                    f"Fix: `alx fetch --id {source_id} --refresh`.",
+                    severity="warn",
+                    ids=[source_id],
+                    fix=f"alx fetch --id {source_id} --refresh",
+                )
+            )
+
+    def direct_source_ids(claim_id):
+        claim = claims_by_id.get(claim_id, {})
+        linked = claim.get("source_ids")
+        if linked is None:
+            evidence = claim.get("source_evidence")
+            linked = [
+                entry.get("source_id")
+                for entry in evidence
+                if isinstance(entry, dict) and entry.get("source_id")
+            ] if isinstance(evidence, list) else []
+        linked = set(linked) if isinstance(linked, list) else set()
+        return {source_id for source_id in linked if source_id in sources_by_id}
+
+    def foundation_source_ids(claim_id, levels=1):
+        """Direct sources plus at most `levels` declared support levels.
+
+        `supports` points strictly downward, so a foundation is never counted
+        through an unbounded chain: one declared level is the most a claim may
+        borrow before it must cite the evidence itself.
+        """
+        foundations = direct_source_ids(claim_id)
+        if levels <= 0:
+            return foundations
+        supports = claims_by_id.get(claim_id, {}).get("supports", [])
+        if isinstance(supports, list):
+            for related_id in supports:
+                if related_id in claims_by_id and related_id != claim_id:
+                    foundations.update(
+                        foundation_source_ids(related_id, levels - 1)
+                    )
+        return foundations
+
+    family_of = _source_family_index(sources_by_id)
+    errors.extend(_source_family_errors(sources_by_id))
+
+    # The schema floor is 20 so CJK notes fit; the script-aware floor keeps a
+    # Latin note substantive (40) without punishing CJK prose (20).
+    for source_id, source in sorted(sources_by_id.items()):
+        note = _text(source.get("accountability_note"))
+        threshold = _prose_minimum(note)
+        if note and len(note) < threshold:
+            errors.append(
+                _f(
+                    "ledger/provenance",
+                    f"{source_id}: accountability_note must say what makes the "
+                    "source accountable (threshold "
+                    f"{threshold}, actual {len(note)}).",
+                    severity="warn",
+                    ids=[source_id],
+                    fix=(
+                        f"alx source set {source_id} "
+                        "--accountability-note accountability-note.txt"
+                    ),
+                )
+            )
+
+    for item in coverage:
+        if not isinstance(item, dict) or item.get("status") != "supported":
+            continue
+        linked_sources = {
+            source_id
+            for claim_id in item.get("claim_ids", [])
+            for source_id in foundation_source_ids(claim_id)
+            if source_id in sources_by_id
+        }
+        if linked_sources and all(
+            sources_by_id[source_id].get("provenance") in interested_provenance
+            for source_id in linked_sources
+        ):
+            errors.append(
+                _f(
+                    "ledger/provenance",
+                    f"Supported coverage {item.get('area', '<unknown>')} relies "
+                    "only on interested sources; mark it as a gap or add "
+                    "independent evidence.",
+                    severity="warn",
+                    fix="alx source set S1",
+                )
+            )
+
     for claim in claims:
         if not isinstance(claim, dict):
             continue
         claim_id = claim.get("claim_id", "<unknown>")
-        raw = claim.get("source_ids")
-        if raw is None:
-            evidence = claim.get("source_evidence")
-            evidence = evidence if isinstance(evidence, list) else []
-            source_links = list(
-                dict.fromkeys(
-                    entry.get("source_id")
-                    for entry in evidence
-                    if isinstance(entry, dict) and entry.get("source_id")
+        try:
+            claim_day = (
+                date.fromisoformat(claim["as_of"])
+                if isinstance(claim.get("as_of"), str)
+                else None
+            )
+        except ValueError:
+            claim_day = None
+        if claim_day and report_day and claim_day > report_day:
+            errors.append(f"{claim_id} is dated after the report date.")
+        source_evidence = claim.get("source_evidence")
+        source_evidence = (
+            source_evidence if isinstance(source_evidence, list) else []
+        )
+        evidence_ids = [
+            entry.get("source_id")
+            for entry in source_evidence
+            if isinstance(entry, dict) and entry.get("source_id")
+        ]
+        raw_source_ids = claim.get("source_ids")
+        if raw_source_ids is None:
+            source_links = list(dict.fromkeys(evidence_ids))
+            errors.append(
+                _f(
+                    "ledger/source-ids",
+                    f"{claim_id}: source_ids missing; derived {source_links} "
+                    f"from source_evidence (threshold: present; actual: absent). "
+                    "Fix: `alx check --fix`.",
+                    severity="warn",
+                    ids=_ids_in(claim_id),
+                    fix="alx check --fix",
                 )
             )
-        elif not isinstance(raw, list):
+        elif not isinstance(raw_source_ids, list):
             source_links = []
         else:
-            source_links = list(raw)
+            source_links = list(raw_source_ids)
         for source_id in source_links:
             if source_id not in source_set:
-                findings.append(
+                # R28: the one hard cross-reference — a claim may cite only a
+                # source the ledger actually fetched.
+                errors.append(
                     _f(
                         "ledger/reference",
                         f"{claim_id} references unknown source {source_id}.",
@@ -1409,10 +2531,117 @@ def _reference_findings(data, cache_dir=None):
                         remove=_drop(claim_id),
                     )
                 )
+        # R22: two passages from one page are legitimate evidence; source_ids
+        # derivation dedupes, and every entry is probed on its own.
+        for source_id in evidence_ids:
+            if source_id not in source_links:
+                errors.append(
+                    f"{claim_id}: source_evidence references {source_id}, "
+                    "which is not a direct source for the claim."
+                )
+        extras = [
+            source_id
+            for source_id in source_links
+            if source_id not in evidence_ids
+        ]
+        if extras:
+            errors.append(
+                _f(
+                    "ledger/source-ids",
+                    f"{claim_id}: extra source_ids {extras} not in "
+                    f"source_evidence (threshold: 0 extras; actual: {len(extras)}). "
+                    "Fix: `alx check --fix`.",
+                    severity="warn",
+                    ids=_ids_in(claim_id),
+                    fix="alx check --fix",
+                    remove=_drop(claim_id),
+                )
+            )
+        person_links = claim.get("person_ids", [])
+        person_links = person_links if isinstance(person_links, list) else []
+        # R25: naming a registered person is a silent mechanical repair (R15),
+        # and an unregistered id is a bookkeeping warn. Nothing else about a
+        # person blocks a claim.
+        auto_linked = [
+            person_id
+            for person_id in derive_person_ids(claim, people_by_id.values())
+            if person_id not in person_links
+        ]
+        person_links = person_links + auto_linked
+        for person_id in person_links:
+            if person_id not in people_by_id:
+                errors.append(
+                    _f(
+                        "ledger/person",
+                        f"{claim_id}: person_ids {person_id} not in "
+                        "ledger.people; run alx ledger merge people or drop "
+                        "the id",
+                        severity="warn",
+                        ids=[claim_id, person_id],
+                        fix="alx ledger merge people.json",
+                    )
+                )
+        for relation in ("supports", "contradicts"):
+            related_claims = claim.get(relation, [])
+            if not isinstance(related_claims, list):
+                continue
+            for related_id in related_claims:
+                if related_id == claim_id:
+                    errors.append(f"{claim_id} has a circular {relation} reference.")
+                if related_id in excluded_ids:
+                    errors.append(
+                        _f(
+                            "ledger/excluded-supports",
+                            f"{claim_id}: surviving {relation} naming excluded "
+                            f"claim {related_id}. Fix: set field {relation}. "
+                            f"Remove: `{_drop(claim_id)}`.",
+                            severity="warn",
+                            ids=[claim_id, related_id],
+                            fix=f"set field {relation}",
+                            remove=_drop(claim_id),
+                        )
+                    )
+                elif related_id not in claim_set:
+                    errors.append(f"{claim_id} references unknown claim {related_id}.")
+                elif relation == "contradicts":
+                    other = claims_by_id.get(related_id, {})
+                    reverse = other.get("contradicts", [])
+                    if not isinstance(reverse, list) or claim_id not in reverse:
+                        errors.append(
+                            f"{claim_id} contradicts {related_id}, but the "
+                            "relationship is not reciprocal."
+                        )
+        if claim.get("status") == "disputed":
+            if not str(claim.get("resolution") or "").strip():
+                errors.append(
+                    _f(
+                        "ledger/coverage",
+                        f"{claim_id} is disputed but has no resolution.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field resolution",
+                    )
+                )
+            if not claim.get("contradicts"):
+                errors.append(
+                    _f(
+                        "ledger/coverage",
+                        f"{claim_id} is disputed but has no contradicting claim.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field contradicts",
+                    )
+                )
+
+        foundations = foundation_source_ids(claim_id)
+        direct_foundations = direct_source_ids(claim_id)
+        errors.extend(_derived_findings(claim))
         ledger_dates = [claim.get("as_of"), claim.get("verified_at")]
-        for source_id in source_links:
-            source = sources_by_id.get(source_id) or {}
+        for source_id in sorted(direct_foundations):
+            source = sources_by_id[source_id]
             ledger_dates.extend([source.get("accessed"), source.get("published")])
+        # An analysis inherits the evidence of the claims it rests on, so a
+        # figure it carries must appear somewhere beneath it.
         inherited = ""
         if claim.get("kind") == "analysis":
             inherited = " ".join(
@@ -1420,15 +2649,415 @@ def _reference_findings(data, cache_dir=None):
                 for related_id in claim.get("supports") or []
                 if related_id in claims_by_id
             )
-        findings.extend(
+        errors.extend(
             _evidence_coverage_findings(
-                claim,
-                ledger_dates,
-                inherited,
-                source_year_text(claim, data, cache_dir),
+                claim, ledger_dates, inherited, source_year_text(claim, data, cache_dir)
             )
         )
-    return findings
+        errors.extend(
+            _absence_errors(claim, report_day)
+        )
+        errors.extend(
+            _verification_errors(claim, claim_day, report_day, direct_foundations, sources_by_id)
+        )
+        if claim.get("kind") == "estimate":
+            assumptions = claim.get("assumptions")
+            if not isinstance(assumptions, list) or not [
+                item for item in assumptions if _text(item)
+            ]:
+                errors.append(
+                    f"{claim_id}: an estimate must record its assumptions; "
+                    "state the inputs and the arithmetic that produced it."
+                )
+        if claim.get("time_sensitive") is True:
+            if claim_day is None:
+                errors.append(
+                    f"{claim_id}: time-sensitive claim requires a non-null as_of date."
+                )
+            elif report_day and (
+                report_day - claim_day
+            ).days > FRESHNESS_WINDOW_DAYS:
+                errors.append(
+                    _f(
+                        "ledger/freshness",
+                        f"{claim_id}: time-sensitive claim is dated "
+                        f"{(report_day - claim_day).days} days before the report date.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field as_of",
+                        remove=_drop(claim_id),
+                    )
+                )
+            for source_id in sorted(foundations):
+                source = sources_by_id[source_id]
+                undated_reason = _text(source.get("undated_reason"))
+                if not source.get("published") and not undated_reason:
+                    errors.append(
+                        f"{source_id}: source for time-sensitive {claim_id} "
+                        "has no publication date or undated_reason."
+                    )
+                    continue
+                accessed_day = _as_date(source.get("accessed"))
+                if report_day and accessed_day is None:
+                    errors.append(
+                        f"{source_id}: source for time-sensitive {claim_id} "
+                        "has no usable accessed date; a stale reading cannot "
+                        "support a current claim."
+                    )
+                elif (
+                    report_day
+                    and accessed_day
+                    and (report_day - accessed_day).days > FRESHNESS_WINDOW_DAYS
+                ):
+                    errors.append(
+                        f"{source_id}: source for time-sensitive {claim_id} "
+                        f"was last accessed {(report_day - accessed_day).days} "
+                        "days before the report date; re-read it inside the "
+                        f"{FRESHNESS_WINDOW_DAYS}-day freshness window."
+                    )
+                published_day = _as_date(source.get("published"))
+                stale_publication = (
+                    published_day is not None
+                    and report_day is not None
+                    and (report_day - published_day).days > FRESHNESS_WINDOW_DAYS
+                )
+                if (
+                    published_day is None or stale_publication
+                ) and not CONTINUOUS_UPDATE_PATTERN.search(undated_reason):
+                    errors.append(
+                        _f(
+                            "ledger/undated-reason",
+                            f"{source_id}: source for time-sensitive {claim_id} is "
+                            "not published inside the freshness window and its "
+                            "undated_reason does not state that the page is "
+                            "continuously updated. Accepted phrasings, for example: "
+                            "'continuously updated', 'updated continuously', "
+                            "'living page', '持续更新', '持續更新'.",
+                            severity="warn",
+                            ids=[source_id, claim_id],
+                            fix=f"alx source set {source_id}",
+                            remove=_drop(claim_id),
+                        )
+                    )
+        if (
+            claim.get("confidence") == "high"
+            and claim.get("status") == "inference"
+            and foundations
+            and not any(
+                sources_by_id[source_id].get("provenance")
+                in independent_provenance
+                for source_id in foundations
+            )
+        ):
+            errors.append(
+                f"{claim_id}: high-confidence inference requires an "
+                "independent source foundation."
+            )
+
+        if (
+            claim.get("kind") == "analysis"
+            and claim.get("importance") == "key"
+        ):
+            triangulation = claim.get("triangulation", {})
+            triangulation_status = (
+                triangulation.get("status")
+                if isinstance(triangulation, dict)
+                else None
+            )
+            families = {
+                family_of[source_id]
+                for source_id in foundation_source_ids(claim_id)
+                if source_id in family_of
+            }
+            if triangulation_status == "met" and len(families) < 2:
+                errors.append(
+                    _f(
+                        "ledger/triangulation",
+                        f"{claim_id} declares triangulation met but has "
+                        f"{len(families)} normalized source family.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field triangulation",
+                        remove=_drop(claim_id),
+                    )
+                )
+            if triangulation_status == "met" and not any(
+                sources_by_id[source_id].get("provenance")
+                in independent_provenance
+                for source_id in foundation_source_ids(claim_id)
+                if source_id in sources_by_id
+            ):
+                errors.append(
+                    _f(
+                        "ledger/triangulation",
+                        f"{claim_id} declares triangulation met but has "
+                        "no independent source.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="alx source set S1",
+                        remove=_drop(claim_id),
+                    )
+                )
+            if triangulation_status == "limited":
+                if claim.get("confidence") == "high":
+                    errors.append(
+                        _f(
+                            "ledger/triangulation",
+                            f"{claim_id}: high-confidence key judgment cannot "
+                            "use limited triangulation.",
+                            severity="warn",
+                            ids=[claim_id],
+                            fix="set field triangulation",
+                            remove=_drop(claim_id),
+                        )
+                    )
+                if not str(claim.get("limitations") or "").strip():
+                    errors.append(
+                        _f(
+                            "ledger/triangulation",
+                            f"{claim_id} has limited triangulation but no limitation.",
+                            severity="warn",
+                            ids=[claim_id],
+                            fix="set field limitations",
+                            remove=_drop(claim_id),
+                        )
+                    )
+            if triangulation_status == "not_applicable":
+                errors.append(
+                    _f(
+                        "ledger/triangulation",
+                        f"{claim_id} is a key analysis; triangulation cannot be "
+                        "not applicable.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field triangulation",
+                        remove=_drop(claim_id),
+                    )
+                )
+
+        if claim.get("importance") == "key":
+            # Judged on the claim's own sources when it has any: a supporting
+            # claim's independent source does not launder a key claim that
+            # cites only the subject.
+            judged = direct_foundations or foundations
+            if not judged:
+                errors.append(
+                    _f(
+                        "ledger/key-claim",
+                        f"{claim_id}: key claim has no direct source and no "
+                        "first-level supporting claim with one.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="alx source set S1",
+                        remove=_drop(claim_id),
+                    )
+                )
+            elif all(
+                sources_by_id[source_id].get("provenance")
+                in interested_provenance
+                for source_id in judged
+            ):
+                errors.append(
+                    _f(
+                        "ledger/key-claim",
+                        f"{claim_id}: key claim rests only on interested/unverified sources "
+                        f"({', '.join(sorted(judged))}); add independent "
+                        "evidence or record the area as a gap.",
+                        severity="warn",
+                        ids=[claim_id, *sorted(judged)],
+                        fix=f"alx source set {sorted(judged)[0]}",
+                        remove=_drop(claim_id),
+                    )
+                )
+            declared_roles = {
+                source_id: {
+                    role
+                    for role in sources_by_id[source_id].get("roles", [])
+                    if isinstance(role, str)
+                }
+                for source_id in (direct_foundations or foundations)
+            }
+            if any(declared_roles.values()) and not any(
+                roles - {"subject_official"}
+                for roles in declared_roles.values()
+            ):
+                errors.append(
+                    f"{claim_id}: every source under this key claim is "
+                    "subject_official. A key judgment needs at least one "
+                    "source in another role (independent analysis, empirical "
+                    "data, affected stakeholder, or historical record)."
+                )
+
+    def reaches_sourced_claim(claim_id, visited=None):
+        visited = set() if visited is None else visited
+        if claim_id in visited:
+            return False
+        visited.add(claim_id)
+        claim = claims_by_id.get(claim_id)
+        if not claim:
+            return False
+        if direct_source_ids(claim_id):
+            return True
+        supports = claim.get("supports", [])
+        if not isinstance(supports, list):
+            return False
+        return any(
+            reaches_sourced_claim(related_id, visited)
+            for related_id in supports
+        )
+
+    for claim_id, claim in claims_by_id.items():
+        if (
+            claim.get("kind") == "analysis"
+            and claim.get("include_in_report") is True
+            and not reaches_sourced_claim(claim_id)
+        ):
+            errors.append(f"{claim_id} has no sourced foundation.")
+    # Cycles are detected on the whole supports graph, never short-circuited
+    # by a sourced claim on the way down: supports points strictly downward,
+    # so any cycle is a collapsed source graph and is rejected outright.
+    for path in _supports_cycles(claims_by_id):
+        errors.append(
+            "Analysis has circular support: "
+            f"{' -> '.join(path)}. supports must point strictly downward to "
+            "the evidence a claim rests on."
+        )
+
+    synthesis = data.get("synthesis")
+    if isinstance(synthesis, dict):
+        central = synthesis.get("central_judgment_claim_ids", [])
+        central = central if isinstance(central, list) else []
+        counterevidence = synthesis.get("counterevidence_claim_ids", [])
+        counterevidence = (
+            counterevidence if isinstance(counterevidence, list) else []
+        )
+        for claim_id in central:
+            claim = claims_by_id.get(claim_id)
+            if not claim:
+                errors.append(
+                    _f(
+                        "ledger/synthesis",
+                        f"Synthesis references unknown central judgment {claim_id}.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field synthesis",
+                    )
+                )
+            elif (
+                claim.get("importance") != "key"
+                or claim.get("include_in_report") is not True
+            ):
+                errors.append(
+                    _f(
+                        "ledger/synthesis",
+                        f"Central judgment {claim_id} must be an included key claim.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field synthesis",
+                    )
+                )
+        for claim_id, claim in claims_by_id.items():
+            if (
+                claim.get("importance") == "key"
+                and claim.get("include_in_report") is True
+                and claim_id not in central
+            ):
+                errors.append(
+                    _f(
+                        "ledger/synthesis",
+                        f"Key report claim {claim_id} is missing from the central synthesis.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix="set field synthesis",
+                    )
+                )
+        for claim_id in counterevidence:
+            if claim_id not in claim_set:
+                errors.append(
+                    f"Synthesis references unknown counterevidence {claim_id}."
+                )
+        adversarial_claims = set()
+        adversarial_tests = synthesis.get("adversarial_tests", [])
+        if not isinstance(adversarial_tests, list):
+            adversarial_tests = []
+        for test in adversarial_tests:
+            if not isinstance(test, dict):
+                continue
+            for claim_id in test.get("claim_ids", []):
+                adversarial_claims.add(claim_id)
+                if claim_id not in claim_set:
+                    errors.append(
+                        f"Synthesis references unknown adversarial-test claim {claim_id}."
+                    )
+        for claim_id in counterevidence:
+            if claim_id in claim_set and claim_id not in adversarial_claims:
+                # R23: an untested counterevidence claim is a thin synthesis,
+                # not a fabricated one; it is advice, and it has its own fix.
+                errors.append(
+                    _f(
+                        "ledger/reference",
+                        f"Counterevidence {claim_id} is not tested by an "
+                        "adversarial hypothesis (threshold: 1 adversarial_tests "
+                        "entry naming it; actual: 0).",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix=ADVERSARIAL_TESTS_FIX,
+                    )
+                )
+
+        for implication in synthesis.get("implications", []):
+            if not isinstance(implication, dict):
+                continue
+            implication_claims = implication.get("claim_ids", [])
+            for claim_id in implication_claims:
+                if claim_id not in claim_set:
+                    errors.append(
+                        f"Synthesis references unknown implication claim {claim_id}."
+                    )
+            if not set(implication_claims).intersection(central):
+                errors.append(
+                    "Implication is not linked to a central judgment."
+                )
+        for takeaway in synthesis.get("decisions_or_takeaways", []):
+            if not isinstance(takeaway, dict):
+                continue
+            rationale_claims = takeaway.get("rationale_claim_ids", [])
+            for claim_id in rationale_claims:
+                if claim_id not in claim_set:
+                    errors.append(
+                        f"Synthesis references unknown takeaway rationale {claim_id}."
+                    )
+            if not set(rationale_claims).intersection(central):
+                errors.append(
+                    "Takeaway is not linked to a central judgment."
+                )
+        for scenario in synthesis.get("scenarios", []):
+            if not isinstance(scenario, dict):
+                continue
+            scenario_claims = scenario.get("claim_ids", [])
+            for claim_id in scenario_claims:
+                if claim_id not in claim_set:
+                    errors.append(
+                        f"Synthesis references unknown scenario claim {claim_id}."
+                    )
+            if not set(scenario_claims).intersection(central):
+                errors.append(
+                    "Scenario is not linked to a central judgment."
+                )
+
+        high_priority_claims = {
+            claim_id
+            for item in coverage
+            if isinstance(item, dict) and item.get("priority") == "high"
+            for claim_id in item.get("claim_ids", [])
+        }
+        for claim_id in central:
+            if claim_id in claim_set and claim_id not in high_priority_claims:
+                errors.append(
+                    f"Central judgment {claim_id} is not covered by a "
+                    "high-priority research area."
+                )
+    return [_ref(item) for item in errors]
 
 
 def validate_references(data, cache_dir=None):
@@ -1437,8 +3066,12 @@ def validate_references(data, cache_dir=None):
 
 
 def collect_findings(ledger, *, schema_path=None, cache_dir=None):
-    del schema_path
+    schema_file = Path(schema_path) if schema_path else DEFAULT_SCHEMA
+    schema = json.loads(schema_file.read_text(encoding="utf-8"))
     findings = []
+    for item in validate_schema(ledger, schema):
+        location, _, detail = item.partition(": ")
+        findings.append(_f("ledger/schema", item, fix=schema_remedy(location, detail)))
     findings.extend(_reference_findings(ledger, cache_dir))
     if cache_dir:
         findings.extend(_offline_probe_findings(ledger, cache_dir))
@@ -1612,6 +3245,9 @@ def _claim_input_schema_findings(claim):
     ]
 
 
+_CJK_CHARACTER = re.compile("[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
+
+
 def _cached_documents(claim, cache_dir):
     """Normalized cache text for every source this claim cites."""
     if not cache_dir:
@@ -1662,17 +3298,59 @@ def source_year_text(claim, ledger, cache_dir=None):
     return " ".join(part for part in parts if part)
 
 
+def _extract_length_findings(claim, *, cache_dir=None):
+    """Ruling R13: length is advice, never a fabrication check.
+
+    The whole extract may read short; only `fidelity/mismatch` decides whether
+    it is real. Ellipsis-separated pieces carry no length floor at all.
+    """
+    findings = []
+    claim_id = claim.get("claim_id", "")
+    texts = []
+    if claim.get("extract_or_location"):
+        texts.append(str(claim.get("extract_or_location")))
+    for entry in claim.get("source_evidence") or []:
+        if isinstance(entry, dict) and entry.get("extract_or_location"):
+            texts.append(str(entry.get("extract_or_location")))
+    for text in texts:
+        folded = unicodedata.normalize("NFKC", text)
+        compact = re.sub(r"\s+", "", folded)
+        threshold = 10 if _CJK_CHARACTER.search(compact) else 20
+        if len(compact) < threshold:
+            findings.append(
+                Finding(
+                    family="ledger/extract-length",
+                    severity="warn",
+                    klass="A",
+                    ids=_ids_in(claim_id),
+                    message=(
+                        f"{claim_id}: extract length {len(compact)} is below "
+                        f"threshold {threshold}; extend the quote"
+                    ),
+                    fix="extend the quote in claims/<file>",
+                    remove="",
+                )
+            )
+    return findings
+
+
 def claim_findings(claim, ledger, *, cache_dir=None):
     findings = []
     findings.extend(_claim_input_schema_findings(claim))
+    findings.extend(_extract_length_findings(claim, cache_dir=cache_dir))
     working = dict(claim)
     if working.get("source_ids") is None and working.get("source_evidence"):
         working = expand_claim_input(working, ledger, cache_meta={})
+    findings.extend(
+        _evidence_coverage_findings(
+            working, source_text=source_year_text(working, ledger, cache_dir)
+        )
+    )
+    findings.extend(_derived_findings(working))
     claims = [item for item in (ledger.get("claims") or []) if isinstance(item, dict)]
     shadow = dict(ledger)
-    shadow["claims"] = [
-        item for item in claims if item.get("claim_id") != working.get("claim_id")
-    ] + [working]
+    if working.get("claim_id") not in {item.get("claim_id") for item in claims}:
+        shadow["claims"] = claims + [working]
     claim_id = working.get("claim_id")
     findings.extend(
         item

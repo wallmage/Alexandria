@@ -212,7 +212,7 @@ class GateEntryPointSeverityTests(unittest.TestCase):
                 )
 
     def test_ledger_command_reports_a_schema_error_without_refusing(self):
-        """R30: ledger/schema is gone; an empty ledger is not a finding."""
+        """R29: the ledger is machine-written, so its shape is a WARN."""
         with tempfile.TemporaryDirectory() as directory:
             ledger = Path(directory) / "ledger.json"
             ledger.write_text("{}", encoding="utf-8")
@@ -221,15 +221,15 @@ class GateEntryPointSeverityTests(unittest.TestCase):
                 code = validate_ledger.main([str(ledger)])
         self.assertEqual(0, code)
         self.assertIn("=== HARD 0", err.getvalue())
-        self.assertNotIn("[ledger/schema]", err.getvalue())
+        self.assertIn("[ledger/schema]", err.getvalue())
 
     def test_evidence_and_citation_findings_are_never_warnings(self):
         ledger = json.loads(LEDGER_FIXTURE.read_text(encoding="utf-8"))
-        ledger["claims"][0]["source_ids"] = ["S99"]
+        ledger["claims"][0]["extract_or_location"] = ""
+        ledger["claims"][0]["source_evidence"][0]["extract_or_location"] = ""
         findings = validate_ledger.validate_references(ledger)
         self.assertTrue(findings)
         self.assertEqual(findings, hard_errors(findings))
-        self.assertTrue(any("unknown source" in str(item) for item in findings))
 
     def test_markdown_structure_findings_are_never_warnings(self):
         findings = validate_report.validate_markdown(

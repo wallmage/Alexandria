@@ -719,6 +719,23 @@ class ClaimTests(AlxTestCase):
         code, out = self.run_in("check")
         self.assertNotIn("leftover-prose", out)
 
+    def test_surviving_supports_to_excluded_claim_is_hard(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        ledger["claims"][1]["supports"] = ["C1"]
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        self.run_in("claim", "drop", "C1", "--apply")
+        surviving = {
+            claim["claim_id"]: claim for claim in self.ledger()["claims"]
+        }
+        self.assertIn("C2", surviving)
+        code, out = self.run_in("check")
+        self.assertEqual(1, code)
+        self.assertIn("C1", out)
+        self.assertIn("excluded", out)
+
     def test_claim_add_upserts_by_claim_id(self):
         self.init()
         self.fetch("https://example.org/study")
@@ -774,6 +791,27 @@ class ClaimTests(AlxTestCase):
         self.assertEqual([], self.ledger()["claims"])
 
     def test_r28_warn_families_are_printed_but_block_neither_add_nor_check(self):
+        """R28: a downgraded family is advice — the claim still lands."""
+        self.bootstrap()
+        warned = dict(
+            CLAIM_ONE,
+            claim_id="C9",
+            supports=["C99"],
+            person_ids=["P9"],
+        )
+        batch = self.write_json("warned.json", [warned])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertIn("C9 WARN", out)
+        self.assertIn("[ledger/reference]", out)
+        self.assertIn("[ledger/person]", out)
+        self.assertIn("C9", {claim["claim_id"] for claim in self.ledger()["claims"]})
+        _code, out = self.run_in("check")
+        hard = out.split("=== WARN")[0]
+        for family in ("ledger/reference", "ledger/person", "ledger/synthesis"):
+            self.assertNotIn(family, hard)
+
+    def test_quantity_is_warn_and_does_not_block_add_or_check(self):
         """A2: ledger/quantity is advice — the claim still lands."""
         self.bootstrap()
         warned = dict(
@@ -922,7 +960,7 @@ class CheckTests(AlxTestCase):
         code, out = self.run_in("check")
         self.assertEqual(1, code, out)
         self.assertIn("fidelity/rewild", out)
-        code, out = self.run_in("issue")
+        code, out = self.run_in("issue", "--offline")
         self.assertEqual(0, code, out)
         self.assertIn("restored from the latest snapshot", out)
         self.assertIn("1,204", (self.dir / "report.md").read_text(encoding="utf-8"))
@@ -1089,6 +1127,10 @@ class ReviewTests(AlxTestCase):
         )
         self.assertEqual(alx.file_sha256(self.dir / "report.md"), note["report_sha256"])
         self.assertEqual([], note["findings"])
+        self.assertIn("references/content-quality.md §13 review protocol", out)
+        code, out = self.run_in("review", "start", "rewild")
+        self.assertEqual(0, code, out)
+        self.assertIn("references/rewild-gate.md blind-review protocol", out)
 
     def test_finish_refuses_an_incomplete_note(self):
         self.bootstrap()
@@ -1154,8 +1196,8 @@ class ReviewTests(AlxTestCase):
         )
         code, out = self.run_in("check")
         self.assertEqual(0, code, out)
-        self.assertNotIn("re-review required", out)
-        self.assertNotIn("review start", out)
+        self.assertIn("re-review required", out)
+        self.assertNotIn("re-review required", out.split("=== WARN")[0])
 
     def test_restore_reverts_report_and_ledger(self):
         self.bootstrap()
@@ -1289,7 +1331,8 @@ class IssueTests(AlxTestCase):
             )
             code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
-        self.assertEqual(0, calls["online"])
+        self.assertGreaterEqual(calls["online"], 1)
+        self.assertIn("source fidelity:", out)
         receipt = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
         )
@@ -1398,7 +1441,7 @@ class IssueTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn("dropped C1 (fidelity/mismatch)", out)
         self.assertIn("cache-detached", out)
-        self.assertEqual(0, calls["online"])
+        self.assertGreaterEqual(calls["online"], 1)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     def test_deliver_never_bypasses_class_f(self):
@@ -1477,7 +1520,7 @@ class IssueTests(AlxTestCase):
                     side_effect=failing_online,
                 )
             )
-            code, out = self.run_in("issue", "--online")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
         notes = json.loads(
@@ -1644,12 +1687,12 @@ class SkillRunbookTests(unittest.TestCase):
                 parser.parse_args(shlex.split(command))
 
     def test_skill_md_is_the_core_path_only(self):
-        """R30: no review, snapshot, merge or dry-run step; short enough to hold."""
+        """Recovered SKILL.md: no intake flags; reviews stay optional."""
         text = (
             Path(alx.__file__).resolve().parents[1] / "SKILL.md"
         ).read_text(encoding="utf-8")
         self.assertLessEqual(len(text.splitlines()), 80)
-        for token in ("review start", "ledger merge", "--dry-run", "--deliver", "--subject-status"):
+        for token in ("--dry-run", "--deliver", "--subject-status"):
             self.assertNotIn(token, text)
 
 
@@ -1678,7 +1721,10 @@ class CheckOutputTests(AlxTestCase):
     def grouped_block(self, text):
         lines = text.splitlines()
         start = next(i for i, line in enumerate(lines) if line.startswith("=== HARD"))
-        end = next(i for i, line in enumerate(lines) if line.startswith("=== STATUS:"))
+        end = next(
+            (i for i, line in enumerate(lines) if line.startswith("=== STATUS:")),
+            len(lines),
+        )
         return "\n".join(lines[start:end])
 
     # item 1 --------------------------------------------------------------
@@ -1687,6 +1733,24 @@ class CheckOutputTests(AlxTestCase):
         self.assertEqual(1, rendered.count("alx find S1 1916"), rendered)
         self.assertEqual(1, rendered.count("alx claim drop C1 --apply"), rendered)
         self.assertNotIn("alx find S1 C1", rendered)
+
+    def test_a_producer_set_field_synthesis_completes_to_ledger_merge(self):
+        rendered = self.rendered(
+            self.item(
+                family="ledger/synthesis",
+                severity="warn",
+                klass="A",
+                ids=["C1"],
+                message="C1: synthesis names a missing claim",
+                fix="set field synthesis",
+                remove="",
+            )
+        )
+        self.assertIn(
+            "set field synthesis, then alx ledger merge ledger-patch.json",
+            rendered,
+        )
+        self.assertNotIn("in claims/", rendered)
 
     def test_a_generic_remedy_is_added_only_when_the_producer_has_none(self):
         rendered = self.rendered(
@@ -1973,7 +2037,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue", "--online")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertRegex(out, r"dropped C\d+ \(fidelity/mismatch\): ")
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2002,7 +2066,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue", "--online")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
@@ -2022,7 +2086,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue", "--deliver", "--online")
+            code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
         notes = json.loads(
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
@@ -2524,6 +2588,23 @@ class FixRoundTests(AlxTestCase):
             "原始日記", (self.dir / "report.md").read_text(encoding="utf-8")
         )
 
+    def test_the_ledger_half_of_content_gate_is_not_printed_twice(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        code, out = self.run_in("review", "start", "content")
+        self.assertEqual(0, code, out)
+        ledger = self.ledger()
+        ledger["sources"][0]["url"] = ledger["sources"][0]["url"].replace(
+            "https://", "http://"
+        )
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        _code, out = self.run_in("check")
+        https = [line for line in out.splitlines() if "must be https" in line]
+        self.assertEqual(1, len(https), out)
+        self.assertNotIn("alx review start content --iter", https[0])
+
 class DeliveryRoundTests(AlxTestCase):
     """Task 7d part J: what `issue --deliver` may and may not ship."""
 
@@ -2610,7 +2691,7 @@ class DeliveryRoundTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
-            code, out = self.run_in("issue", "--online")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C2 (fidelity/mismatch)", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2630,7 +2711,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver", "--online")
+            code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertNotIn("as the [registry note]", report)
@@ -2656,7 +2737,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver", "--online")
+            code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
         drops = [line for line in out.splitlines() if line.startswith("dropped ")]
         self.assertEqual(1, len(drops), out)
@@ -2680,7 +2761,7 @@ class DeliveryRoundTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
-            code, out = self.run_in("issue", "--online")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
 
@@ -2701,7 +2782,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver", "--online")
+            code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C2 (", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2784,7 +2865,7 @@ class DeliveryRoundTests(AlxTestCase):
                     side_effect=refused,
                 )
             )
-            code, out = self.run_in("issue", "--online")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertNotIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
@@ -3322,7 +3403,7 @@ class RefreshedSourceReprobeTests(AlxTestCase):
         stack.enter_context(
             mock_production_transport(self.responses_for(self.changed_page()))
         )
-        return self.run_in("issue", "--sample-size", "1", "--online", *extra)
+        return self.run_in("issue", "--sample-size", "1", *extra)
 
     def test_a_claim_outside_the_sample_is_dropped_by_issue(self):
         """C1 restatement of ..._blocks_issue."""
@@ -3393,7 +3474,7 @@ class VerificationNotePdfTests(AlxTestCase):
                     "disclosure_required": ["C1"],
                 },
             )
-            code, out = self.run_in("issue", "--deliver", "--online")
+            code, out = self.run_in("issue", "--deliver")
             self.assertEqual(0, code, out)
             code, out = self.run_in("render")
         self.assertEqual(0, code, out)
@@ -3714,6 +3795,15 @@ class AccountabilityNoteTests(AlxTestCase):
         _code, out = self.run_in("check")
         self.assertNotIn("accountability_note must say", out)
 
+    def test_the_floor_remedy_names_the_flag_and_the_real_id(self):
+        self.short_note()
+        _code, out = self.run_in("check")
+        line = next(item for item in out.splitlines() if "accountability_note" in item)
+        self.assertIn(
+            "Fix: alx source set S1 --accountability-note accountability-note.txt",
+            line,
+        )
+
 
 class ReserveReceiptTests(AlxTestCase):
     """K1/K4: what the §6.11 reserve skip may destroy, and what it owes."""
@@ -3735,11 +3825,11 @@ class ReserveReceiptTests(AlxTestCase):
         receipt = self.dir / "receipts" / "source-fidelity.json"
         with ExitStack() as stack:
             helper.stub_gates(stack)
-            code, out = self.run_in("issue", "--deliver", "--online")
+            code, out = self.run_in("issue", "--deliver")
             self.assertEqual(0, code, out)
             self.assertTrue(receipt.exists(), out)
             self.set_remaining(2)
-            code, out = self.run_in("issue", "--deliver", "--online")
+            code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
         self.assertTrue(receipt.exists())
         issued = json.loads(
@@ -3773,7 +3863,7 @@ class ReserveReceiptTests(AlxTestCase):
                 )
             )
             self.set_remaining(2)
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver", "--offline")
         self.assertEqual(0, code, out)
         self.assertEqual([[]], errors)
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
@@ -4830,6 +4920,20 @@ class CompactWarnTierTests(AlxTestCase):
         self.assertEqual(len(families), len(set(families)))
 
     def test_verbose_expands_the_warn_tier_to_one_line_per_item(self):
+        self._unverified()
+        _code, compact = self.run_in("check")
+        _code, verbose = self.run_in("check", "--verbose")
+        self.assertIn("[ledger/provenance] 2", compact)
+        self.assertIn("[ledger/provenance] 2", verbose)
+        self.assertGreater(
+            len(verbose.splitlines()), len(compact.splitlines())
+        )
+        self.assertTrue(
+            any(line.startswith("  ") for line in verbose.splitlines()[5:]),
+            verbose,
+        )
+
+    def test_verbose_expands_quantity_warns_to_one_line_per_item(self):
         self.bootstrap()
         ledger = self.ledger()
         ledger["claims"][0]["claim"] = (
@@ -4862,6 +4966,25 @@ class CompactWarnTierTests(AlxTestCase):
         self.assertRegex(out, r"=== WARN \d+ ===")
         hard = out.split("=== HARD ")[1].split("=== WARN")[0].splitlines()[1:]
         self.assertTrue(any(line.startswith("  ") for line in hard), out)
+
+
+class PortfolioVocabularyTests(AlxTestCase):
+    def test_the_portfolio_finding_lists_every_allowed_value(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        for source in ledger["sources"]:
+            source["provenance"] = "unverified"
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        _code, out = self.run_in("check", "--verbose")
+        self.assertIn("portfolio has no independent source", out)
+        for flag, values in (
+            ("--provenance", alx.PROVENANCES),
+            ("--type", alx.EVIDENCE_TYPES),
+            ("--role", alx.SOURCE_ROLES),
+        ):
+            self.assertIn(f"{flag}: {', '.join(values)}", out)
 
 
 class DeletedNoiseFamiliesTests(AlxTestCase):
@@ -5181,7 +5304,7 @@ class PartBFlowTests(AlxTestCase):
         self.assertEqual("S1", ev["source_id"])
         self.assertEqual(self.EXTRACT, ev["extract_or_location"])
 
-    def test_issue_without_online_appends_no_delivery_disclosure(self):
+    def test_issue_offline_appends_no_delivery_disclosure(self):
         from contextlib import ExitStack
 
         self.bootstrap()
@@ -5199,9 +5322,10 @@ class PartBFlowTests(AlxTestCase):
                     "disclosure_required": ["C1"],
                 },
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--offline")
         self.assertEqual(0, code, out)
         self.assertEqual(0, calls["online"])
+        self.assertNotIn("source fidelity:", out)
         issued = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
         )
@@ -5235,6 +5359,6 @@ class PartBFlowTests(AlxTestCase):
         self.assertIn("optional", issue._option_string_actions["--deliver"].help)
         self.assertIn("optional", claim_add._option_string_actions["--dry-run"].help)
         self.assertIn(
-            "re-verify extracts against the live pages; optional",
-            issue._option_string_actions["--online"].help,
+            "skip live source re-check; optional",
+            issue._option_string_actions["--offline"].help,
         )

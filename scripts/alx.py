@@ -710,6 +710,9 @@ def valid_remedy(text):
     return False
 
 
+_LEDGER_MERGE_FIELDS = ("brief", "people", "coverage", "synthesis")
+
+
 def _named_file(item):
     """Claim findings are edited in the claim inputs; the rest in the ledger."""
     return (
@@ -741,7 +744,11 @@ def _completed_remedy(text, item):
     """`set field x` from a producer becomes the closed imperative in full."""
     match = _BARE_SET_FIELD.match(str(text or "").strip())
     if match:
-        return set_field(match.group(1), _named_file(item))
+        field = match.group(1)
+        root = field.split(".", 1)[0]
+        if root in _LEDGER_MERGE_FIELDS:
+            return f"set field {field}, then alx ledger merge ledger-patch.json"
+        return set_field(field, _named_file(item))
     return text
 
 
@@ -3251,8 +3258,19 @@ def _review_findings(ws, state, ledger):
                 _content_check(ws), ws, state, ledger
             )
         )
-    # R30: a review is optional, so its staleness or incompleteness is never a
-    # finding — nothing here may send the model back to `review start`.
+    for kind in REVIEW_KINDS:
+        note_missing = _note_completeness(ws, state, ledger, kind)
+        record = state.get("reviews", {}).get(kind, {})
+        if record.get("finished") and note_missing:
+            findings.append(
+                finding(
+                    _review_family(kind, "stale"),
+                    f"reviews/{kind}.json is incomplete: "
+                    f"{'; '.join(note_missing)}.",
+                )
+            )
+            continue
+        findings.extend(freshness_findings(ws, state, ledger, kind))
     return findings
 
 
@@ -3584,9 +3602,14 @@ def cmd_review_start(args):
     ws.reviews.mkdir(parents=True, exist_ok=True)
     _write_json(ws.reviews / f"{kind}.json", _note_skeleton(ws, state, kind, ledger))
     ws.save_state(state)
+    protocol = (
+        "references/rewild-gate.md blind-review protocol"
+        if kind == "rewild"
+        else "references/content-quality.md §13 review protocol"
+    )
     lines.append(f"Review copy: {target}")
     lines.extend(_note_instructions(kind))
-    lines.append("Judge the report on its own merits; fill only the skeleton's fields.")
+    lines.append(f"Judge the report by {protocol}.")
     _emit(ws, state, f"review start {kind}", f"iteration {iteration}", lines)
     return 0
 
@@ -3780,8 +3803,8 @@ def _online_findings(result):
 
 
 def _online_phase(ws, state, ledger, args, lines, delivery_notes):
-    """Live fidelity only when `issue --online` is passed."""
-    if not getattr(args, "online", False):
+    """Live fidelity unless `issue --offline` is passed."""
+    if getattr(args, "offline", False):
         return [], True
     receipt_path = ws.receipts / "source-fidelity.json"
     # J1: only a receipt this pass wrote may be hashed into `issue.json`, and
@@ -4076,7 +4099,7 @@ def cmd_render(args):
         # C2: a missing or stale receipt is the issue step `render` runs itself.
         cmd_issue(
             argparse.Namespace(
-                dir=args.dir, deliver=False, sample_size=8, online=False
+                dir=args.dir, deliver=False, sample_size=8, offline=True
             )
         )
         ws, state, ledger = _open(args)
@@ -4331,9 +4354,9 @@ def build_parser():
     issue = subparsers.add_parser("issue", help="receipts, once, at the end")
     issue.add_argument("--deliver", action="store_true", help="optional")
     issue.add_argument(
-        "--online",
+        "--offline",
         action="store_true",
-        help="re-verify extracts against the live pages; optional",
+        help="skip live source re-check; optional",
     )
     issue.add_argument("--sample-size", type=int, default=8)
     issue.set_defaults(handler=cmd_issue)

@@ -1077,7 +1077,7 @@ class ContentGateTests(unittest.TestCase):
             review.write_text(json.dumps(note), encoding="utf-8")
             ledger_data = json.loads(ledger.read_text(encoding="utf-8"))
             ledger_data["claims"][0]["report_paragraph"] = 1
-            ledger_data["claims"][0]["source_ids"] = ["S404"]
+            ledger_data["claims"][0]["supports"] = ["C404"]
             ledger.write_text(json.dumps(ledger_data), encoding="utf-8")
             report.write_text(
                 report.read_text(encoding="utf-8")
@@ -1090,11 +1090,10 @@ class ContentGateTests(unittest.TestCase):
                 report, ledger, review, include_ledger_checks=False
             )
             self.assertTrue(
-                any("unknown source S404" in item.message for item in with_ledger),
-                with_ledger,
+                any("C404" in item.message for item in with_ledger), with_ledger
             )
             self.assertFalse(
-                any("unknown source S404" in item.message for item in without_ledger),
+                any("C404" in item.message for item in without_ledger),
                 without_ledger,
             )
             self.assertIn(

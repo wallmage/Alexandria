@@ -1,12 +1,14 @@
-"""Resilience rulings R14/R15 and R17, R20-R24.
+"""Resilience rulings R14/R15 and R17, R20-R27.
 
 Every rule here loosens or re-aims a gate that looped a Chinese run: a source
 that states the year once and then writes bare month-day dates (R14), a claim
 naming a registered person without the person_id (R15), a negation leaking
 across an ASCII-punctuated sentence (R17), person messages that never named the
 vocabulary they demanded (R20), a year cut off before 年 (R21), two passages
-quoted from one page (R22), an untested counterevidence claim (R23) and a local
-as_of one day ahead of a UTC verified_at (R24).
+quoted from one page (R22), an untested counterevidence claim (R23), a local
+as_of one day ahead of a UTC verified_at (R24), the living-person harm rules
+themselves (R25, deleted), a count spelled in Han numerals (R26) and an
+unclassified source portfolio (R27).
 """
 
 from __future__ import annotations
@@ -17,7 +19,13 @@ import unittest
 from pathlib import Path
 
 from scripts import alx
-from tests.test_alx import CLAIM_ONE, AlxTestCase
+from tests.test_alx import (
+    CLAIM_ONE,
+    CLAIM_TWO,
+    COVERAGE_PATCH,
+    AlxTestCase,
+    ReviewTests,
+)
 from tests.test_validate_ledger import valid_quality_ledger, validate_ledger
 
 EXTRACT = "12月10日的日记记载了当天的行程与会见安排，并注明随行人员。"
@@ -111,23 +119,19 @@ def named_claim():
 
 
 class PersonAutoLinkTests(unittest.TestCase):
-    def test_named_person_is_linked_with_a_warn_not_a_hard_finding(self):
+    def test_named_person_is_linked_silently(self):
+        """R25 restatement of
+        test_named_person_is_linked_with_a_warn_not_a_hard_finding: the
+        auto-link is a convenience, so it no longer prints a WARN either.
+        """
         data = person_ledger("deceased")
         findings = validate_ledger.claim_findings(named_claim(), data)
-        warns = [
-            item
-            for item in findings
-            if item.family == "ledger/person" and item.severity == "warn"
-        ]
-        self.assertTrue(warns)
-        self.assertIn("P3", warns[0].message)
         self.assertEqual(
             [],
             [
                 item
                 for item in findings
                 if item.family in {"ledger/person", "ledger/reference"}
-                and item.severity != "warn"
             ],
         )
         self.assertEqual(
@@ -152,17 +156,19 @@ class PersonAutoLinkTests(unittest.TestCase):
             ],
         )
 
-    def test_living_person_still_needs_harm_review_after_linking(self):
+    def test_living_person_needs_nothing_after_linking(self):
+        """R25 restatement of
+        test_living_person_still_needs_harm_review_after_linking: living status
+        is recorded, never gated.
+        """
         data = person_ledger("living")
-        findings = validate_ledger.claim_findings(named_claim(), data)
-        self.assertTrue(
+        self.assertEqual(
+            [],
             [
                 item
-                for item in findings
-                if item.severity != "warn"
-                and item.family in {"ledger/person", "ledger/harm"}
+                for item in validate_ledger.claim_findings(named_claim(), data)
+                if item.family == "ledger/person"
             ],
-            findings,
         )
 
 
@@ -367,49 +373,144 @@ class EvidenceEntryProbeTests(unittest.TestCase):
         )
 
 
-class ProtectedPersonMessageTests(unittest.TestCase):
-    """R20: the person messages carry the vocabulary they demand."""
+class LivingPersonRulesAreGoneTests(unittest.TestCase):
+    """R25: nothing about a person blocks a claim any more."""
 
-    def findings(self):
-        claim = dict(
+    def bogus_role_claim(self):
+        return dict(
             named_claim(),
             person_ids=["P3"],
             person_claim_role="subject_assessment",
-            person_claim_assessment={"harm": "none", "note": "日记原文转引"},
         )
-        return [
+
+    def test_a_living_person_with_a_bogus_role_raises_no_person_finding(self):
+        self.assertEqual(
+            [],
+            [
+                item
+                for item in validate_ledger.claim_findings(
+                    self.bogus_role_claim(), person_ledger("living")
+                )
+                if item.family == "ledger/person"
+            ],
+        )
+
+    def test_the_claim_is_accepted(self):
+        self.assertEqual(
+            [],
+            [
+                item
+                for item in validate_ledger.claim_findings(
+                    self.bogus_role_claim(), person_ledger("living")
+                )
+                if item.severity == "hard"
+            ],
+        )
+
+    def test_the_harm_family_is_no_longer_emitted(self):
+        self.assertNotIn("ledger/harm", validate_ledger.FAMILIES)
+
+    def test_an_unregistered_person_id_only_warns(self):
+        [item] = [
             item
-            for item in validate_ledger.claim_findings(claim, person_ledger("living"))
-            if item.family == "ledger/person" and item.severity == "hard"
+            for item in validate_ledger.claim_findings(
+                dict(named_claim(), person_ids=["P9"]), person_ledger("living")
+            )
+            if item.family == "ledger/person"
         ]
-
-    def test_the_role_message_names_the_person_the_roles_and_the_got_value(self):
-        [message] = [
-            item.message
-            for item in self.findings()
-            if "person_claim_role one of" in item.message
-        ]
-        self.assertIn("P3 Chen Bulei (living_status living)", message)
-        self.assertIn(
-            "neutral|harmful|sensitive_private_fact|response|resolution", message
+        self.assertEqual("warn", item.severity)
+        self.assertEqual("A", item.klass)
+        self.assertEqual(
+            "C51: person_ids P9 not in ledger.people; run alx ledger merge "
+            "people or drop the id",
+            item.message,
         )
-        self.assertIn("got 'subject_assessment'", message)
+        self.assertEqual("alx ledger merge people.json", item.fix)
+        self.assertEqual("", item.remove)
 
-    def test_the_assessment_message_names_the_person_the_shape_and_the_floor(self):
-        [message] = [
-            item.message
-            for item in self.findings()
-            if "person_claim_assessment" in item.message
-        ]
-        self.assertIn("P3 Chen Bulei (living_status living)", message)
-        self.assertIn(
-            '{"classification": <person_claim_role>, "rationale": >=40 chars}',
-            message,
-        )
-        self.assertIn("got None, 0 chars", message)
 
-    def test_both_messages_stay_hard(self):
-        self.assertEqual(2, len(self.findings()))
+class CjkNumeralQuantityTests(unittest.TestCase):
+    """R26: a count spelled in Han numerals warns; digits and dates stay hard."""
+
+    def claim(self, text):
+        return {
+            "claim_id": "C57",
+            "claim": text,
+            "kind": "fact",
+            "importance": "supporting",
+            "source_ids": ["S2"],
+            "source_evidence": [
+                {
+                    "source_id": "S2",
+                    "extract_or_location": (
+                        "该文由学界同人共同署名,文末未列出署名人数与日期."
+                    ),
+                }
+            ],
+        }
+
+    def findings(self, text):
+        return quantity_findings(self.claim(text), valid_quality_ledger())
+
+    def test_a_han_numeral_count_is_a_warn(self):
+        item = self.findings("三位作者共同署名该文。")[0]
+        self.assertEqual("warn", item.severity)
+        self.assertEqual("A", item.klass)
+        self.assertIn("quantity '三' appears in claim but not in", item.message)
+        self.assertIn("claim n:3", item.message)
+        self.assertEqual("alx find S2 三", item.fix)
+        self.assertEqual("", item.remove)
+        self.assertNotIn("Remove:", item.message)
+
+    def test_the_same_count_in_digits_stays_hard(self):
+        item = self.findings("3位作者共同署名该文。")[0]
+        self.assertEqual("hard", item.severity)
+        self.assertIn("claim n:3", item.message)
+
+    def test_a_date_stays_hard(self):
+        items = self.findings("1936年12月11日三位作者共同署名该文。")
+        hard = [item for item in items if item.severity == "hard"]
+        self.assertTrue(hard, items)
+        self.assertIn("d:1936-12-11", " ".join(item.message for item in hard))
+
+
+class UnclassifiedSourcePortfolioTests(AlxTestCase):
+    """R27: an unclassified evidence portfolio is a warn, not a refusal.
+
+    `bootstrap` classifies both sources; this is the same workspace with the
+    `alx source set` step left out, which is what a run out of time produces.
+    """
+
+    def workspace_without_classification(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        patch = self.write_json("coverage.json", COVERAGE_PATCH)
+        code, out = self.run_in("ledger", "merge", patch)
+        self.assertEqual(0, code, out)
+        self.draft_report()
+        self.run_in("check", "--fix")
+        self.run_in("snapshot")
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        reviews.dir, reviews.root = self.dir, self.root
+        reviews.run_alx, reviews.run_in = self.run_alx, self.run_in
+        reviews.finish_reviews()
+        return self.run_in("check")
+
+    def test_no_classification_finding_blocks_the_check(self):
+        _code, out = self.workspace_without_classification()
+        self.assertIn("no independent source", out)
+        hard = out.split("=== WARN")[0]
+        for family in ("ledger/portfolio", "ledger/provenance", "ledger/key-claim"):
+            self.assertNotIn(family, hard)
+
+    def test_every_classification_finding_is_class_a(self):
+        _code, out = self.workspace_without_classification()
+        self.assertIn("[ledger/portfolio] 1 (A, waivable by --deliver)", out)
+        self.assertIn("[ledger/provenance] 2 (A, waivable by --deliver)", out)
+        self.assertIn("[ledger/key-claim] 1 (A, waivable by --deliver)", out)
 
 
 class ClaimAddNamesTheClaimFileTests(AlxTestCase):

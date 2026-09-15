@@ -115,7 +115,6 @@ ARCHETYPES = (
     "hybrid",
 )
 LIVING_STATUSES = ("living", "recently_deceased", "deceased", "unknown")
-PROTECTED_STATUSES = frozenset({"living", "recently_deceased", "unknown"})
 PROVENANCES = (
     "primary_independent",
     "primary_interested",
@@ -535,11 +534,8 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
             set_field("claim-input", "claims/*.json"),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
-    if family in {"ledger/person", "ledger/harm"}:
-        return (
-            remedy("ledger-merge", file="people.json"),
-            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
-        )
+    if family == "ledger/person":
+        return remedy("ledger-merge", file="people.json"), ""
     if family == "ledger/https":
         match = _URL_IN_MESSAGE.search(item.message)
         https = re.sub(r"^http://", "https://", match.group(0)) if match else ""
@@ -1613,7 +1609,6 @@ CLAIM_ADD_FAMILIES = frozenset(
         "ledger/derived",
         "ledger/date-granularity",
         "ledger/person",
-        "ledger/harm",
         "ledger/reference",
         "ledger/excluded-supports",
         "fidelity/mismatch",
@@ -2244,6 +2239,8 @@ def _ledger_findings(ws, ledger):
                     "ledger/provenance",
                     f"{source_id} carries a key or central claim while provenance is "
                     "`unverified` (treated as interested).",
+                    # R27: the default classification is a prompt, not a refusal.
+                    severity="warn",
                     ids=[source_id],
                 )
             )

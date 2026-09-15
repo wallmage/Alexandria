@@ -43,7 +43,6 @@ FAMILIES = frozenset(
         "ledger/derived",
         "ledger/date-granularity",
         "ledger/person",
-        "ledger/harm",
         "ledger/excluded-supports",
         "ledger/undated-reason",
         "ledger/host-conflict",
@@ -214,57 +213,6 @@ DIRECTION_ASSERTIONS = (
     ),
 )
 
-PROTECTED_LIVING_STATUSES = {
-    "living",
-    "recently_deceased",
-    "unknown",
-}
-#: R20: the only accepted person_claim_role values; both person messages print
-#: this list verbatim, because nothing else tells the producer the vocabulary.
-PERSON_CLAIM_ROLES = (
-    "neutral",
-    "harmful",
-    "sensitive_private_fact",
-    "response",
-    "resolution",
-)
-HUMAN_HARM_PATTERN = re.compile(
-    r"(?i)\b(?:alleg(?:e[ds]?|ation)|accus(?:e[ds]?|ation)|"
-    r"investigat(?:ed|ion)|charged(?!\s+(?:the\s+)?(?:battery|device|phone|"
-    r"account|card|fee|price))|indicted|convicted|acquitted|"
-    r"liable|misconduct|fraud|harass(?:ed|ment)|abuse[ds]?|assault(?:ed)?|"
-    r"bribery|corrupt(?:ion)?|theft|stole|embezzl(?:e[ds]?|ement)|"
-    r"murder(?:ed)?|manslaughter|kill(?:ed|ing)?|launder(?:ed|ing)?|"
-    r"tax evasion|plagiariz(?:ed|ing)|discriminat(?:ed|ion)|"
-    r"retaliat(?:ed|ion)|extort(?:ed|ion)|blackmail(?:ed)?|"
-    r"kidnap(?:ped|ping)?|traffick(?:ed|ing)?|perjury|forgery|"
-    r"falsif(?:ied|ication)|scam(?:med)?|wrongdoing|personal failing)\b|"
-    r"指控|被控|起訴|起诉|定罪|無罪|无罪|欺詐|欺诈|騷擾|骚扰|賄賂|贿赂"
-)
-SENSITIVE_PRIVATE_PATTERN = re.compile(
-    r"(?i)\b(?:medical|diagnos(?:is|ed)|health condition|sexuality|religion|"
-    r"minor child|romantic|addiction|home address|private financ)"
-    r"|病歷|病历|診斷|诊断|性取向|宗教|未成年子女|住址|私人財務|私人财务"
-)
-LEGAL_STAGE_PATTERNS = {
-    "alleged": re.compile(r"(?i)\b(?:alleg(?:e[ds]?|ation)|accus(?:e[ds]?|ation))\b|指控"),
-    "investigated": re.compile(r"(?i)\b(?:investigat(?:ed|ion)|under investigation)\b|調查|调查"),
-    "charged": re.compile(r"(?i)\b(?:charged?|criminal charges?)\b|被控"),
-    "indicted": re.compile(r"(?i)\b(?:indicted|indictment)\b|起訴|起诉"),
-    "settled_no_admission": re.compile(
-        r"(?i)\bsettled\b.{0,60}\bwithout (?:admitting|admission)\b"
-    ),
-    "settled_with_admission": re.compile(
-        r"(?i)\bsettled\b.{0,60}\b(?:admitted|admission)\b"
-    ),
-    "found_liable": re.compile(r"(?i)\b(?:found|held) liable\b|裁定.*責任|裁定.*责任"),
-    "convicted": re.compile(r"(?i)\b(?:convicted|conviction|found guilty)\b|定罪"),
-    "acquitted": re.compile(r"(?i)\b(?:acquitted|acquittal|found not guilty)\b|無罪|无罪"),
-    "overturned": re.compile(r"(?i)\b(?:overturned|vacated|reversed on appeal)\b|推翻"),
-    "expunged": re.compile(r"(?i)\b(?:expunged|sealed record)\b|撤銷記錄|撤销记录"),
-    "retracted": re.compile(r"(?i)\b(?:retracted|withdrew|withdrawn)\b|撤回"),
-}
-
 
 def mentions_person_alias(text, person):
     """Match a registered name or alias without substringing another word."""
@@ -280,16 +228,6 @@ def mentions_person_alias(text, person):
         elif alias in folded:
             return True
     return False
-
-def _auto_link_finding(claim_id, auto_linked):
-    return _f(
-        "ledger/person",
-        f"{claim_id}: claim names registered person {', '.join(auto_linked)}; "
-        "person_ids auto-linked.",
-        severity="warn",
-        ids=[claim_id, *auto_linked],
-        fix="alx check --fix",
-    )
 
 
 def derive_person_ids(claim, people):
@@ -458,7 +396,22 @@ _CJK_ABBREVIATED_TAIL_RE = re.compile(
 #: context ("一起", "一些", "二手", "十分"): requiring a classifier keeps those
 #: silent without a stoplist. Deliberately narrow to 個/个, the classifier in
 #: both worked examples ("三個漏洞", "十八個月"); broadening it is deferred.
+#: R27: the provenance `alx fetch` writes before anyone classifies the source.
+UNCLASSIFIED_PROVENANCE = "unverified"
+
 _CJK_COUNT_CLASSIFIERS = frozenset("個个項项名家次種种款位條条篇卷册冊")
+
+#: R26: a quantity spelled with Han numeral words ("三位作者"), with or without
+#: the classifier the scan leaves out of the display. Digits, percentages,
+#: currency and dates never match, so those stay hard.
+_CJK_NUMERAL_TOKEN_RE = re.compile(
+    "^[" + _HAN_NUMERAL_CHARS + "]+[位次个個年月日]?$"
+)
+
+
+def _is_cjk_numeral_token(display):
+    """R26: tag the Han-numeral quantities the coverage finding downgrades."""
+    return bool(_CJK_NUMERAL_TOKEN_RE.match(str(display or "").strip()))
 
 #: Measure units whose figure is comparable across notations, each mapped to
 #: the (dimension, factor) that converts it to that dimension's base unit. A
@@ -1057,14 +1010,6 @@ def _year_documented_coverage(claim_forms, evidence_forms, source_text):
             return True
     return False
 
-
-def _person_label(people):
-    """R20: a person message names who it is about, not just 'a protected person'."""
-    return "; ".join(
-        f"{person.get('person_id')} {_text(person.get('name'))} "
-        f"(living_status {person.get('living_status')})"
-        for person in people
-    )
 
 
 def _claim_field_fix(field):
@@ -1884,13 +1829,15 @@ def _evidence_coverage_findings(
                 f"the source's form ({offer_form})"
             )
             detail = "The extract states the month and day but not the year."
+        cjk_word = _is_cjk_numeral_token(display)
         errors.append(
             _f(
                 "ledger/quantity",
                 f"{claim_id}: quantity '{display}' appears in claim but not in "
                 f"extract_or_location (claim {', '.join(sorted(claim_forms))}; "
-                f"{'; '.join(offered)}). {detail} "
-                f"Remove: `{_drop(claim_id)}`.",
+                f"{'; '.join(offered)}). {detail}"
+                + ("" if cjk_word else f" Remove: `{_drop(claim_id)}`."),
+                severity="warn" if cjk_word else "hard",
                 ids=_ids_in(f"{claim_id} {find_id or ''}"),
                 fix=fix,
                 remove=_drop(claim_id),
@@ -2316,14 +2263,6 @@ def _reference_findings(data, cache_dir=None):
         for person in people
         if isinstance(person, dict) and person.get("person_id")
     }
-    brief = data.get("brief")
-    brief = brief if isinstance(brief, dict) else {}
-    primary_protected_ids = {
-        person_id
-        for person_id, person in people_by_id.items()
-        if person.get("relationship") == "primary_subject"
-        and person.get("living_status") in PROTECTED_LIVING_STATUSES
-    }
     independent_provenance = {
         "primary_independent",
         "secondary_independent",
@@ -2333,6 +2272,13 @@ def _reference_findings(data, cache_dir=None):
         "secondary_dependent",
         "unverified",
     }
+
+    def unclassified(source_ids):
+        """R27: nobody classified these sources; the default is not a verdict."""
+        return all(
+            sources_by_id[source_id].get("provenance") == UNCLASSIFIED_PROVENANCE
+            for source_id in source_ids
+        )
     excluded_claims = data.get("excluded_claims")
     excluded_claims = excluded_claims if isinstance(excluded_claims, list) else []
     excluded_ids = {
@@ -2359,6 +2305,10 @@ def _reference_findings(data, cache_dir=None):
                 "  --role: subject_official, counterparty_official, "
                 "independent_analysis, empirical_data, affected_stakeholder, "
                 "expert_interpretation, historical_record",
+                # R27: unclassified sourcing is a judgment about the portfolio,
+                # not a fabrication; triangulation still computes from whatever
+                # classification is set.
+                severity="warn",
                 fix="alx source set S1",
             )
         )
@@ -2497,20 +2447,6 @@ def _reference_findings(data, cache_dir=None):
                     )
         return foundations
 
-    def support_reaches(claim_id, target_id, visited=None):
-        visited = set() if visited is None else visited
-        if claim_id in visited:
-            return False
-        visited.add(claim_id)
-        supports = claims_by_id.get(claim_id, {}).get("supports", [])
-        if not isinstance(supports, list):
-            return False
-        return target_id in supports or any(
-            support_reaches(related_id, target_id, visited.copy())
-            for related_id in supports
-            if related_id in claims_by_id
-        )
-
     family_of = _source_family_index(sources_by_id)
     errors.extend(_source_family_errors(sources_by_id))
 
@@ -2553,6 +2489,7 @@ def _reference_findings(data, cache_dir=None):
                     f"Supported coverage {item.get('area', '<unknown>')} relies "
                     "only on interested sources; mark it as a gap or add "
                     "independent evidence.",
+                    severity="warn" if unclassified(linked_sources) else "hard",
                     fix="alx source set S1",
                 )
             )
@@ -2628,579 +2565,28 @@ def _reference_findings(data, cache_dir=None):
             )
         person_links = claim.get("person_ids", [])
         person_links = person_links if isinstance(person_links, list) else []
-        # R15: naming a registered person is a mechanical linkage repair, not a
-        # refusal; the harm rules below then run on the linked set.
+        # R25: naming a registered person is a silent mechanical repair (R15),
+        # and an unregistered id is a bookkeeping warn. Nothing else about a
+        # person blocks a claim.
         auto_linked = [
             person_id
             for person_id in derive_person_ids(claim, people_by_id.values())
             if person_id not in person_links
         ]
-        if auto_linked:
-            errors.append(_auto_link_finding(claim_id, auto_linked))
-            person_links = person_links + auto_linked
+        person_links = person_links + auto_linked
         for person_id in person_links:
             if person_id not in people_by_id:
                 errors.append(
                     _f(
                         "ledger/person",
-                        f"{claim_id} references unknown person {person_id}.",
+                        f"{claim_id}: person_ids {person_id} not in "
+                        "ledger.people; run alx ledger merge people or drop "
+                        "the id",
+                        severity="warn",
                         ids=[claim_id, person_id],
-                        fix="alx ledger merge PATCH",
-                        remove=_drop(claim_id),
+                        fix="alx ledger merge people.json",
                     )
                 )
-        protected_people = [
-            people_by_id[person_id]
-            for person_id in person_links
-            if person_id in people_by_id
-            and people_by_id[person_id].get("living_status")
-            in PROTECTED_LIVING_STATUSES
-        ]
-        person_claim_role = claim.get("person_claim_role")
-        person_claim_assessment = claim.get("person_claim_assessment")
-        protected_label = _person_label(protected_people)
-        if protected_people and person_claim_role not in set(PERSON_CLAIM_ROLES):
-            errors.append(
-                _f(
-                    "ledger/person",
-                    f"{claim_id}: {protected_label} needs person_claim_role "
-                    f"one of {'|'.join(PERSON_CLAIM_ROLES)}; got "
-                    f"{person_claim_role!r}.",
-                    ids=[claim_id],
-                    fix="set field person_claim_role",
-                    remove=_drop(claim_id),
-                )
-            )
-        for person_id in person_links:
-            person = people_by_id.get(person_id)
-            if person and person.get("living_status") == "unknown":
-                errors.append(
-                    _f(
-                        "ledger/person",
-                        f"{claim_id}: person {person_id} has living_status unknown; "
-                        "refuse person-linked claims until status is pinned via "
-                        "`alx ledger merge PATCH`. Remove: "
-                        f"`{_drop(claim_id)}`.",
-                        ids=[claim_id, person_id],
-                        fix="alx ledger merge PATCH",
-                        remove=_drop(claim_id),
-                    )
-                )
-        rationale = (
-            _text(person_claim_assessment.get("rationale"))
-            if isinstance(person_claim_assessment, dict)
-            else ""
-        )
-        if protected_people and (
-            not isinstance(person_claim_assessment, dict)
-            or person_claim_assessment.get("classification")
-            != person_claim_role
-            or len(rationale) < _prose_minimum(rationale)
-        ):
-            got = (
-                person_claim_assessment.get("classification")
-                if isinstance(person_claim_assessment, dict)
-                else None
-            )
-            errors.append(
-                _f(
-                    "ledger/person",
-                    f"{claim_id}: {protected_label}: person_claim_assessment "
-                    '= {"classification": <person_claim_role>, '
-                    f'"rationale": >={_prose_minimum(rationale)} chars}}; got '
-                    f"{got!r}, {len(rationale)} chars.",
-                    ids=[claim_id],
-                    fix="set field person_claim_assessment",
-                    remove=_drop(claim_id),
-                )
-            )
-        harm_review = claim.get("human_harm_review")
-        claim_text = _text(claim.get("claim"))
-        harmful_text = bool(
-            HUMAN_HARM_PATTERN.search(claim_text)
-            or SENSITIVE_PRIVATE_PATTERN.search(claim_text)
-        )
-        if harmful_text:
-            if (
-                brief.get("archetype") == "person"
-                and len(primary_protected_ids) == 1
-                and not person_links
-            ):
-                primary_id = next(iter(primary_protected_ids))
-                errors.append(
-                    f"{claim_id}: harmful claim in a person brief must link "
-                    f"the protected primary subject {primary_id}; pronouns "
-                    "and omitted names do not remove that accountability."
-                )
-            if protected_people and person_claim_role not in {
-                "harmful",
-                "sensitive_private_fact",
-            }:
-                errors.append(
-                    _f(
-                        "ledger/harm",
-                        f"{claim_id}: harmful wording conflicts with "
-                        f"person_claim_role {person_claim_role!r}.",
-                        ids=[claim_id],
-                        fix="set field person_claim_role",
-                        remove=_drop(claim_id),
-                    )
-                )
-        if (
-            SENSITIVE_PRIVATE_PATTERN.search(claim_text)
-            and protected_people
-            and person_claim_role != "sensitive_private_fact"
-        ):
-            errors.append(
-                f"{claim_id}: sensitive private wording requires "
-                "person_claim_role 'sensitive_private_fact'."
-            )
-        needs_harm_review = bool(
-            protected_people
-            and (
-                harmful_text
-                or person_claim_role in {
-                    "harmful",
-                    "sensitive_private_fact",
-                }
-            )
-        )
-        if needs_harm_review and not isinstance(harm_review, dict):
-            errors.append(
-                f"{claim_id}: protected-person harm claim requires a "
-                "human_harm_review bound to sourcing, attribution, resolution, "
-                "privacy, and right of reply."
-            )
-        if isinstance(harm_review, dict) and protected_people:
-            if (
-                person_claim_role == "sensitive_private_fact"
-                and harm_review.get("category") != "sensitive_private_fact"
-            ):
-                errors.append(
-                    f"{claim_id}: person_claim_role sensitive_private_fact "
-                    "requires the matching review category."
-                )
-            if (
-                SENSITIVE_PRIVATE_PATTERN.search(claim_text)
-                and harm_review.get("category") != "sensitive_private_fact"
-            ):
-                errors.append(
-                    f"{claim_id}: sensitive private information must use the "
-                    "sensitive_private_fact review category."
-                )
-            source_floor = harm_review.get("source_floor")
-            legal_stage = harm_review.get("legal_stage")
-            stage_pattern = LEGAL_STAGE_PATTERNS.get(legal_stage)
-            evidence_by_source = {
-                entry.get("source_id"): _text(
-                    entry.get("extract_or_location")
-                )
-                for entry in source_evidence
-                if isinstance(entry, dict) and entry.get("source_id")
-            }
-            supporting_harm_sources = {
-                source_id
-                for source_id, evidence_text in evidence_by_source.items()
-                if (
-                    legal_stage == "nonlegal"
-                    and (
-                        HUMAN_HARM_PATTERN.search(evidence_text)
-                        or SENSITIVE_PRIVATE_PATTERN.search(evidence_text)
-                    )
-                )
-                or (
-                    stage_pattern is not None
-                    and _has_affirmative_match(
-                        stage_pattern.pattern, evidence_text
-                    )
-                )
-            }
-            if source_floor == "met":
-                harm_families = {
-                    family_of[source_id]
-                    for source_id in supporting_harm_sources
-                    if source_id in family_of
-                }
-                if len(harm_families) < 2:
-                    errors.append(
-                        f"{claim_id}: protected-person harm claim needs two "
-                        "independent source families."
-                    )
-                accountable_ids = harm_review.get(
-                    "accountable_source_ids", []
-                )
-                accountable_ids = (
-                    accountable_ids
-                    if isinstance(accountable_ids, list)
-                    else []
-                )
-                accountable = [
-                    source_id
-                    for source_id in accountable_ids
-                    if source_id in supporting_harm_sources
-                    and sources_by_id.get(source_id, {}).get(
-                        "accountability_basis"
-                    )
-                    in {
-                        "court_or_regulator_record",
-                        "named_source_investigation",
-                        "subject_admission",
-                    }
-                ]
-                if not accountable:
-                    errors.append(
-                        f"{claim_id}: protected-person harm claim needs an "
-                        "accountable source: a court/regulator record, named-"
-                        "source investigation, or subject admission."
-                    )
-            elif source_floor == "single_source_limited":
-                triangulation = claim.get("triangulation")
-                triangulation_status = (
-                    triangulation.get("status")
-                    if isinstance(triangulation, dict)
-                    else None
-                )
-                limitation = _text(
-                    harm_review.get("sourcing_limitation_excerpt")
-                )
-                if (
-                    claim.get("kind") != "reported_claim"
-                    or claim.get("importance") == "key"
-                    or claim.get("confidence") != "low"
-                    or triangulation_status != "limited"
-                    or not limitation
-                    or limitation.casefold() not in claim_text.casefold()
-                ):
-                    errors.append(
-                        f"{claim_id}: single-source harm must be a low-"
-                        "confidence, non-key reported claim with limited "
-                        "triangulation and an in-sentence sourcing limitation."
-                    )
-                dependent_key_claims = [
-                    other_id
-                    for other_id, other_claim in claims_by_id.items()
-                    if other_id != claim_id
-                    and other_claim.get("importance") == "key"
-                    and other_claim.get("include_in_report") is True
-                    and support_reaches(other_id, claim_id)
-                ]
-                if dependent_key_claims:
-                    errors.append(
-                        f"{claim_id}: single-source harm cannot support a key "
-                        "report claim: "
-                        + ", ".join(sorted(dependent_key_claims))
-                        + "."
-                    )
-            attribution = _text(harm_review.get("attributed_to"))
-            if not attribution or attribution.casefold() not in claim_text.casefold():
-                errors.append(
-                    f"{claim_id}: protected-person harm must be attributed "
-                    "in the claim text."
-                )
-            detected_claim_stages = {
-                stage
-                for stage, pattern in LEGAL_STAGE_PATTERNS.items()
-                if _has_affirmative_match(pattern.pattern, claim_text)
-            }
-            evidence_text = " ".join(
-                _text(entry.get("extract_or_location"))
-                for entry in source_evidence
-                if isinstance(entry, dict)
-            )
-            detected_evidence_stages = {
-                stage
-                for stage, pattern in LEGAL_STAGE_PATTERNS.items()
-                if _has_affirmative_match(pattern.pattern, evidence_text)
-            }
-            if legal_stage == "nonlegal" and (
-                detected_claim_stages or detected_evidence_stages
-            ):
-                errors.append(
-                    f"{claim_id}: a legal allegation or outcome cannot be "
-                    "classified as nonlegal."
-                )
-            elif legal_stage != "nonlegal":
-                if (
-                    not detected_claim_stages
-                    or legal_stage not in detected_claim_stages
-                ):
-                    errors.append(
-                        f"{claim_id}: human-harm legal stage {legal_stage!r} "
-                        "is not stated consistently in the claim text."
-                    )
-                if stage_pattern is None or not _has_affirmative_match(
-                    stage_pattern.pattern, evidence_text
-                ):
-                    errors.append(
-                        f"{claim_id}: source evidence does not establish the "
-                        f"declared legal stage {legal_stage!r}."
-                    )
-
-            resolution_status = harm_review.get("resolution_status")
-            resolution_ids = harm_review.get("resolution_claim_ids", [])
-            resolution_ids = (
-                resolution_ids if isinstance(resolution_ids, list) else []
-            )
-            if (
-                resolution_status == "not_applicable"
-                and legal_stage != "nonlegal"
-            ):
-                errors.append(
-                    f"{claim_id}: a legal allegation or outcome cannot mark "
-                    "resolution as not_applicable."
-                )
-            if resolution_status == "resolved":
-                known_resolution_ids = [
-                    resolution_id
-                    for resolution_id in resolution_ids
-                    if resolution_id in claims_by_id
-                ]
-                if (
-                    not resolution_ids
-                    or len(known_resolution_ids) != len(resolution_ids)
-                ):
-                    errors.append(
-                        f"{claim_id}: resolved harm needs known resolution "
-                        "claim IDs."
-                    )
-                for resolution_id in known_resolution_ids:
-                    resolution_claim = claims_by_id[resolution_id]
-                    if (
-                        resolution_claim.get("person_claim_role")
-                        != "resolution"
-                        or claim_id
-                        not in (
-                            resolution_claim.get("resolves_claim_ids") or []
-                        )
-                        or not set(
-                            resolution_claim.get("person_ids", [])
-                        ).intersection(person_links)
-                    ):
-                        errors.append(
-                            f"{claim_id}: resolution claim {resolution_id} "
-                            "must reciprocally resolve this claim for the "
-                            "same protected person."
-                        )
-                if claim.get("include_in_report") is True:
-                    harm_excerpts = {
-                        _text(excerpt)
-                        for excerpt in claim.get("report_excerpts", [])
-                        if _text(excerpt)
-                    }
-                    resolution_excerpts = {
-                        _text(excerpt)
-                        for resolution_id in known_resolution_ids
-                        for excerpt in claims_by_id[resolution_id].get(
-                            "report_excerpts", []
-                        )
-                        if _text(excerpt)
-                    }
-                    if not harm_excerpts.intersection(resolution_excerpts):
-                        errors.append(
-                            f"{claim_id}: a known resolution must appear in "
-                            "the same report excerpt as the harmful claim."
-                        )
-            elif resolution_status == "unresolved":
-                reversal_stages = {
-                    "acquitted",
-                    "overturned",
-                    "expunged",
-                    "retracted",
-                }
-                evidenced_reversals = detected_evidence_stages.intersection(
-                    reversal_stages
-                )
-                if evidenced_reversals:
-                    errors.append(
-                        f"{claim_id}: unresolved harm conflicts with evidence "
-                        "of a reversal: "
-                        + ", ".join(sorted(evidenced_reversals))
-                        + "."
-                    )
-                search = harm_review.get("resolution_search")
-                search_day = _as_date(
-                    search.get("searched_at")
-                    if isinstance(search, dict)
-                    else None
-                )
-                if (
-                    not isinstance(search, dict)
-                    or not search.get("queries")
-                    or not search.get("expected_locations")
-                    or search_day is None
-                    or (
-                        report_day
-                        and (
-                            search_day > report_day
-                            or (report_day - search_day).days
-                            > FRESHNESS_WINDOW_DAYS
-                        )
-                    )
-                ):
-                    errors.append(
-                        f"{claim_id}: unresolved harm needs a fresh bounded "
-                        "resolution search."
-                    )
-            right_of_reply = harm_review.get("right_of_reply")
-            if not isinstance(right_of_reply, dict):
-                errors.append(
-                    f"{claim_id}: protected-person harm claim needs a "
-                    "documented right of reply."
-                )
-            else:
-                response_status = right_of_reply.get("status")
-                response_ids = right_of_reply.get("response_claim_ids", [])
-                response_ids = (
-                    response_ids if isinstance(response_ids, list) else []
-                )
-                if response_status in {"documented", "declined"}:
-                    if not response_ids or any(
-                        response_id not in claim_set
-                        for response_id in response_ids
-                    ):
-                        errors.append(
-                            f"{claim_id}: documented or declined right of "
-                            "reply needs known response claim IDs."
-                        )
-                    elif any(
-                        not set(
-                            claims_by_id[response_id].get("person_ids", [])
-                        ).intersection(person_links)
-                        for response_id in response_ids
-                    ):
-                        errors.append(
-                            f"{claim_id}: right-of-reply claims must refer to "
-                            "the same protected person."
-                        )
-                    for response_id in [
-                        item for item in response_ids if item in claims_by_id
-                    ]:
-                        response_claim = claims_by_id[response_id]
-                        if (
-                            response_claim.get("person_claim_role")
-                            != "response"
-                            or claim_id
-                            not in (
-                                response_claim.get("responds_to_claim_ids")
-                                or []
-                            )
-                        ):
-                            errors.append(
-                                f"{claim_id}: right-of-reply claim "
-                                f"{response_id} must reciprocally respond to "
-                                "this harmful claim."
-                            )
-                        response_sources = response_claim.get("source_ids", [])
-                        if not any(
-                            sources_by_id.get(source_id, {}).get(
-                                "accountability_basis"
-                            )
-                            == "subject_admission"
-                            for source_id in response_sources
-                        ):
-                            errors.append(
-                                f"{claim_id}: right-of-reply claim "
-                                f"{response_id} needs subject-origin evidence."
-                            )
-                        if claim.get("include_in_report") is True:
-                            harm_excerpts = {
-                                _text(excerpt)
-                                for excerpt in claim.get(
-                                    "report_excerpts", []
-                                )
-                                if _text(excerpt)
-                            }
-                            response_excerpts = {
-                                _text(excerpt)
-                                for excerpt in response_claim.get(
-                                    "report_excerpts", []
-                                )
-                                if _text(excerpt)
-                            }
-                            if not harm_excerpts.intersection(
-                                response_excerpts
-                            ):
-                                errors.append(
-                                    f"{claim_id}: documented response must "
-                                    "appear in the same report excerpt as "
-                                    "the harmful claim."
-                                )
-                elif response_status == "no_public_response":
-                    search = right_of_reply.get("search_record")
-                    search_day = _as_date(
-                        search.get("searched_at")
-                        if isinstance(search, dict)
-                        else None
-                    )
-                    if (
-                        not isinstance(search, dict)
-                        or not search.get("queries")
-                        or not search.get("expected_locations")
-                        or search_day is None
-                        or (
-                            report_day
-                            and (
-                                search_day > report_day
-                                or (
-                                    report_day - search_day
-                                ).days > FRESHNESS_WINDOW_DAYS
-                            )
-                        )
-                    ):
-                        errors.append(
-                            f"{claim_id}: no-public-response finding needs "
-                            "a fresh bounded response search."
-                        )
-                elif response_status == "not_applicable" and not (
-                    harm_review.get("category") == "sensitive_private_fact"
-                    and harm_review.get("privacy_basis") == "self_disclosed"
-                ):
-                    errors.append(
-                        f"{claim_id}: right of reply cannot be not_applicable "
-                        "for a protected-person harm claim."
-                    )
-            if harm_review.get("category") == "sensitive_private_fact":
-                privacy_basis = harm_review.get("privacy_basis")
-                privacy_ids = harm_review.get(
-                    "privacy_basis_source_ids", []
-                )
-                privacy_ids = (
-                    privacy_ids if isinstance(privacy_ids, list) else []
-                )
-                relevance = _text(
-                    harm_review.get("governing_question_relevance")
-                )
-                valid_privacy_source = any(
-                    source_id in source_links
-                    and (
-                        (
-                            privacy_basis == "self_disclosed"
-                            and "subject_official"
-                            in sources_by_id.get(source_id, {}).get("roles", [])
-                        )
-                        or (
-                            privacy_basis == "court_or_regulator_record"
-                            and sources_by_id.get(source_id, {}).get(
-                                "accountability_basis"
-                            )
-                            == "court_or_regulator_record"
-                        )
-                    )
-                    for source_id in privacy_ids
-                )
-                if (
-                    privacy_basis
-                    not in {"self_disclosed", "court_or_regulator_record"}
-                    or not valid_privacy_source
-                    or len(relevance) < _prose_minimum(relevance)
-                ):
-                    errors.append(
-                        f"{claim_id}: sensitive private information needs "
-                        "self-disclosure or a court/regulator record plus a "
-                        "specific governing-question justification "
-                        f"(threshold {_prose_minimum(relevance)}, actual "
-                        f"{len(relevance)})."
-                    )
         for relation in ("supports", "contradicts"):
             related_claims = claim.get(relation, [])
             if not isinstance(related_claims, list):
@@ -3474,6 +2860,7 @@ def _reference_findings(data, cache_dir=None):
                         f"{claim_id}: key claim rests only on interested/unverified sources "
                         f"({', '.join(sorted(judged))}); add independent "
                         "evidence or record the area as a gap.",
+                        severity="warn" if unclassified(judged) else "hard",
                         ids=[claim_id, *sorted(judged)],
                         fix=f"alx source set {sorted(judged)[0]}",
                         remove=_drop(claim_id),
@@ -3917,15 +3304,6 @@ def claim_findings(claim, ledger, *, cache_dir=None):
     findings = []
     findings.extend(_claim_input_schema_findings(claim))
     findings.extend(_extract_length_findings(claim, cache_dir=cache_dir))
-    auto_linked = [
-        person_id
-        for person_id in derive_person_ids(claim, ledger.get("people"))
-        if person_id not in (claim.get("person_ids") or [])
-    ]
-    if auto_linked:
-        findings.append(
-            _auto_link_finding(claim.get("claim_id", "<unknown>"), auto_linked)
-        )
     working = dict(claim)
     if working.get("source_ids") is None and working.get("source_evidence"):
         working = expand_claim_input(working, ledger, cache_meta={})

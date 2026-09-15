@@ -20,8 +20,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Ledger (`check` b / `validate_ledger`)
 
-### `ledger/quantity` — F
-- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year.
+### `ledger/quantity` — F/W
+- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R26 (W): a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) is a warn when the extracts do not carry it; digits, percentages, currency and dates stay hard.
 - **fix:** `alx find S<n> TOKEN` then extend quote, or reword claim to dated form.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.

@@ -88,7 +88,7 @@ class RepositoryContractTests(unittest.TestCase):
             skill,
         )
         self.assertIn("without touching quoted text", skill)
-        self.assertIn("At remaining ≤ 15 min stop fixing: `alx issue`, `alx render`, deliver.", skill)
+        self.assertIn("a BLOCKED gate is fixed regardless of the clock, which never lifts a block", skill)
 
     def test_pdf_commands_resolve_bundled_paths_from_skill_root(self):
         production = (ROOT / "references" / "pdf-production.md").read_text(

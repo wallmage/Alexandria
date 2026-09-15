@@ -61,8 +61,9 @@ SOURCE_HEADINGS = {
     "參考資料",
 }
 #: An H2 names the Sources section when its casefolded text, stripped of spaces
-#: and punctuation, contains one of these (`## 资料来源`, `## References and
-#: sources`, `## 参考文献` all count).
+#: and punctuation, starts or ends with one of these (`## 资料来源`,
+#: `## References and sources`, `## 六、参考文献` all count; a body section
+#: such as `## 文献回顾` or `## Cross-references` does not).
 SOURCE_HEADING_TOKENS = (
     "sources",
     "references",
@@ -70,18 +71,20 @@ SOURCE_HEADING_TOKENS = (
     "workscited",
     "来源",
     "來源",
-    "参考",
-    "參考",
-    "文献",
-    "文獻",
-    "引用",
+    "参考资料",
+    "參考資料",
+    "参考文献",
+    "參考文獻",
 )
 
 
 def is_sources_heading(heading):
     """True when this H2 heading names the report's Sources section."""
     folded = re.sub(r"[\W_]+", "", str(heading).casefold())
-    return any(token in folded for token in SOURCE_HEADING_TOKENS)
+    return any(
+        folded.startswith(token) or folded.endswith(token)
+        for token in SOURCE_HEADING_TOKENS
+    )
 
 
 LANG_CHOICES = ("en", "zh-CN", "zh-HK")

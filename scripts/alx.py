@@ -2128,7 +2128,7 @@ def cmd_ledger_merge(args):
 
 
 def cmd_snapshot(args):
-    ws, state, _ledger = _open(args)
+    ws, state, ledger = _open(args)
     if args.restore:
         latest = ws.latest_snapshot()
         if latest is None:
@@ -2156,6 +2156,7 @@ def cmd_snapshot(args):
             file=sys.stderr,
         )
         return 1
+    _bind_markers(ws, state, ledger, ws.report_text())
     shutil.copyfile(ws.report, target)
     state["humanization"] = "snapshot"
     ws.save_state(state)
@@ -2360,14 +2361,30 @@ def _convert_claim_markers(ws, ledger, text):
 
     def replace(match):
         claim_ids = re.findall(r"C[0-9]+", match.group(1))
-        if not all(claim_id in links for claim_id in claim_ids):
+        if not any(claim_id in links for claim_id in claim_ids):
             return match.group(0)
-        return " ".join(links[claim_id] for claim_id in claim_ids)
+        # An id with no ledger claim stays a visible `[C22]` for the author.
+        return " ".join(links.get(claim_id, f"[{claim_id}]") for claim_id in claim_ids)
 
     converted = _CLAIM_MARKER_RE.sub(replace, text)
     if converted != text:
         ws.report.write_text(converted, encoding="utf-8")
     return converted
+
+
+def _bind_markers(ws, state, ledger, text):
+    """Record the marker bindings, then turn the markers into source links.
+
+    The binding is recorded before the marker becomes a link, so it survives
+    the rewrite; an explicit `claim bind` still wins. `snapshot` runs this too,
+    so the pre-Rewild copy never carries a marker the report has since lost.
+    """
+    bindings = state.setdefault("bindings", {})
+    known = {claim.get("claim_id") for claim in ledger.get("claims", [])}
+    for claim_id, number in _marker_bindings(text).items():
+        if claim_id in known:
+            bindings.setdefault(claim_id, number)
+    return _convert_claim_markers(ws, ledger, text)
 
 
 def paragraph_mapping(ws, state, ledger, text):
@@ -2558,14 +2575,7 @@ def _binding_findings(ws, state, ledger, *, fix=False):
     mapping, unbound = paragraph_mapping(ws, state, ledger, text)
     paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
     if fix:
-        # A marker binding is recorded before the marker becomes a link, so the
-        # binding survives the rewrite; an explicit `claim bind` still wins.
-        bindings = state.setdefault("bindings", {})
-        known = {claim.get("claim_id") for claim in ledger.get("claims", [])}
-        for claim_id, number in _marker_bindings(text).items():
-            if claim_id in known:
-                bindings.setdefault(claim_id, number)
-        text = _convert_claim_markers(ws, ledger, text)
+        text = _bind_markers(ws, state, ledger, text)
         paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
         for claim in ledger.get("claims", []):
             number = mapping.get(claim.get("claim_id"))

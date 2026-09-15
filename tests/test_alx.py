@@ -4400,6 +4400,26 @@ class ClaimMarkerTests(AlxTestCase):
         mapping, _unbound = self.mapping()
         self.assertEqual(3, mapping["C1"])
 
+    def test_a_mixed_marker_links_the_known_id_and_keeps_the_unknown_one(self):
+        self.bootstrap()
+        self.marked_report(first_marker="[C1, C42]")
+        self.run_in("check", "--fix")
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        first = self.ledger()["sources"][0]["url"]
+        self.assertIn(f"[S1]({first}) [C42]", report)
+
+    def test_snapshot_converts_the_markers_it_copies(self):
+        self.bootstrap()
+        self.marked_report()
+        code, out = self.run_in("snapshot")
+        self.assertEqual(0, code, out)
+        first = self.ledger()["sources"][0]["url"]
+        for name in ("report.md", "report.pre-rewild.md"):
+            text = (self.dir / name).read_text(encoding="utf-8")
+            self.assertIn(f"[S1]({first})", text)
+            self.assertNotIn("[C1]", text)
+        self.assertEqual(1, self.state()["bindings"]["C1"])
+
 
 class CitedSourceTests(AlxTestCase):
     """B2: a bound claim cites its sources without a link in the body."""
@@ -4434,11 +4454,20 @@ class SourcesHeadingTests(AlxTestCase):
             "资料来源",
             "資料來源",
             "参考文献",
+            "六、参考资料",
+            "附录：资料来源",
             "References and sources",
+            "Sources and further reading",
         ):
             with self.subTest(heading=heading):
                 self.assertTrue(alx.validate_report.is_sources_heading(heading))
-        for heading in ("Findings", "方法"):
+        for heading in (
+            "Findings",
+            "方法",
+            "文献回顾",
+            "引用日记原文的原则",
+            "Cross-references between entries",
+        ):
             with self.subTest(heading=heading):
                 self.assertFalse(alx.validate_report.is_sources_heading(heading))
         self.assertIsNotNone(

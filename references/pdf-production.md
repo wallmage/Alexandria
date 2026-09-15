@@ -74,7 +74,7 @@ metadata block as `> Client: Acme Research` or
 `> Prepared by: Alice Smith`; the renderer accepts only that exact typed value.
 The constant default preparer `Alexandria` needs no metadata line. Identity
 fields use a short person/organization grammar and reject sentences, unsafe
-punctuation, and harm language.
+punctuation.
 
 Every custom cover or Markdown body image must also have an `approved`
 `visual_assets` record in the content review with its report-relative path,

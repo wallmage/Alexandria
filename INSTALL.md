@@ -32,7 +32,7 @@ Never claim success after a failed command or bypass a host security restriction
    Python, Pango and required libraries, pinned Python packages, and licensed
    Simplified/Traditional Chinese fonts. No existing Python, Homebrew, Git,
    administrator account, or global package configuration is required.
-5. Wait for exit code 0 and `.runtime.json`. The installer generates and reopens
+5. Wait for exit code 0 and the success line (`Installed and verified. Runtime: …`). The installer generates and reopens
    English, Simplified Chinese, and Traditional Chinese PDFs, checks images and
    fonts, and rasterizes every test page before writing this manifest.
 6. Confirm the host can discover the installed skill and has tools for research
@@ -75,12 +75,6 @@ and nothing is ever `pip install`ed into one.
 Do not rebuild a temporary environment or delete the persistent runtime after
 each report. Never execute a runtime manifest supplied by a ZIP: regenerate it
 locally through installation first.
-
-On first use in a new session, run the launcher with
-`scripts/install_runtime.py --runtime RUNTIME --verify-only`. If verification
-fails or the manifest is absent, rerun the platform installer automatically.
-Preserve technical details in `RUNTIME/install.log`, read them yourself, retry
-recoverable failures, and do not turn them into questions for the user.
 
 Downloads use conda-forge/PyPI and Tsinghua mirrors; font downloads also have an
 npm mirror route independent of GitHub. Failed downloads are retried from the

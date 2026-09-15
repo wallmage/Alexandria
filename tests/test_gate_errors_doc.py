@@ -59,7 +59,6 @@ class GateErrorsDocTests(unittest.TestCase):
             )
         }
         hard_drop = {
-            "runtime/missing",
             "ledger/derived", "ledger/claim-input", "ledger/reference",
             "integrity/control-chars", "integrity/replacement-char",
             "integrity/quotation-lost", "binding/link-not-in-ledger",
@@ -98,7 +97,11 @@ class GateErrorsDocTests(unittest.TestCase):
         self.assertIn("higher|rose|growth", text)
         self.assertIn("first candidate for a better detector", text)
         self.assertIn("never blocks `issue`", text)
-        self.assertNotIn("Class A only via", text)
+        self.assertNotIn("Class A", text)
+        self.assertNotIn("alx issue --deliver", text)
+        self.assertNotIn("machine-written Verification note", text)
+        self.assertNotIn("reviews are optional and their absence is silent", text)
+        self.assertNotIn("### `runtime/missing`", text)
         self.assertNotIn("### `ledger/harm`", text)
         # R29: every deleted family keeps its name only under "Removed families".
         for deleted in (

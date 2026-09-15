@@ -67,8 +67,7 @@ Adapt the outline and research depth within those limits. A narrower subject bel
 
 ### Runtime and workspace
 
-0 Runtime. `ALEXANDRIA_PYTHON="$HOME/.alexandria/runtime/bin/python"` (Windows `%USERPROFILE%\.alexandria\runtime\bin\python.cmd`; `$ALEXANDRIA_RUNTIME_DIR` replaces the default root). Missing → `sh "$SKILL_ROOT/scripts/install.sh"` (Windows `install.ps1`), then continue. Never read `.runtime.json`. Line 1 of status must say `runtime: … (managed)`.
-`"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" status`
+0 Runtime. `ALEXANDRIA_PYTHON="$HOME/.alexandria/runtime/bin/python"` (Windows `%USERPROFILE%\.alexandria\runtime\bin\python.cmd`; `$ALEXANDRIA_RUNTIME_DIR` replaces the default root). Missing → `sh "$SKILL_ROOT/scripts/install.sh"` (Windows `install.ps1`), then continue.
 
 1 Write the subject file (subject, what the report must answer, reader), then init with the chosen archetype. init prints the length target; an existing workspace is kept.
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" init "$WORK" --lang "$REPORT_LANG" --subject "$SUBJECT_FILE" --archetype person`
@@ -102,7 +101,7 @@ Freshness applies to claims, not to the entire bibliography:
 - mechanisms, history, and foundational ideas may require older original sources;
 - a current article does not replace an older primary document merely because it is newer.
 
-2 Search the web, then fetch every URL in one call, 8–15 reachable sources. Classify each source as you fetch (`--provenance primary_independent|primary_interested|secondary_independent|secondary_dependent|unverified`; `--type accountable_record|peer_reviewed|preprint|official_documentation|dataset_or_test|reported_interview|news_report|opinion_or_forecast|marketing|anecdote`; `--role subject_official|counterparty_official|independent_analysis|empirical_data|affected_stakeholder|expert_interpretation|historical_record`); an unknown value is stored as the default with a note. Read the per-URL lines and refetch failures; `fetch` exits non-zero when any URL failed, so never chain it with `&&`.
+2 Search the web, then fetch every URL in one call, 8–15 reachable sources. Classify each source as you fetch (`--provenance primary_independent|primary_interested|secondary_independent|secondary_dependent|unverified`; `--type accountable_record|peer_reviewed|preprint|official_documentation|dataset_or_test|reported_interview|news_report|opinion_or_forecast|marketing|anecdote`; `--role subject_official|counterparty_official|independent_analysis|empirical_data|affected_stakeholder|expert_interpretation|historical_record`); an unknown value is stored as the default with a note. Read the per-URL lines and refetch failures.
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" fetch URL1 URL2 --provenance primary_independent --type news_report`
 
 Treat promotional claims, filings, preprints, peer-reviewed studies, independent tests, and reporting as different evidence types. Authority and independence are separate axes. An official source may be best for what an organization says and poor evidence that the claim is true.
@@ -237,7 +236,7 @@ The task is complete only when:
 - the final PDFs were reopened and visually inspected;
 - all deliverables exist at the reported paths.
 
-## Deep reads (only if remaining > 40 min)
+## Deep reads
 
 - archetype: `references/person.md` `references/organization.md` `references/artifact.md` `references/event.md` `references/concept.md` `references/system.md`
 - editorial: `references/editorial-en.md` / `references/editorial-zh.md` / `references/editorial-modes.md`
@@ -250,4 +249,4 @@ One command at a time. Write claim and report text to files; never put it inside
 
 ## Clock
 
-60 min wall-clock from `init`; every command prints elapsed/remaining and nothing ever blocks on it. At remaining ≤ 15 min stop polishing: `alx issue`, `alx render`, deliver what `issue` accepts; a BLOCKED gate is fixed regardless of the clock, which never lifts a block. `BEHIND SCHEDULE` (no claim accepted after 12 min) → drop what will not validate and go to Step 4 with what you have.
+60 min wall-clock from `init`; every command prints elapsed/remaining and nothing ever blocks on it. At remaining ≤ 15 min stop polishing: `alx issue`, `alx render`, deliver what `issue` accepts; a BLOCKED gate is fixed regardless of the clock, which never lifts a block.

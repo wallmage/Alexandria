@@ -388,6 +388,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("weighted-source-evidence-v2", protocol)
         self.assertNotIn("--allow-unverified", protocol)
         self.assertIn("alx snapshot", rewild)
+        self.assertNotIn("alx snapshot --iter", rewild)
         self.assertIn("alx review start rewild", rewild)
         self.assertIn(
             "Semantic reversals (direction, negation, causality) are warnings that `alx issue` repeats as reminders",

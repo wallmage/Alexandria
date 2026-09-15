@@ -65,7 +65,7 @@ Where is this person right now? What are they currently doing, building, saying,
 
 ### Allegations, Harm, and Privacy
 
-This dimension is mandatory whenever the subject is living, recently deceased, or the report will touch wrongdoing, controversy, or reputational damage. A person report is the archetype most capable of harming a real human being, and getting this wrong is not a style defect.
+This dimension is mandatory whenever the report will touch wrongdoing, controversy, or reputational damage. A person report is the archetype most capable of harming a real human being, and getting this wrong is not a style defect.
 
 **Never collapse the legal ladder.** Each rung is a different factual claim and must be labelled as what it is:
 

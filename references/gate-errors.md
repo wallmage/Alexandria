@@ -2,21 +2,13 @@
 
 Family → severity → rule → fix → remove → example. One section per family the code emits, grouped by the module that emits it.
 
-Severity is three-valued (ruling R33). **F = HARD-drop**: at `issue` the offending claim, paragraph or edit is removed or restored so it never ships; delivery continues; the removal is printed and noted. **B = HARD-refuse**: `issue` (or `render`) stops with exit 1 and the fix list; nothing is written until fixed; used only for whole-report defects that no drop can cure: no snapshot at `issue`, a report under two thirds of the length floor, an unrestorable encoding, a broken PDF at `render`. An unsupported figure, a Rewild meaning reversal and an unfixed critical review finding are warnings that `issue` repeats as reminders (user ruling, 09-16). HARD-refuse prints `=== BLOCKED (fix, then alx issue again) ===` and blocks `issue` and `render`. **W = WARN**: printed with a fix; never changes the deliverable. WARN is listed in the delivery notes and never blocks `issue`, `render` or `claim add`. Class A no longer exists; `alx issue --deliver` is accepted as an alias of `alx issue` when nothing is hard.
+Severity is three-valued (ruling R33). **F = HARD-drop**: at `issue` the offending claim, paragraph or edit is removed or restored so it never ships; delivery continues; the removal is printed and noted. **B = HARD-refuse**: `issue` (or `render`) stops with exit 1 and the fix list; nothing is written until fixed; used only for whole-report defects that no drop can cure: no snapshot at `issue`, a report under two thirds of the length floor, an unrestorable encoding, a broken PDF at `render`. An unsupported figure, a Rewild meaning reversal and an unfixed critical review finding are warnings that `issue` repeats as reminders (user ruling, 09-16). HARD-refuse prints `=== BLOCKED (fix, then alx issue again) ===` and blocks `issue` and `render`. **W = WARN**: printed with a fix; never changes the deliverable. WARN is listed in the delivery notes and never blocks `issue`, `render` or `claim add`.
 
 Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
 Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 800 characters (the quoted window is truncated with `…`, never the remedy); the WARN tier prints one line per family (family, count, the first member's message cut at 160 characters, its fix), and `alx check --verbose` expands it to one line per item (5 per family, then `+N more`).
-
-## Runtime (`alx`, before any command runs)
-
-### `runtime/missing` — F
-- **rule:** `RUNTIME MISSING` — no managed runtime at `$ALEXANDRIA_RUNTIME_DIR` (else `~/.alexandria/runtime`): neither `RUNTIME/.runtime.json` nor `RUNTIME/env`.
-- **fix:** `sh "$SKILL_ROOT/scripts/install.sh"` (Windows: `& "$SKILL_ROOT/scripts/install.ps1"`), then rerun the command.
-- **remove:** n/a (never a host or system interpreter, never `pip install`).
-- **example:** `alx status` prints `RUNTIME MISSING` on a fresh machine.
 
 ## Ledger (`check` b / `validate_ledger`)
 
@@ -129,7 +121,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** S4 has no `published` and no reason.
 
 ### `ledger/person` — W
-- **rule:** a person-linked claim names an unregistered person id. R15: a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix`. The harm rules are deleted (R25/R28): `person_claim_role`, `person_claim_assessment` and `human_harm_review` are gone, and `living_status: unknown` is not a finding.
+- **rule:** a person-linked claim names an unregistered person id. R15: a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix`.
 - **fix:** `alx ledger merge people.json` (auto-link warn: `alx check --fix`)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** C3 names P9; no P9 in `people`.
@@ -197,7 +189,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.
 
 ### `integrity/length` — B/W
-- **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. HARD-refuse when below two thirds of the floor (en < 5,000 words; zh-CN/zh-HK < 3,333 non-whitespace chars). Between two thirds and the floor stays WARN. The ceiling stays WARN; SKILL.md keeps the target.
+- **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, Sources excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. HARD-refuse when below two thirds of the floor (en < 5,000 words; zh-CN/zh-HK < 3,333 non-whitespace chars). Between two thirds and the floor stays WARN. The ceiling stays WARN; SKILL.md keeps the target.
 - **fix:** deepen (research, counterevidence, implications), never pad; or delete a paragraph (above the ceiling).
 - **remove:** n/a (HARD-refuse below two thirds of the floor; nothing is written. WARN half never blocks `issue`)
 - **example:** 16,400 words; ceiling 15,000.
@@ -305,7 +297,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** 9 consecutive sentences open with the subject.
 
 ### `rewild/length` — W
-- **rule:** length floor or ceiling, language and script checks (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), the same count as `integrity/length`, counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`).
+- **rule:** length floor or ceiling, language and script checks (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), the same count as `integrity/length`, counted on the visible prose body — front matter, headings, Sources excluded (`report_blocks.report_length`).
 - **fix:** edit prose (warning; never blocks)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** report has 68 words; minimum is 7,500.
@@ -403,9 +395,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Removed families
 
-`ledger/harm` — deleted with the person harm rules (R25/R28). `human_harm_review` is no longer a field and no harm finding is raised; ignore any residual emission.
-
-R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `review/content-missing` — reviews are optional and their absence is silent. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. Han-numeral quantities raise no `ledger/quantity` finding.
+R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. Han-numeral quantities raise no `ledger/quantity` finding.
 
 ## Aliases
 

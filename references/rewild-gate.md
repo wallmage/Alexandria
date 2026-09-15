@@ -7,8 +7,8 @@ not while drafting. Lifecycle: `alx snapshot` then humanize; `alx review start r
 
 ## Snapshot discipline
 
-`alx snapshot` writes `report.pre-rewild.md` once. Never overwrite it. Later
-iterations use `alx snapshot --iter` (`report.pre-rewild.iter<k>.md`).
+`alx snapshot` writes `report.pre-rewild.md` once. Never overwrite it. A second
+`alx snapshot` writes `report.pre-rewild.iterN.md`.
 `alx snapshot --restore` overwrites `report.md` with the latest snapshot.
 
 This matters because the delivered `*.pre-rewild.md` is the only public evidence
@@ -46,34 +46,6 @@ verification in `REWILD_REVIEW_NOTE` using `references/rewild-review.schema.json
 bound to the exact report, source, language, and profile by hash. A stale note is
 invalid. Record what you changed.
 
-## Style waivers
-
-To keep a retainable statistical style warning, supply a JSON file with
-`style_waivers` entries carrying the checker's exact `section`, its exact
-`message`, and a specific `reason`, then add `--style-waivers`.
-
-AI-vocabulary, fidelity, region, and Hong Kong register warnings cannot be
-waived. The gate classifies every checker warning whose section begins with
-`Fidelity` as hard and excludes it from the waiver pool entirely.
-
-## Fidelity notes
-
-Clause-level fidelity findings are deterministic backstops; the bound blind
-review remains authoritative for semantic equivalence. When a resolved review
-finding legitimately changes meaning against the source, document each edit in a
-JSON file matching `references/rewild-fidelity-notes.schema.json` and add
-`--fidelity-notes`.
-
-Each entry quotes `source_fragment` and `report_fragment` verbatim from the
-source and the final report — matching ignores letter case and nothing else —
-with a substantive `reason`. Fragments need at least 15 characters, reasons at
-least 40. A note suppresses only findings quoting both fragments, requires a
-resolved fidelity finding in the review note, fails closed when unmatched, and is
-recorded in the receipt.
-
-Direction reversals, added causal claims, and causal substitutions can never be
-acknowledged. Each note covers one clause pair, and at most eight are accepted.
-Needing more means the draft should be rewritten, not annotated.
 Semantic reversals (direction, negation, causality) are warnings that `alx issue` repeats as reminders; fix the sentence.
 Fabricated figures restore the snapshot (as today).
 

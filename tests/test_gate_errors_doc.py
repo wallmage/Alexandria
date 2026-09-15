@@ -7,6 +7,7 @@ exports in FAMILIES are required to have their own section.
 from __future__ import annotations
 
 import importlib
+import re
 import unittest
 from pathlib import Path
 
@@ -47,6 +48,35 @@ class GateErrorsDocTests(unittest.TestCase):
         for marker in ("- **rule:**", "- **fix:**", "- **remove:**", "- **example:**"):
             self.assertIn(marker, text)
         self.assertRegex(text, r"### `[^`]+` — [FAW]\b")
+
+    def test_doc_severities_match_the_r28_table(self):
+        """R28: F only for the fabrication/integrity list; every other family W."""
+        text = (ROOT / "references" / "gate-errors.md").read_text(encoding="utf-8")
+        letters = {
+            name: letter
+            for name, letter in re.findall(r"### `([^`]+)`[^\n]*? — ([FW])(?:/[FW])?\b", text)
+        }
+        hard = {
+            "runtime/missing", "ledger/quantity", "ledger/status", "ledger/direction",
+            "ledger/derived", "ledger/claim-input", "ledger/schema", "ledger/reference",
+            "integrity/control-chars", "integrity/replacement-char", "integrity/encoding",
+            "integrity/quotation-lost", "binding/link-not-in-ledger",
+            "binding/leftover-prose", "fidelity/mismatch", "fidelity/cache-missing",
+            "fidelity/cache-detached", "fidelity/rewild",
+        }
+        for name, letter in sorted(letters.items()):
+            with self.subTest(family=name):
+                self.assertEqual("F" if name in hard else "W", letter)
+        for downgraded in (
+            "ledger/key-claim", "ledger/person", "ledger/portfolio", "integrity/length",
+            "binding/claim-paragraph", "fidelity/context-changed", "fidelity/semantic",
+            "rewild/region", "review/content-missing", "content/score", "tooling/receipt",
+        ):
+            with self.subTest(family=downgraded):
+                self.assertEqual("W", letters[downgraded])
+        self.assertIn("never blocks `issue`", text)
+        self.assertNotIn("Class A only via", text)
+        self.assertNotIn("### `ledger/harm`", text)
 
     def test_module_families_appear_when_exported(self):
         text = (ROOT / "references" / "gate-errors.md").read_text(encoding="utf-8")

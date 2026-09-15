@@ -106,15 +106,11 @@ It also distinguishes:
 - **Supporting:** explains or substantiates a key judgment.
 - **Context:** orients the reader without carrying the verdict.
 
-A key judgment records:
-
-1. the evidence or supported claims beneath it;
-2. the reasoning that connects them;
-3. why the judgment matters to the reader;
-4. what evidence would weaken or reverse it;
-5. triangulation status;
-6. confidence and limitations;
-7. contradictions and their resolution.
+A key judgment records the evidence or supported claims beneath it. The rest —
+the reasoning that connects them, why the judgment matters, what would weaken
+or reverse it, triangulation status, confidence, limitations, contradictions
+and their resolution — is optional in the ledger and no gate asks for it.
+Write it where it changes what the reader understands, in the report itself.
 
 Do not hide inference inside factual prose. A transparent reasoning chain is more useful than an unexplained confident sentence.
 

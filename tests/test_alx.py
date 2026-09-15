@@ -1097,7 +1097,8 @@ class ReviewTests(AlxTestCase):
         )
         (self.dir / "report.md").write_text(report, encoding="utf-8")
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        # R28: a stale content review is a warning; check still names the re-review.
+        self.assertEqual(0, code, out)
         self.assertIn("re-review required", out)
         self.assertIn("alx review start content --iter", out)
         code, out = self.run_in("review", "start", "content", "--iter")

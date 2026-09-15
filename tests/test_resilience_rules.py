@@ -506,11 +506,12 @@ class UnclassifiedSourcePortfolioTests(AlxTestCase):
         for family in ("ledger/portfolio", "ledger/provenance", "ledger/key-claim"):
             self.assertNotIn(family, hard)
 
-    def test_every_classification_finding_is_class_a(self):
+    def test_every_classification_finding_is_a_warning(self):
         _code, out = self.workspace_without_classification()
-        self.assertIn("[ledger/portfolio] 1 (A, waivable by --deliver)", out)
-        self.assertIn("[ledger/provenance] 2 (A, waivable by --deliver)", out)
-        self.assertIn("[ledger/key-claim] 1 (A, waivable by --deliver)", out)
+        warn_block = out.split("=== WARN", 1)[1]
+        self.assertIn("[ledger/portfolio] 1", warn_block)
+        self.assertIn("[ledger/provenance] 2", warn_block)
+        self.assertIn("[ledger/key-claim] 1", warn_block)
 
 
 class ClaimAddNamesTheClaimFileTests(AlxTestCase):

@@ -245,7 +245,7 @@ Prose that walks the reader through rows they can already read is the most commo
 
 Numbers and mechanisms are the easy half of concrete evidence. Reports routinely arrive full of both and empty of people, and the passage a reader remembers a week later is almost always the one with a named human in it.
 
-Carry at least one of the following, wherever the evidence supplies it:
+A long report needs, at minimum, one of the following per roughly 2,000 words of English or 1,500 non-whitespace characters of Chinese, and never fewer than three in total:
 
 - a **named practitioner, participant, or affected party** whose documented experience tests the argument;
 - a **direct quotation** from an identified person or accountable document, quoted accurately and cited;
@@ -312,16 +312,42 @@ Keep necessary depth, evidence, and context. Remove duplicate explanation, throa
 
 After Rewild, review the exact final report and ledger with no access to drafting rationalizations. Use an independent reviewer when available; otherwise begin a context-isolated fresh-eyes pass.
 
-Self-check, eight dimensions: question answered, evidence strength, evidence coverage, reasoning integrity, counterevidence, explanatory depth, decision value, writing clarity.
+Score each dimension from 1 to 5:
+
+| Dimension | A score of 4 means |
+|---|---|
+| Question answered | The governing question receives a clear, bounded answer |
+| Evidence strength | Consequential claims use evidence suited to the claim |
+| Evidence coverage | Priority questions and material perspectives are covered or disclosed as gaps |
+| Reasoning integrity | The path from evidence to judgment is explicit and valid |
+| Counterevidence | Strong alternatives and contradictions receive fair tests |
+| Explanatory depth | The reader can understand mechanisms, context, and limits |
+| Decision value | The report changes what the reader can decide, do, watch, or explain |
+| Writing clarity | The long report remains coherent, specific, and readable, **and its sections differ in shape, weight, and rhythm as their evidence requires** |
+
+A 5 is exceptional. It requires unusually strong evidence, synthesis, and execution; do not award it as a courtesy. Every dimension must reach 4 before production.
+A missing or stale content review is a warning and never blocks `alx issue`.
+
+### The rubric scores substance, not conformity
+
+Uniform compliance is not a strong result. A report in which every section marches through the same purpose, evidence, limitation, consequence beat has satisfied §9 mechanically and failed it in substance, and the reviewer should say so rather than scoring it well because nothing is missing.
+
+Writing clarity therefore cannot be scored on sentence-level readability alone. Run three structural counts on the exact final report:
+
+1. **Closing-sentence census.** Read the last sentence of every body paragraph in order, ignoring the rest. Count how many end on an evaluative verdict rather than on a fact, figure, source, or mechanical explanation. Above roughly 20%, writing clarity cannot reach 4. The editorial reference for the report language names the specific closer templates to search for.
+2. **Section-shape census.** Name the shape of each section from the menu in §9. Fewer than three distinct shapes across a long report caps writing clarity at 3.
+3. **Section-length spread.** If every section lands within a narrow band of the same length, the report is allocating space by symmetry rather than by decision value. Check that against the §12 finding of which sections carry the verdict.
+
+Record each failure as a finding with `category: structure`, locating the specific sections or paragraphs, and repair it by deleting and rebuilding passages rather than by adding a section for balance.
+
+This test and the §9 Section Contract can appear to pull against each other. They do not. The contract sets what each section must establish; this test confirms it was not established the same way twelve times running. When a reviewer must choose, coverage of the four answers is mandatory and their uniform presentation is a defect.
 
 The required checks and finding fields live in `content-review.schema.json`. Critical findings must be fixed. A major evidence limitation may remain only when the report discloses it in clear language and the review records the exact disclosure excerpt.
 
 Cover image: use the bundled template image; pass `--cover-image` only if the user supplies a file.
 
-The content review is optional; run it only when more than 25 minutes remain.
 Lifecycle: `alx review start content` (copies report + ledger), fill
 `reviews/content.json` per this section, `alx review finish content`;
 `alx review restore content` reverts both files. `alx issue` then writes
-`receipts/content.json` and the source-fidelity receipt. A missing or stale
-content review is a warning and never blocks `alx issue`. Do not invoke
+`receipts/content.json` and the source-fidelity receipt. Do not invoke
 standalone `content_gate.py` / `source_fidelity.py` from the runbook.

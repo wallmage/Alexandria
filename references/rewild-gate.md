@@ -37,7 +37,7 @@ Give the reviewer only the edited report and the selected profile's
 quick-reference checklist — never the pre-edit draft, the user request, the
 evidence ledger, or drafting notes. The reviewer flags problems and does not
 rewrite. Without a separate reviewer, run the profile's fresh-eyes fallback in a
-context-isolated pass.
+context-isolated pass; never skip the second pass.
 
 The primary agent then applies justified fixes, rejects style changes that would
 create a new formula, and checks every material edit against the pre-edit draft

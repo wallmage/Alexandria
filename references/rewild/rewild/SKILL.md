@@ -101,7 +101,11 @@ CRITICAL CONSTRAINT: every detail you add must already exist in the source text 
    - Exception: press releases, announcements, policy text, and other written-form genres never get fully re-said, however dense the slop. Their written skeleton *is* the register, and re-saying slides into chat tone. Strip and tighten instead: delete the boilerplate sentences outright, compress what remains, keep the announcement's frame. Full re-saying is for essays, posts, and other pieces the voice carries.
 6. Run the quick-reference checklist.
 7. Second pass: get the rewrite reviewed with fresh eyes. Follow "Second Pass: Review With Fresh Eyes" below.
-8. Do not run the checker yourself: `alx check` runs it and prints the findings. Never invoke a host `python3`, and never write anything under `SKILL_ROOT`.
+8. Run the bundled checker on your final text — this step is mandatory, not optional. Save both the original and the rewrite to files under `$WORK` (never under `SKILL_ROOT`) and run the script from this skill's own folder, passing both:
+   `"$ALEXANDRIA_PYTHON" <skill-dir>/scripts/naturalness-check.py "$WORK/REWRITE" --source "$WORK/ORIGINAL" --lang en`
+   If `$ALEXANDRIA_PYTHON` is unset, fall back to `python3`. It exits 1 while anything is flagged and 0 when the report is clean.
+   Treat the two halves of the report differently. **Style warnings are suggestions** — on text you triaged as already natural, do not edit just to silence a statistic; a justified warning beats an unjustified edit. **Fidelity warnings are defects.** A fidelity warning means the rewrite now says something the source did not, and the fix is always to change the rewrite, never to justify it. The only exception is a figure you derived arithmetically from figures in the source; say so and move on.
+   A clean report is not a passing grade; it only means the countable problems are gone. `alx check` prints the same families afterwards.
 9. Read it aloud in your head. Any sentence you would not say to a colleague in that register, rewrite plainly.
 
 ## Fidelity: The Four Leaks

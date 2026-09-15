@@ -764,16 +764,41 @@ class ClaimTests(AlxTestCase):
                         "The archive released 1,204 documents in March 2026 "
                         "after a court ordered their immediate publication."
                     ),
-                }
+                },
+                # R28 restatement: a missing `reasoning` no longer refuses the
+                # claim, so the claim-input half of this test is now the empty
+                # extract, which is still hard.
+                {"source_id": "S1", "extract_or_location": ""},
             ],
         }
         batch = self.write_json("broken.json", [broken])
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(1, code)
         self.assertIn("ledger/claim-input", out)
-        self.assertIn("reasoning", out)
+        self.assertIn("extract_or_location", out)
         self.assertIn("fidelity/mismatch", out)
         self.assertEqual([], self.ledger()["claims"])
+
+    def test_r28_warn_families_are_printed_but_block_neither_add_nor_check(self):
+        """R28: a downgraded family is advice — the claim still lands."""
+        self.bootstrap()
+        warned = dict(
+            CLAIM_ONE,
+            claim_id="C9",
+            supports=["C99"],
+            person_ids=["P9"],
+        )
+        batch = self.write_json("warned.json", [warned])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertIn("C9 WARN", out)
+        self.assertIn("[ledger/reference]", out)
+        self.assertIn("[ledger/person]", out)
+        self.assertIn("C9", {claim["claim_id"] for claim in self.ledger()["claims"]})
+        _code, out = self.run_in("check")
+        hard = out.split("=== WARN")[0]
+        for family in ("ledger/reference", "ledger/person", "ledger/synthesis"):
+            self.assertNotIn(family, hard)
 
     def test_drop_cascade_drops_both_claims_mapped_to_one_paragraph(self):
         self.bootstrap()
@@ -2539,7 +2564,13 @@ class DeliveryRoundTests(AlxTestCase):
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
 
     # J5 ------------------------------------------------------------------
-    def test_deliver_rechecks_after_an_online_drop_and_refuses_survivors(self):
+    def test_deliver_rechecks_after_an_online_drop_and_issues_survivors(self):
+        """R28 restatement of ..._and_refuses_survivors.
+
+        The survivor's `supports` still names the dropped claim, but
+        ledger/excluded-supports is a WARN now, so the recheck issues instead
+        of refusing. The drop itself is still applied and still reported.
+        """
         from contextlib import ExitStack
 
         self.prepared_with_supporter()
@@ -2550,10 +2581,9 @@ class DeliveryRoundTests(AlxTestCase):
                 stack, [self.mismatch_result(), self.passed_result()]
             )
             code, out = self.run_in("issue", "--deliver")
-        self.assertEqual(1, code, out)
-        self.assertIn("excluded", out)
-        self.assertIn("issue refused", out)
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+        self.assertEqual(0, code, out)
+        self.assertIn("claim C2 dropped", out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     # J7 ------------------------------------------------------------------
     def test_issue_refreshes_the_last_check_counters(self):
@@ -2902,15 +2932,19 @@ class ClaimInputRoundTripTests(AlxTestCase):
             self.assertEqual(value, claim[key])
         return claim
 
-    def missing_key_is_named(self, item, key):
+    def missing_key_is_accepted(self, item, key):
+        """R28 restatement of missing_key_is_named.
+
+        Every conditional claim-input field is optional, so dropping one is
+        accepted outright rather than raising ledger/claim-input.
+        """
         broken = {name: value for name, value in item.items() if name != key}
         path = self.write_json("broken.json", [broken])
         code, out = self.run_in("claim", "add", path)
-        self.assertEqual(1, code, out)
-        self.assertIn("[ledger/claim-input]", out)
-        self.assertIn(key, out)
+        self.assertEqual(0, code, out)
+        self.assertNotIn("[ledger/claim-input]", out)
 
-    def test_analysis_claim_round_trips_and_names_missing_reasoning(self):
+    def test_analysis_claim_round_trips_without_reasoning(self):
         item = self.fixture(
             "C10",
             kind="analysis",
@@ -2920,9 +2954,9 @@ class ClaimInputRoundTripTests(AlxTestCase):
             ),
         )
         self.round_trip(item)
-        self.missing_key_is_named(item, "reasoning")
+        self.missing_key_is_accepted(item, "reasoning")
 
-    def test_estimate_claim_round_trips_and_names_missing_assumptions(self):
+    def test_estimate_claim_round_trips_without_assumptions(self):
         item = self.fixture(
             "C11",
             kind="estimate",
@@ -2931,25 +2965,25 @@ class ClaimInputRoundTripTests(AlxTestCase):
             ],
         )
         self.round_trip(item)
-        self.missing_key_is_named(item, "assumptions")
+        self.missing_key_is_accepted(item, "assumptions")
 
-    def test_response_role_round_trips_and_names_missing_responds_to(self):
+    def test_response_role_round_trips_without_responds_to(self):
         item = self.fixture(
             "C12",
             person_claim_role="response",
             responds_to_claim_ids=["C1"],
         )
         self.round_trip(item)
-        self.missing_key_is_named(item, "responds_to_claim_ids")
+        self.missing_key_is_accepted(item, "responds_to_claim_ids")
 
-    def test_resolution_role_round_trips_and_names_missing_resolves(self):
+    def test_resolution_role_round_trips_without_resolves(self):
         item = self.fixture(
             "C13",
             person_claim_role="resolution",
             resolves_claim_ids=["C1"],
         )
         self.round_trip(item)
-        self.missing_key_is_named(item, "resolves_claim_ids")
+        self.missing_key_is_accepted(item, "resolves_claim_ids")
 
     def test_an_accountable_source_claim_round_trips(self):
         code, out = self.run_in(

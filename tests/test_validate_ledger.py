@@ -2517,6 +2517,68 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         self.assertEqual(validate_ledger.FAMILIES, emitted)
         self.assertTrue(emitted <= validate_ledger.FAMILIES)
 
+    #: R28: every ledger family the severity table downgrades. The fixture
+    #: above emits all of them (the assertion right here pins that), so one
+    #: pass over it proves each one warns instead of refusing.
+    R28_WARN_FAMILIES = frozenset(
+        {
+            "ledger/coverage",
+            "ledger/date-granularity",
+            "ledger/excluded-supports",
+            "ledger/freshness",
+            "ledger/host-conflict",
+            "ledger/https",
+            "ledger/key-claim",
+            "ledger/person",
+            "ledger/portfolio",
+            "ledger/provenance",
+            "ledger/source-family",
+            "ledger/source-ids",
+            "ledger/synthesis",
+            "ledger/triangulation",
+            "ledger/undated-reason",
+        }
+    )
+    R28_HARD_FAMILIES = frozenset(
+        {"ledger/direction", "ledger/quantity", "ledger/schema", "ledger/status"}
+    )
+
+    def test_r28_downgraded_families_are_warn(self):
+        by_family = {}
+        for item in self._family_fixture_findings():
+            by_family.setdefault(item.family, []).append(item)
+        for family in sorted(self.R28_WARN_FAMILIES):
+            with self.subTest(family=family):
+                items = by_family.get(family, [])
+                self.assertTrue(items, f"{family} is not exercised")
+                self.assertEqual(
+                    {"warn"}, {item.severity for item in items}
+                )
+        for family in sorted(self.R28_HARD_FAMILIES):
+            with self.subTest(family=family):
+                self.assertIn(
+                    "hard", {item.severity for item in by_family.get(family, [])}
+                )
+
+    def test_r28_reference_is_hard_only_for_an_unfetched_source(self):
+        data = valid_quality_ledger()
+        data["claims"][0]["source_ids"] = ["S1", "S2", "S99"]
+        unfetched = [
+            item
+            for item in validate_ledger.collect_findings(data)
+            if item.family == "ledger/reference"
+            and "references unknown source" in item.message
+        ]
+        self.assertEqual(1, len(unfetched))
+        self.assertEqual("hard", unfetched[0].severity)
+        others = [
+            item
+            for item in self._family_fixture_findings()
+            if item.family == "ledger/reference"
+        ]
+        self.assertTrue(others)
+        self.assertEqual("warn", {item.severity for item in others}.pop())
+
     def _family_fixture_findings(self):
         findings = []
         data = valid_quality_ledger()
@@ -2579,6 +2641,22 @@ class ResilienceLedgerApiTests(unittest.TestCase):
                         {"source_id": "S2", "extract_or_location": "short"},
                     ],
                     "person_ids": ["P9"],
+                },
+                valid_quality_ledger(),
+            )
+        )
+        # R28: a claim input is refused for an empty extract, not for a missing
+        # conditional field, so that is what now raises ledger/claim-input.
+        findings.extend(
+            validate_ledger.claim_findings(
+                {
+                    "claim_id": "C6",
+                    "claim": "Revenue increased by 12%.",
+                    "kind": "fact",
+                    "importance": "supporting",
+                    "source_evidence": [
+                        {"source_id": "S2", "extract_or_location": ""},
+                    ],
                 },
                 valid_quality_ledger(),
             )
@@ -3060,7 +3138,10 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         findings = validate_ledger.claim_findings(item, data)
         families = {item.family for item in findings}
         self.assertGreaterEqual(len(findings), 2)
-        self.assertIn("ledger/claim-input", families)
+        # R28 restatement: this analysis carries no `reasoning`, which used to
+        # raise ledger/claim-input. Every conditional field is optional now, so
+        # the remaining families must still all report.
+        self.assertNotIn("ledger/claim-input", families)
         self.assertIn("ledger/extract-length", families)
         self.assertIn("ledger/person", families)
 

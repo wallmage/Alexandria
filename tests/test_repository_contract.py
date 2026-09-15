@@ -254,13 +254,15 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("claims", schema["required"])
         self.assertIn("sources", schema["required"])
         self.assertEqual(4, schema["properties"]["schema_version"]["const"])
+        # R28 restatement: thin coverage and thin synthesis are WARN, so the
+        # schema no longer makes a fresh (empty) workspace structurally invalid.
         self.assertIn(
             "adversarial_tests",
-            schema["$defs"]["synthesis"]["required"],
+            schema["$defs"]["synthesis"]["properties"],
         )
-        self.assertEqual(1, schema["properties"]["coverage"]["minItems"])
-        self.assertEqual(1, schema["properties"]["sources"]["minItems"])
-        self.assertEqual(1, schema["properties"]["claims"]["minItems"])
+        self.assertNotIn("required", schema["$defs"]["synthesis"])
+        for section in ("coverage", "sources", "claims"):
+            self.assertNotIn("minItems", schema["properties"][section])
 
     def test_references_match_spec_thresholds_and_alx_lifecycle(self):
         recording = (ROOT / "references" / "evidence-recording.md").read_text(

@@ -514,14 +514,21 @@ class UnclassifiedSourcePortfolioTests(AlxTestCase):
 
 
 class ClaimAddNamesTheClaimFileTests(AlxTestCase):
-    """R20: a rejected claim's remedy names the file the claim came from."""
+    """R20: a claim's remedy names the file the claim came from."""
 
-    def test_a_rejected_claim_names_its_own_input_file(self):
+    def test_a_warned_claim_names_its_own_input_file(self):
+        """R28 restatement of test_a_rejected_claim_names_its_own_input_file.
+
+        A dangling `supports` is ledger/reference, so the claim is accepted and
+        the remedy is printed as a WARN — still naming the real input file.
+        """
         self.bootstrap()
         claim = dict(CLAIM_ONE, claim_id="C9", supports=["C99"])
         path = self.write_json("late.json", [claim])
         code, out = self.run_in("claim", "add", path)
-        self.assertEqual(1, code, out)
+        self.assertEqual(0, code, out)
+        self.assertIn("C9 WARN", out)
+        self.assertIn("[ledger/reference]", out)
         self.assertIn(str(path), out)
         self.assertNotIn("claims/*.json", out)
 
@@ -594,9 +601,14 @@ class AsOfDriftTests(unittest.TestCase):
     def test_the_same_day_is_not_a_finding(self):
         self.assertEqual([], self.findings("2026-07-28"))
 
-    def test_two_days_stay_hard_and_name_as_of(self):
+    def test_two_days_warn_and_name_as_of(self):
+        """R28 restatement of test_two_days_stay_hard_and_name_as_of.
+
+        Drift beyond the window is still reported with its fix, but
+        ledger/reference is bookkeeping: it warns instead of refusing.
+        """
         [item] = self.findings("2026-07-30")
-        self.assertEqual("hard", item.severity)
+        self.assertEqual("warn", item.severity)
         self.assertIn("2 days after verified_at 2026-07-28", item.message)
         self.assertIn("threshold 1 day", item.message)
         self.assertEqual(

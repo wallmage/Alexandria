@@ -7,8 +7,6 @@
   "required": [
     "claim_id",
     "claim",
-    "kind",
-    "importance",
     "source_evidence"
   ],
   "properties": {
@@ -118,62 +116,11 @@
         "type": "string"
       }
     },
+    "triangulation": {
+      "type": "object"
+    },
     "report_paragraph": {
       "type": "integer"
     }
-  },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "analysis"
-          }
-        },
-        "required": ["kind"]
-      },
-      "then": {
-        "required": ["reasoning"]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "estimate"
-          }
-        },
-        "required": ["kind"]
-      },
-      "then": {
-        "required": ["assumptions"]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "person_claim_role": {
-            "const": "response"
-          }
-        },
-        "required": ["person_claim_role"]
-      },
-      "then": {
-        "required": ["responds_to_claim_ids"]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "person_claim_role": {
-            "const": "resolution"
-          }
-        },
-        "required": ["person_claim_role"]
-      },
-      "then": {
-        "required": ["resolves_claim_ids"]
-      }
-    }
-  ]
+  }
 }

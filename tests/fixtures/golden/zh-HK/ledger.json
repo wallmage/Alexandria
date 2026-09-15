@@ -28,10 +28,7 @@
     {
       "person_id": "P1",
       "name": "陳兆聰",
-      "aliases": [],
-      "living_status": "living",
-      "public_role": "public",
-      "relationship": "adjacent"
+      "aliases": []
     }
   ],
   "report_date": "2026-07-28",
@@ -232,7 +229,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "負荷趨勢構成機房改造的需求理據。",
       "what_would_change": "數列被重列，或 2026 年上半年的數字回落至接近 2021 年的水平。",
@@ -268,7 +264,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "按合約量固定收取的費用佔比，決定效率工程可以觸及的開支範圍。",
       "what_would_change": "一份逐月分攤紀錄顯示供冷量費的實際佔比明顯較低。",
@@ -304,7 +299,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "運行系數走高是改造工程要處理的運作徵狀。",
       "what_would_change": "一份獨立的運行系數數列顯示升幅平均分布於整個環路。",
@@ -342,7 +336,6 @@
         "C5"
       ],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "收費增幅是整個供冷方案最大的單項成本輸入。",
       "what_would_change": "一份把兩個成本基礎對接起來的已公布文件。",
@@ -380,7 +373,6 @@
         "C4"
       ],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "較低的估算會改變委員會可以接受的回本期。",
       "what_would_change": "一份公布的合約量假設對接文件，或修訂後的最終裁定。",
@@ -412,7 +404,6 @@
       ],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": "供冷量費按最低合約量固定收取並佔費用結構的大半，而合約量按註冊樓面面積換算，因此改善運行系數只能觸及餘下的用量費。",
       "decision_relevance": "若制約在協議條款，機組改造買到的是穩定運行而不是節省。",
       "what_would_change": "一份逐月帳單顯示供冷量費佔比明顯偏低，或供冷公司公布下調合約量的獲批紀錄。",
@@ -450,12 +441,6 @@
       "person_ids": [
         "P1"
       ],
-      "person_claim_role": "neutral",
-      "person_claim_assessment": {
-        "classification": "neutral",
-        "rationale": "此項只記錄一項已公布的任命及其管理的撥款日程，既無指摘，亦無私人資料，對受任者沒有任何評價性描述。"
-      },
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "截止日期同時決定委員會自己的表決日期。",
       "what_would_change": "主席換人，或同一年開放第二個撥款窗口。",
@@ -491,7 +476,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "可下調的合約量會令改造省下的用量連帶省下供冷量費，並削弱協議制約的判斷。",
       "what_would_change": "一份涵蓋夏季的量度顯示實測高峰貼近合約量，或一份記載申請被拒的紀錄。",
@@ -539,7 +523,6 @@
       ],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": "按評估自身的日數作算術，保留為估算，因為來源只給出達標日數而未給出比例。",
       "decision_relevance": "委員會比較的是比例而不是日數，因為條款寫的是連續期間的達標情況。",
       "what_would_change": "一份把夏季監測日一併計入的日數紀錄。",
@@ -577,7 +560,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "現行單價是任何節省折算成金額時的乘數。",
       "what_would_change": "一份重設已公布收費的最終裁定。",

@@ -1185,44 +1185,6 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
                     ),
                     encoding="utf-8",
                 )
-            # The notes must come from the hash-bound file on disk, never
-            # from the receipt's own embedded copies: replaying
-            # receipt-embedded notes would make any tampered receipt
-            # self-validating.
-            fidelity_notes_path = None
-            recorded_notes_path = receipt.get("fidelity_notes_path")
-            recorded_notes_sha = receipt.get("fidelity_notes_sha256")
-            if receipt.get("fidelity_notes") and not recorded_notes_path:
-                errors.append(
-                    "Rewild receipt records acknowledged findings but no "
-                    "bound fidelity-notes file."
-                )
-            if recorded_notes_path:
-                try:
-                    notes_file = validated_artifact_path(
-                        recorded_notes_path,
-                        "Rewild receipt fidelity-notes",
-                    )
-                except ValueError as exc:
-                    errors.append(str(exc))
-                    notes_file = None
-            else:
-                notes_file = None
-            if notes_file is not None:
-                if not notes_file.is_file():
-                    errors.append(
-                        "Rewild receipt's fidelity-notes file is missing: "
-                        f"{recorded_notes_path}"
-                    )
-                elif _file_sha256(notes_file) != recorded_notes_sha:
-                    errors.append(
-                        "Fidelity-notes file does not match the hash "
-                        "recorded in the Rewild receipt."
-                    )
-                else:
-                    fidelity_notes_path = notes_file
-            if errors:
-                return errors
             rerun_errors = hard_errors(
                 run_gate(
                     report_path,
@@ -1231,12 +1193,11 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
                     review_note_path=Path(receipt["review_note_path"]),
                     receipt_path=regenerated,
                     waiver_path=waiver_path,
-                    fidelity_notes_path=fidelity_notes_path,
                 )
             )
             if not rerun_errors and regenerated.is_file():
                 fresh = json.loads(regenerated.read_text(encoding="utf-8"))
-                for audit_field in ("heuristic_exemptions", "fidelity_notes"):
+                for audit_field in ("heuristic_exemptions",):
                     if fresh.get(audit_field, []) != receipt.get(
                         audit_field, []
                     ):

@@ -79,7 +79,6 @@ def valid_quality_ledger():
                 "supports": [],
                 "contradicts": [],
                 "person_ids": [],
-                "human_harm_review": None,
                 "verified_at": "2026-07-28",
                 "confidence": "high",
                 "status": "supported",
@@ -150,7 +149,6 @@ def fact_claim(**overrides):
         "supports": [],
         "contradicts": [],
         "person_ids": [],
-        "human_harm_review": None,
         "confidence": "medium",
         "status": "supported",
         "include_in_report": False,
@@ -172,9 +170,6 @@ def living_harm_ledger():
             "person_id": "P1",
             "name": "Alex Doe",
             "aliases": ["Doe"],
-            "living_status": "living",
-            "public_role": "public",
-            "relationship": "primary_subject",
         }
     ]
     data["sources"][0]["accountability_basis"] = "court_or_regulator_record"
@@ -218,47 +213,6 @@ def living_harm_ledger():
             "status": "supported",
             "include_in_report": False,
             "person_ids": ["P1"],
-            "person_claim_role": "harmful",
-            "person_claim_assessment": {
-                "classification": "harmful",
-                "rationale": (
-                    "This claim alleges criminal misconduct by a living "
-                    "primary subject and therefore requires full review."
-                ),
-            },
-            "human_harm_review": {
-                "category": "wrongdoing",
-                "legal_stage": "alleged",
-                "source_floor": "met",
-                "accountable_source_ids": ["S1"],
-                "attributed_to": "The regulator",
-                "sourcing_limitation_excerpt": None,
-                "event_period": "2026",
-                "resolution_status": "unresolved",
-                "resolution_claim_ids": [],
-                "resolution_search": {
-                    "queries": ["Alex Doe procurement fraud resolution"],
-                    "expected_locations": ["regulator docket and court index"],
-                    "searched_at": "2026-07-28",
-                },
-                "right_of_reply": {
-                    "status": "no_public_response",
-                    "response_claim_ids": [],
-                    "search_record": {
-                        "queries": ["Alex Doe response procurement fraud"],
-                        "expected_locations": [
-                            "subject website and regulator docket"
-                        ],
-                        "searched_at": "2026-07-28",
-                    },
-                },
-                "privacy_basis": "not_sensitive",
-                "privacy_basis_source_ids": [],
-                "governing_question_relevance": (
-                    "The allegation directly affects the report's assessment "
-                    "of public procurement responsibility."
-                ),
-            },
             "evidence_of_absence": {
                 "queries": ["Alex Doe response procurement fraud"],
                 "expected_locations": ["subject website and regulator docket"],
@@ -2706,17 +2660,9 @@ class ResilienceLedgerApiTests(unittest.TestCase):
                 "person_id": "P1",
                 "name": "Alex Doe",
                 "aliases": ["Doe"],
-                "living_status": "unknown",
-                "public_role": "public",
-                "relationship": "primary_subject",
             }
         ]
         unknown["claims"][0]["person_ids"] = ["P1"]
-        unknown["claims"][0]["person_claim_role"] = "neutral"
-        unknown["claims"][0]["person_claim_assessment"] = {
-            "classification": "neutral",
-            "rationale": "x" * 40,
-        }
         findings.extend(validate_ledger.collect_findings(unknown))
         dropped = fact_claim(claim_id="C9")
         dropped["reason"] = "drop"
@@ -2766,9 +2712,7 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         dup = valid_quality_ledger()
         dup["sources"].append(dict(dup["sources"][0], source_id="S1", url="https://dup.example.org/x"))
         findings.extend(validate_ledger.collect_findings(dup))
-        harm = living_harm_ledger()
-        harm["claims"][-1]["person_claim_role"] = "neutral"
-        findings.extend(validate_ledger.collect_findings(harm))
+        findings.extend(validate_ledger.collect_findings(living_harm_ledger()))
         return findings
 
     def test_threshold_messages_keep_their_own_family(self):
@@ -3211,9 +3155,8 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         self.assertIn("ledger/person", families)
 
     def test_person_unknown_status_raises_no_person_finding(self):
-        """R25 restatement of test_person_unknown_status_refuses_linked_claim.
-
-        A registered person's `living_status` no longer gates any claim.
+        """R25 restatement: a registered person with no living_status field
+        raises no ledger/person finding.
         """
         data = valid_quality_ledger()
         data["people"] = [
@@ -3221,9 +3164,6 @@ class ResilienceLedgerApiTests(unittest.TestCase):
                 "person_id": "P1",
                 "name": "Alex Doe",
                 "aliases": ["Doe"],
-                "living_status": "unknown",
-                "public_role": "public",
-                "relationship": "primary_subject",
             }
         ]
         data["claims"][0]["person_ids"] = ["P1"]

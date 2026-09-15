@@ -80,9 +80,6 @@
     "decision_relevance": {
       "type": ["string", "null"]
     },
-    "named_subjects": {
-      "type": "array"
-    },
     "limitations": {
       "type": ["string", "null"]
     },

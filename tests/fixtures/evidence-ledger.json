@@ -84,7 +84,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The PDF pipeline must preserve source access.",
       "what_would_change": "A rendered fixture without an external clickable link.",

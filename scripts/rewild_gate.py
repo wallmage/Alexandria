@@ -28,7 +28,6 @@ except ImportError:
     from gate_severity import Finding, hard_errors, render_grouped
 
 ROOT = Path(__file__).resolve().parents[1]
-FIDELITY_NOTES_SCHEMA = ROOT / "references" / "rewild-fidelity-notes.schema.json"
 #: Checker sections reported outside the style tier: fabricated figures and
 #: attribution drift (Fidelity), wrong-region vocabulary (Region), and AI
 #: vocabulary. R28: only Fidelity blocks; the rest are warnings, as is style.
@@ -291,108 +290,6 @@ def _load_style_waivers(path):
     return waivers, errors
 
 
-def _fidelity_notes_schema_errors(data):
-    """Validate a notes file against Alexandria's bundled JSON Schema."""
-    try:
-        from .validate_ledger import validate_schema
-    except ImportError:
-        from validate_ledger import validate_schema
-
-    try:
-        schema = json.loads(FIDELITY_NOTES_SCHEMA.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return [
-            "Alexandria's bundled fidelity-notes schema could not be read: "
-            f"{exc}"
-        ]
-    return [
-        f"Fidelity notes file does not match {FIDELITY_NOTES_SCHEMA.name}: "
-        f"{error}"
-        for error in validate_schema(data, schema)
-    ]
-
-
-def _load_fidelity_notes(path):
-    """Load reviewed intentional-edit acknowledgments; return (notes, errors).
-
-    The report-bound blind review is authoritative for semantic equivalence;
-    the deterministic clause checks are backstops. When the review demands a
-    correction that genuinely changes meaning against the pre-Rewild source,
-    the primary agent must document it here: each entry quotes the source
-    fragment, the report fragment, and a specific reason. Fragments are
-    matched case-insensitively as substrings of the compared prose (see
-    ``_fragment_matches``), so only letter case may differ from the quoted
-    text. An entry suppresses only the semantic findings that quote both
-    fragments, every entry must match at least one finding, and all
-    suppressions are recorded in the receipt.
-
-    The file is validated against the bundled
-    ``references/rewild-fidelity-notes.schema.json`` and every rejected entry produces a diagnostic naming its index and the
-    exact rule it broke; a file with any rejected entry fails the gate rather
-    than silently contributing fewer notes.
-    """
-    if path is None:
-        return [], []
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    entries = data.get("fidelity_notes") if isinstance(data, dict) else None
-    if not isinstance(entries, list):
-        return [], [
-            "Fidelity notes file must be a JSON object with a "
-            "'fidelity_notes' array."
-        ]
-    if len(entries) > MAX_FIDELITY_NOTES:
-        return [], [
-            f"{len(entries)} fidelity notes exceed the limit of "
-            f"{MAX_FIDELITY_NOTES}; a report needing more acknowledged "
-            "meaning changes must be re-drafted, not annotated."
-        ]
-    notes = []
-    errors = []
-    for index, entry in enumerate(entries, start=1):
-        if not isinstance(entry, dict):
-            errors.append(f"Fidelity note {index} must be a JSON object.")
-            continue
-        values = {}
-        complete = True
-        for name, minimum in (
-            ("source_fragment", MIN_FIDELITY_FRAGMENT),
-            ("report_fragment", MIN_FIDELITY_FRAGMENT),
-            ("reason", MIN_FIDELITY_REASON),
-        ):
-            value = str(entry.get(name, "")).strip()
-            if len(value) < minimum:
-                complete = False
-                errors.append(
-                    f"Fidelity note {index} has a '{name}' of {len(value)} "
-                    f"characters after trimming; the minimum is {minimum}."
-                )
-            values[name] = value
-        # One note may acknowledge several findings on the same clause pair,
-        # and the receipt records it once per finding; duplicates are the
-        # same acknowledgment, not extra unused waivers.
-        if complete and values not in notes:
-            notes.append(values)
-    errors.extend(_fidelity_notes_schema_errors(data))
-    if errors:
-        return [], errors
-    return notes, []
-
-
-# Acknowledgments are a narrow escape hatch, not a waiver channel: a small
-# fixed budget per report, and never for the findings below, which are the
-# clearest corruption signals and are corrected by re-drafting, not by a note.
-MAX_FIDELITY_NOTES = 8
-MIN_FIDELITY_FRAGMENT = 15
-MIN_FIDELITY_REASON = 40
-# A reversed direction and an invented or swapped cause corrupt a claim just
-# as completely; "causality" is one of the four mandatory fidelity checks, so
-# a fabricated causal link cannot be signed away by an acknowledgment either.
-UNACKNOWLEDGEABLE_FINDINGS = (
-    "Semantic direction reversal",
-    "Unmatched directional claim",
-    "Causal claim added",
-    "Causal substitution detected",
-)
 # The split-remnant heuristics suppress the same class of finding as a
 # fidelity note, so they are rationed the same way. A report producing more
 # structural remnants than this was restructured, not copy-edited, and its
@@ -401,77 +298,6 @@ MAX_HEURISTIC_EXEMPTIONS = 8
 # Share of the shorter clause list that must remain unaligned before the
 # whole-document direction and causal comparison is trusted.
 DOCUMENT_FALLBACK_COVERAGE = 0.2
-
-
-def _finding_clause_pair(error):
-    """Extract the quoted source/report clause pair a finding is about."""
-    match = re.search(r"'(.*)' → '(.*)'\.$", error, re.DOTALL)
-    if match:
-        return (match.group(1), match.group(2))
-    return (error, error)
-
-
-def _fragment_matches(fragment, text):
-    """Report whether a quoted note fragment occurs in ``text``.
-
-    The contract is deliberately forgiving in exactly one dimension: the
-    fragment must be quoted verbatim, but letter case is ignored, because a
-    review-mandated edit often only re-cases a word and an agent should not
-    burn a retry loop on that. Nothing else is normalized — whitespace,
-    punctuation, and wording must match the compared prose.
-    """
-    return fragment.casefold() in text.casefold()
-
-
-def _apply_fidelity_notes(semantic_errors, notes):
-    """Split semantic findings into (remaining, acknowledged, unused_notes).
-
-    A note documents exactly one edit, so it is bound to one clause pair and
-    to at most one finding of each type on that pair. It may not acknowledge
-    a second, unrelated pair that contains the same fragments, and repeated
-    identical clauses elsewhere in the document raise duplicate findings that
-    remain errors: an identical edit at another location is another edit.
-    """
-    remaining = []
-    acknowledged = []
-    used = [False] * len(notes)
-    note_pair = [None] * len(notes)
-    note_types = [set() for _ in notes]
-    for error in semantic_errors:
-        pair = _finding_clause_pair(error)
-        source_side, report_side = pair
-        finding_type = error.split(":", 1)[0]
-        matched = None
-        if not error.startswith(UNACKNOWLEDGEABLE_FINDINGS):
-            for index, note in enumerate(notes):
-                # Each fragment must match its OWN side of the clause pair;
-                # matching against the whole finding text would let a note
-                # with swapped or cross-side fragments suppress findings it
-                # does not document.
-                if (
-                    _fragment_matches(note["source_fragment"], source_side)
-                    and _fragment_matches(note["report_fragment"], report_side)
-                    and note_pair[index] in (None, pair)
-                    and finding_type not in note_types[index]
-                ):
-                    matched = index
-                    break
-        if matched is None:
-            remaining.append(error)
-        else:
-            note_pair[matched] = pair
-            note_types[matched].add(finding_type)
-            used[matched] = True
-            acknowledged.append(
-                {
-                    "finding": error,
-                    "source_fragment": notes[matched]["source_fragment"],
-                    "report_fragment": notes[matched]["report_fragment"],
-                    "reason": notes[matched]["reason"],
-                }
-            )
-    unused = [note for index, note in enumerate(notes) if not used[index]]
-    return remaining, acknowledged, unused
 
 
 def _load_review_note(
@@ -1598,8 +1424,7 @@ def _receipt_is_stale(receipt_path, report_path, source_path):
     ) != file_sha256(source_path)
 
 
-#: Finding families for the tiers `run_check` reports, with the spec's
-#: fabrication (F) versus availability (A) class per family (spec 6.10).
+#: Finding families for the tiers `run_check` reports.
 _CHECK_CLASSES = {
     "integrity/control-chars": "F",
     "fidelity/quotation-lost": "F",
@@ -1781,7 +1606,6 @@ def run_gate(
     review_note_path,
     receipt_path,
     waiver_path=None,
-    fidelity_notes_path=None,
     force=False,
     timeout=CHECKER_TIMEOUT_S,
     snapshot_sha256=None,
@@ -1797,7 +1621,6 @@ def run_gate(
             "pre-Rewild source": source_path,
             "blind-review note": review_note_path,
             "style waivers": waiver_path,
-            "fidelity notes": fidelity_notes_path,
         },
         {"Rewild receipt": receipt_path},
     )
@@ -1874,55 +1697,9 @@ def run_gate(
             "this much structural churn must be re-checked against the "
             "pre-Rewild source and re-drafted, not exempted."
         ]
-    try:
-        fidelity_notes, note_errors = _load_fidelity_notes(fidelity_notes_path)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return [f"Fidelity notes must be valid UTF-8 JSON: {exc}"]
-    if note_errors:
-        return note_errors
-    fidelity_note_ok = any(
-        isinstance(finding, dict)
-        and finding.get("category") == "fidelity"
-        and finding.get("disposition") == "resolved"
-        for finding in review_note.get("findings", [])
-    )
-    if fidelity_notes and not fidelity_note_ok:
-        return [
-            "Fidelity notes require at least one resolved fidelity finding "
-            "in the bound blind-review note."
-        ]
-    # The per-report budget is enforced once, in _load_fidelity_notes, so an
-    # oversized file is rejected before any of it is trusted.
-    source_prose = _fidelity_prose(source_text)
-    report_prose = _fidelity_prose(report_text)
-    for note in fidelity_notes:
-        if not _fragment_matches(note["source_fragment"], source_prose):
-            return [
-                "Fidelity note source fragment is not in the pre-Rewild "
-                f"source: '{note['source_fragment']}'."
-            ]
-        if not _fragment_matches(note["report_fragment"], report_prose):
-            return [
-                "Fidelity note report fragment is not in the report: "
-                f"'{note['report_fragment']}'."
-            ]
-    semantic_errors, acknowledged_findings, unused_notes = _apply_fidelity_notes(
-        semantic_errors, fidelity_notes
-    )
-    if len(acknowledged_findings) > MAX_FIDELITY_NOTES:
-        return [
-            f"Fidelity notes acknowledged {len(acknowledged_findings)} "
-            f"semantic findings, above the limit of {MAX_FIDELITY_NOTES}; "
-            "a report changing meaning this often must be re-drafted."
-        ]
     # R28: semantic drift and the length band are warnings; they are reported
     # with the receipt, they never withhold it.
     soft = [warning(message) for message in semantic_errors]
-    errors.extend(
-        "Fidelity note matched no semantic finding: "
-        f"'{note['source_fragment']}' → '{note['report_fragment']}'."
-        for note in unused_notes
-    )
     soft.extend(warning(message) for message in _length_errors(report_text, report_lang))
 
     checker = _checker_path(report_lang)
@@ -2005,15 +1782,6 @@ def run_gate(
             }
             for item in waived_warnings
         ],
-        "fidelity_notes_path": (
-            str(Path(fidelity_notes_path).resolve())
-            if fidelity_notes_path
-            else None
-        ),
-        "fidelity_notes_sha256": (
-            file_sha256(fidelity_notes_path) if fidelity_notes_path else None
-        ),
-        "fidelity_notes": acknowledged_findings,
         "heuristic_exemptions": heuristic_exemptions,
     }
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2055,10 +1823,6 @@ def build_parser():
         help="blind-review findings and dispositions",
     )
     parser.add_argument("--style-waivers", help="JSON reasons for retained warnings")
-    parser.add_argument(
-        "--fidelity-notes",
-        help="JSON acknowledgments for review-mandated intentional edits",
-    )
     parser.add_argument("--receipt", help="gate receipt JSON to write")
     parser.add_argument(
         "--check",
@@ -2101,7 +1865,6 @@ def main(argv=None):
         review_note_path=args.review_note,
         receipt_path=args.receipt,
         waiver_path=args.style_waivers,
-        fidelity_notes_path=args.fidelity_notes,
         force=args.force,
     )
     return emit_findings(

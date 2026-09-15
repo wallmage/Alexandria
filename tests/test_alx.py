@@ -3079,8 +3079,8 @@ class ParkedReviewNoteTests(AlxTestCase):
             own,
         )
         self.assertNotIn("status", out)
-        # B6: the schema errors come in the same round, never a second one.
-        self.assertTrue(len(missing) > len(own), missing)
+        paths = [item.split(":", 1)[0].split()[0] for item in missing]
+        self.assertEqual(len(paths), len(set(paths)), paths)
 
     def test_review_start_prints_the_rewild_guide(self):
         self.bootstrap()
@@ -4667,7 +4667,12 @@ class ReviewFinishOneRoundTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn("WARN review/content:", out)
         self.assertIn("scores.question_answered.score (integer 1-5)", out)
-        self.assertIn("(content-review schema)", out)
+        paths = []
+        for line in out.splitlines():
+            if line.startswith("WARN review/content: "):
+                rest = line.split("WARN review/content: ", 1)[1]
+                paths.append(rest.split(":", 1)[0].split()[0])
+        self.assertEqual(len(paths), len(set(paths)), paths)
 
     def test_finish_writes_status_itself(self):
         path = self.started()
@@ -5362,3 +5367,122 @@ class PartBFlowTests(AlxTestCase):
             "skip live source re-check; optional",
             issue._option_string_actions["--offline"].help,
         )
+
+
+class DefectAuditTests(AlxTestCase):
+    def test_d1_issue_prints_refused_rewild_note(self):
+        from contextlib import ExitStack
+
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        with ExitStack() as stack:
+            helper.stub_gates(stack, rewild=False)
+            stack.enter_context(
+                mock.patch.object(
+                    alx.rewild_gate, "run_gate", return_value=["rewild gate refused"]
+                )
+            )
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertTrue(any(line.startswith("note:") for line in out.splitlines()), out)
+        self.assertIn("rewild receipt not issued", out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        for prefix in alx.VERIFICATION_NOTE_PREFIX.values():
+            self.assertNotIn(prefix, report)
+
+    def test_d3_review_finish_lists_each_path_once(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("review", "start", "content")
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(0, code, out)
+        paths = []
+        for line in out.splitlines():
+            if not line.startswith("WARN review/content: "):
+                continue
+            rest = line.split("WARN review/content: ", 1)[1]
+            paths.append(rest.split(":", 1)[0].split()[0])
+            if "schema)" in rest:
+                self.assertFalse(rest.endswith(" missing"), line)
+        self.assertGreater(len(paths), 1, out)
+        self.assertEqual(len(paths), len(set(paths)), paths)
+
+    def test_d4_ledger_merge_names_the_claim_file(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.dir / "claims" / "batch.json"
+        batch.write_text(json.dumps([dict(CLAIM_ONE, supports=["C99"])]), encoding="utf-8")
+        code, out = self.run_in("claim", "add", "claims/batch.json")
+        self.assertEqual(0, code, out)
+        patch = self.write_json("patch.json", {"coverage": []})
+        code, out = self.run_in("ledger", "merge", patch)
+        self.assertEqual(0, code, out)
+        self.assertIn("claims/batch.json", out)
+        self.assertNotIn("claims/*.json", out)
+
+    def test_d6_find_prints_one_window_for_two_keywords(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        code, out = self.run_in("find", "S1", "1,204", "documents")
+        self.assertEqual(0, code, out)
+        hits = [line for line in out.splitlines() if line.startswith("S1 #")]
+        self.assertEqual(1, len(hits), out)
+
+    def test_d7_status_names_pdfs_until_report_changes(self):
+        from contextlib import ExitStack
+
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        with ExitStack() as stack:
+            helper.stub_gates(stack)
+
+            def fake_render_pdf(input_path, output_path, **kwargs):
+                Path(output_path).write_bytes(b"%PDF-1.7\n")
+                return Path(output_path)
+
+            def fake_render_pages(pdf_path, output_dir, **kwargs):
+                Path(output_dir).mkdir(parents=True, exist_ok=True)
+                page = Path(output_dir) / "page-001.png"
+                page.write_bytes(b"\x89PNG")
+                return [page]
+
+            from scripts import md_to_pdf, render_pdf_pages
+
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_pages", side_effect=fake_render_pages
+                )
+            )
+            code, out = self.run_in("issue")
+            self.assertEqual(0, code, out)
+            code, out = self.run_in("render")
+            self.assertEqual(0, code, out)
+            code, out = self.run_in("status")
+        self.assertEqual(0, code, out)
+        next_line = next(line for line in out.splitlines() if line.startswith("Next:"))
+        self.assertIn("report-executive.pdf", next_line)
+        self.assertIn("report-atlas.pdf", next_line)
+        self.assertIn("report.md", next_line)
+        self.assertNotIn("alx render", next_line)
+        report = self.dir / "report.md"
+        report.write_text(report.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        code, out = self.run_in("status")
+        self.assertEqual(0, code, out)
+        next_line = next(line for line in out.splitlines() if line.startswith("Next:"))
+        self.assertTrue(
+            "alx check --fix" in next_line or "alx issue" in next_line, next_line
+        )
+        self.assertNotIn("deliver report-", next_line)

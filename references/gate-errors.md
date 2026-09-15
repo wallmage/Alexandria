@@ -51,16 +51,16 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `extract_or_location: "short"` (5 chars, threshold 20).
 
 ### `ledger/claim-input` — F
-- **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch, or has an empty `claim`, `source_evidence` or `extract_or_location`. Every conditional field — `reasoning`, `assumptions`, `responds_to_claim_ids`, `resolves_claim_ids`, `decision_relevance`, `what_would_change`, `limitations`, `confidence`, `triangulation` — is optional and never a finding (R28).
+- **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch, or has an empty `claim`, `source_evidence` or `extract_or_location`. Every conditional field — `responds_to_claim_ids`, `resolves_claim_ids`, `decision_relevance`, `what_would_change`, `limitations`, `confidence`, `triangulation` — is optional at schema and never a `ledger/claim-input` finding (R28). Missing `reasoning` on `kind: analysis` or `assumptions` on `kind: estimate` is advised under `ledger/reference` (W), not here.
 - **fix:** set field `<name>` in `claims/<file>.json`, then `alx claim add claims/<file>.json` (the claim re-enters the ledger only through `claim add`, which upserts by `claim_id`).
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `source_evidence: []`.
 
 ### `ledger/schema` — W
-- **rule:** ledger fails `evidence-ledger.schema.json`. R29: the ledger is machine-written, so a schema defect is never something the model can repair.
-- **fix:** set field `<name>` in `ledger.json` via `alx ledger merge` (brief/people/coverage/synthesis only).
+- **rule:** ledger fails `evidence-ledger.schema.json`. R29: the ledger is machine-written, so a schema defect is never something the model can repair. Empty top-level `coverage`/`sources`/`claims`, missing `$defs.brief`/`coverageItem`/`synthesis` required keys, empty minItems arrays, and hollow implication/takeaway/scenario/adversarialTest objects are WARN here.
+- **fix:** set field `<name>` in `<section>` via `alx ledger merge` (brief/people/coverage/synthesis); otherwise set field `<name>` in `ledger.json`; claims paths: set field `<name>` in `claims/*.json`, then `alx claim add claims/*.json`.
 - **remove:** n/a (warning; never blocks `issue`)
-- **example:** missing `schema_version`.
+- **example:** `coverage: []`; `brief: 'intended_reader' is a required property`; `synthesis.implications.0.statement` missing.
 
 ### `ledger/key-claim` — W
 - **rule:** key/central claim rests on `unverified`/interested-only sources, or lacks `decision_relevance`/`what_would_change`. `unverified` counts as interested.
@@ -153,10 +153,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `central_judgment_claim_ids: ["C9"]`; C9 was dropped.
 
 ### `ledger/reference` — F/W
-- **rule:** cross-reference between claims, people or sources does not resolve. R22: two or more `source_evidence` entries with the same `source_id` are legitimate (two passages from one page) — no finding, and each entry is probed on its own. R23: counterevidence with no adversarial test is a thin synthesis, not a fabrication (W). R24: `as_of` up to 1 day after `verified_at` is timezone drift (UTC fetch vs local date); past that the finding names both dates and the threshold.
-- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`; untested counterevidence: `set field synthesis.adversarial_tests, then alx ledger merge synthesis`; as_of drift: set field as_of in claims/<file>, then `alx claim add claims/<file>`
+- **rule:** cross-reference between claims, people or sources does not resolve. R22: two or more `source_evidence` entries with the same `source_id` are legitimate (two passages from one page) — no finding, and each entry is probed on its own. R23: counterevidence with no adversarial test is a thin synthesis, not a fabrication (W). R24: `as_of` up to 1 day after `verified_at` is timezone drift (UTC fetch vs local date); past that the finding names both dates and the threshold. Analysis/estimate completeness (W): `kind: analysis` with empty/missing `reasoning`, or `kind: estimate` with empty/missing `assumptions` (no non-blank entries). Never blocks `claim add` or `issue`.
+- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`; untested counterevidence: `set field synthesis.adversarial_tests, then alx ledger merge synthesis`; as_of drift: set field as_of in claims/<file>, then `alx claim add claims/<file>`; analysis missing reasoning: `set field reasoning in claims/*.json`, then `alx claim add claims/*.json`; estimate missing assumptions: `set field assumptions in claims/*.json`, then `alx claim add claims/*.json`
 - **remove:** `alx claim drop C<n> --apply` — hard half only (a `source_id` no fetched source carries); every other cross-reference is W and carries no remove
-- **example:** `responds_to_claim_ids: ["C12"]`; no C12.
+- **example:** `responds_to_claim_ids: ["C12"]`; no C12. `kind: analysis`, `reasoning` absent. `kind: estimate`, `assumptions: []`.
 
 ## Integrity (`check` a / `validate_report`)
 

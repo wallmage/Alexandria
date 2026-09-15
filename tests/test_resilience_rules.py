@@ -703,5 +703,48 @@ class AsOfDriftTests(unittest.TestCase):
         )
 
 
+class RecoveredSchemaWarnTests(unittest.TestCase):
+    """B2-B6: restored schema shape stays WARN and never refuses."""
+
+    def test_empty_arrays_and_hollow_brief_are_warn_only(self):
+        findings = validate_ledger.collect_findings(
+            {
+                "schema_version": 4,
+                "subject": "X",
+                "research_question": "Y",
+                "brief": {},
+                "people": [],
+                "report_date": "2026-07-28",
+                "coverage": [],
+                "sources": [],
+                "claims": [],
+                "synthesis": {
+                    "central_judgment_claim_ids": [],
+                    "counterevidence_claim_ids": [],
+                    "adversarial_tests": [],
+                    "implications": [],
+                    "decisions_or_takeaways": [],
+                    "scenarios": [],
+                    "limitations": [],
+                    "research_stop_reason": "stop",
+                },
+                "unresolved_questions": [],
+            }
+        )
+        schema = [item for item in findings if item.family == "ledger/schema"]
+        self.assertTrue(schema)
+        self.assertEqual({"warn"}, {item.severity for item in schema})
+        self.assertEqual([], [item for item in findings if item.severity == "hard"])
+        printed = validate_ledger.render_grouped(schema, verbose=True)
+        self.assertIn("[] should be non-empty", printed)
+        self.assertTrue(
+            any(
+                "via alx ledger merge" in item.fix or "in ledger.json" in item.fix
+                for item in schema
+            ),
+            [item.fix for item in schema],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

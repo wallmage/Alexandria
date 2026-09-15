@@ -219,6 +219,7 @@ REMEDY_TEMPLATES = {
     "extend-quote": "extend the quote in {file}",
     "extend-report": "extend the report body in report.md",
     "delete-paragraph": "delete paragraph {paragraph} of report.md",
+    "remove-link": "remove link {url} from report.md",
     "edit-prose": "(edit prose; waivable by alx issue --deliver)",
     # Ruling R9: inserting a link leaves the visible text unchanged, so it is a
     # mechanical delta and never stales a review.
@@ -249,6 +250,7 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^extend the quote in \S+$"),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
+    re.compile(r"^remove link \S+ from report\.md$"),
     re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
     re.compile(r"^add the source link to paragraph \d+ of report\.md$"),
     re.compile(
@@ -503,7 +505,11 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
     if family == "binding/link-not-in-ledger":
         match = _URL_IN_MESSAGE.search(item.message)
         url = match.group(0) if match else ""
-        return (remedy("fetch-url", url=url) if url else ""), ""
+        if not url:
+            return "", ""
+        # The Remove remedy is what `issue --deliver` applies; without it one
+        # foreign link blocked `issue` and `issue --deliver` alike, forever.
+        return remedy("fetch-url", url=url), remedy("remove-link", url=url)
     if family in {"binding/claim-paragraph", "binding/paragraph"}:
         candidate = re.search(r"candidates: (\d+)", item.message)
         paragraph = int(candidate.group(1)) if candidate else 1
@@ -694,10 +700,22 @@ def _named_file(item):
     )
 
 
+#: Both placeholders a producer may write for "the claim's own input file".
+CLAIM_FILE_PLACEHOLDERS = ("claims/*.json", "claims/<file>")
+
+
 def _with_claim_file(text, item, claim_files):
-    """K5: a producer remedy names the real claim input when `alx` knows it."""
-    named = (claim_files or {}).get(_pick_id(item, "C"))
-    return str(text).replace("claims/*.json", named) if text and named else text
+    """K5: a producer remedy names the real claim input when `alx` knows it.
+
+    `claims/<file>` is never runnable, so it becomes the real file, or the glob
+    that `claim add` expands.
+    """
+    if not text:
+        return text
+    named = (claim_files or {}).get(_pick_id(item, "C")) or "claims/*.json"
+    for placeholder in CLAIM_FILE_PLACEHOLDERS:
+        text = str(text).replace(placeholder, named)
+    return text
 
 
 def _completed_remedy(text, item):
@@ -1246,7 +1264,9 @@ def _skeleton_ledger(args, subject, question, reader, report_day):
             "implications": [],
             "decisions_or_takeaways": [],
             "scenarios": [],
-            "limitations": "Set in `alx ledger merge`.",
+            # The schema types this as an array; a placeholder string made every
+            # fresh workspace open with a HARD ledger/schema finding.
+            "limitations": [],
             "research_stop_reason": "Set in `alx ledger merge`.",
         },
         "unresolved_questions": [],
@@ -1582,9 +1602,10 @@ def cmd_find(args):
                     text, match.start(), len(keyword), args.context
                 )
                 hits += 1
-                lines.append(f"{source_id} #{index} · {window}")
+                # One line per hit: the paste line is the window, so printing
+                # the prose window as well doubled `find` output for nothing.
                 lines.append(
-                    "    extract_or_location: "
+                    f"{source_id} #{index} extract_or_location: "
                     + json.dumps(window, ensure_ascii=False)
                 )
         if not hits:
@@ -1846,18 +1867,32 @@ def record_binding_hashes(state, text, mapping):
 def cmd_claim_bind(args):
     ws, state, ledger = _open(args)
     ids = {claim.get("claim_id") for claim in ledger.get("claims", [])}
-    if args.claim_id not in ids:
-        print(f"{args.claim_id} is not in the ledger.", file=sys.stderr)
-        return 1
-    state.setdefault("bindings", {})[args.claim_id] = args.paragraph
-    record_binding_hashes(state, ws.report_text(), {args.claim_id: args.paragraph})
+    bindings = {}
+    for token in args.claims:
+        # Both forms: `C1 --paragraph 3`, and any number of `C1:3 C4:15` pairs.
+        claim_id, separator, number = str(token).partition(":")
+        number = number if separator else args.paragraph
+        try:
+            paragraph = int(number)
+        except (TypeError, ValueError):
+            print(
+                f"{token}: write `C<n>:<paragraph>` or pass --paragraph.",
+                file=sys.stderr,
+            )
+            return 1
+        if claim_id not in ids:
+            print(f"{claim_id} is not in the ledger.", file=sys.stderr)
+            return 1
+        bindings[claim_id] = paragraph
+    state.setdefault("bindings", {}).update(bindings)
+    record_binding_hashes(state, ws.report_text(), bindings)
     ws.save_state(state)
     _emit(
         ws,
         state,
         "claim bind",
-        f"{args.claim_id} -> paragraph {args.paragraph}",
-        [f"{args.claim_id} is bound to paragraph {args.paragraph}."],
+        ", ".join(f"{claim} -> paragraph {number}" for claim, number in bindings.items()),
+        [f"{claim} is bound to paragraph {number}." for claim, number in bindings.items()],
     )
     return 0
 
@@ -2390,18 +2425,26 @@ def _excerpt_remedy(claim, claim_id, candidates, paragraphs, mapping):
 
 
 def _binding_remedy(item, unbound):
-    """J3: print the candidate `alx`'s own numbering found, never a bare `N`."""
+    """J3: print the candidates `alx`'s own numbering found, never a bare `N`.
+
+    One line binds every unbound claim at once, so a report with five of them
+    costs one command instead of five.
+    """
     if not is_finding(item) or item.family != "binding/claim-paragraph":
         return item
     claim_id = _pick_id(item, "C")
-    candidates = unbound.get(claim_id) or []
-    if not claim_id or not candidates:
+    pairs = [
+        f"{other}:{candidates[0]}"
+        for other, candidates in sorted(unbound.items())
+        if candidates
+    ]
+    if not claim_id or not unbound.get(claim_id):
         return item
     return Finding(
         **{
             **vars(item),
             "ids": list(item.ids or []) or [claim_id],
-            "fix": remedy("claim-bind", claim_id=claim_id, paragraph=candidates[0]),
+            "fix": f"alx claim bind {' '.join(pairs)}",
             "remove": remedy("claim-drop", claim_id=claim_id),
         }
     )
@@ -2611,25 +2654,23 @@ def _note_completeness(ws, state, ledger, kind):
             missing.append(
                 f"findings[{index}].report_disclosure_excerpt (not in report.md)"
             )
-    # Spec §6.7(f): one disposition per retained claim->paragraph mapping.
-    entries = {
-        entry.get("claim_id"): entry
-        for entry in note.get("claim_support") or []
-        if isinstance(entry, dict)
-    }
-    mapping, _unused = paragraph_mapping(ws, state, ledger, ws.report_text())
-    for claim_id in sorted(mapping):
-        entry = entries.get(claim_id) or {}
-        if not entry.get("disposition"):
-            missing.append(
-                f"claim_support[{claim_id}].disposition "
-                "(supported | qualified | removed)"
-            )
+    # A retained claim with no entry is supported by default; only a claim the
+    # reviewer qualified or removed owes an entry, so the missing-key list is
+    # the fixed form and never one line per claim.
+    for entry in note.get("claim_support") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("disposition") in {"", None, "supported"}:
+            continue
         if not str(entry.get("note") or "").strip():
             missing.append(
-                f"claim_support[{claim_id}].note "
-                "(why the paragraph is supported by this claim)"
+                f"claim_support[{entry.get('claim_id') or '?'}].note "
+                f"(why the claim is {entry.get('disposition')})"
             )
+    if missing:
+        # The form above already names every unfilled key; repeating them as
+        # schema errors tripled the list the reviewer has to read.
+        return missing
     # The note must also satisfy the schema `content_gate` enforces, or
     # `finish` would exit 0 on a note the gate then rejects.
     missing.extend(
@@ -3066,20 +3107,11 @@ CONTENT_NOTE_GUIDE = (
     ),
     ("completion_note", "text", "what you checked and what stands"),
     (
-        "claim_support[].paragraph",
-        "integer >= 1",
-        "the paragraph that states the claim; correct the prefilled number "
-        "when it is wrong",
-    ),
-    (
-        "claim_support[].disposition",
-        "supported | qualified | removed",
-        "one entry per retained claim, prefilled empty",
-    ),
-    (
-        "claim_support[].note",
-        "text, 1+ chars",
-        "how that paragraph's evidence carries the claim",
+        "claim_support[]",
+        "may stay empty",
+        "one entry only for a claim you qualified or removed; every other "
+        "retained claim counts as supported. keys: claim_id, paragraph "
+        "(integer >= 1), disposition qualified|removed, note (1+ chars)",
     ),
 )
 
@@ -3115,27 +3147,6 @@ def _note_instructions(kind):
     return lines
 
 
-def _claim_support_skeleton(ws, state, ledger):
-    """One entry per retained `include_in_report` claim (item 4)."""
-    mapping, _unbound = paragraph_mapping(ws, state, ledger, ws.report_text())
-    entries = []
-    for claim in ledger.get("claims", []):
-        if claim.get("include_in_report") is not True:
-            continue
-        claim_id = claim.get("claim_id", "")
-        entries.append(
-            {
-                "claim_id": claim_id,
-                # An unbound claim gets `null`, never a guessed paragraph: a
-                # prefilled number is a binding the reviewer never made.
-                "paragraph": mapping.get(claim_id),
-                "disposition": "",
-                "note": "",
-            }
-        )
-    return entries
-
-
 def _note_skeleton(ws, state, kind, ledger):
     lang = state.get("lang", "en")
     if kind == "rewild":
@@ -3162,14 +3173,20 @@ def _note_skeleton(ws, state, kind, ledger):
         "report_lang": lang,
         "reviewed_at": date.today().isoformat(),
         "reviewer_mode": "fresh_eyes",
-        "scores": {},
-        "checks": {},
+        # The skeleton is the whole form: every score and check key is here, so
+        # `review finish` can only ever name keys the reviewer left unfilled.
+        "scores": {
+            name: {"score": None, "rationale": ""} for name in CONTENT_SCORE_KEYS
+        },
+        "checks": {name: False for name in CONTENT_CHECK_KEYS},
         "section_reviews": [],
         "visual_assets": [],
         "findings": [],
         "evidence_limitations": [],
         "completion_note": "",
-        "claim_support": _claim_support_skeleton(ws, state, ledger),
+        # Empty by default: a retained claim needs an entry only when the
+        # reviewer qualifies or removes it.
+        "claim_support": [],
     }
 
 
@@ -3331,6 +3348,21 @@ def _auto_remedies(ws, state, ledger, findings, lines):
     if restore and ws.latest_snapshot() is not None:
         ws.report.write_text(_snapshot_text(ws, state), encoding="utf-8")
         lines.append("auto-remedy: report.md restored from the latest snapshot.")
+    # The Remove remedy of `binding/link-not-in-ledger`: the anchor text stays,
+    # the URL goes, so a link to an unfetched source never withholds delivery.
+    urls = []
+    for item in class_f_findings(findings):
+        if item.family != "binding/link-not-in-ledger":
+            continue
+        match = _URL_IN_MESSAGE.search(item.message)
+        if match and match.group(0) not in urls:
+            urls.append(match.group(0))
+    if urls:
+        text = ws.report_text()
+        for url in urls:
+            text = re.sub(r"\[([^\]]*)\]\(\s*" + re.escape(url) + r"\s*\)", r"\1", text)
+        ws.report.write_text(text, encoding="utf-8")
+        lines.append(f"auto-remedy: link(s) removed from report.md: {', '.join(urls)}.")
     claim_ids = []
     for item in class_f_findings(findings):
         for value in item.ids:
@@ -3850,6 +3882,11 @@ def _next_command(ws, state, ledger):
         return "`alx claim add claims/batch.json`"
     if not state.get("last_check"):
         return f"`{remedy('check-fix')}`"
+    _elapsed, remaining = _minutes(state)
+    if remaining <= DEGRADE_MINUTES:
+        # Past the degrade line the snapshot and both reviews are optional
+        # (R28); the only command that still ends in a delivery is this one.
+        return f"`{remedy('issue-deliver')}`"
     if ws.latest_snapshot() is None:
         return "`alx snapshot`"
     if not all(
@@ -3946,8 +3983,8 @@ def build_parser():
     claim_drop.add_argument("--reason")
     claim_drop.set_defaults(handler=cmd_claim_drop)
     claim_bind = claim_sub.add_parser("bind")
-    claim_bind.add_argument("claim_id")
-    claim_bind.add_argument("--paragraph", type=int, required=True)
+    claim_bind.add_argument("claims", nargs="+", metavar="C<n>[:<paragraph>]")
+    claim_bind.add_argument("--paragraph", type=int)
     claim_bind.set_defaults(handler=cmd_claim_bind)
 
     ledger = subparsers.add_parser("ledger", help="ledger edits")
@@ -4000,13 +4037,19 @@ def missing_file_arguments(args):
     command. `file_args` on each subparser names the flags that take a path.
     """
     missing = []
+    cwd = Path.cwd()
     for flag, dest in getattr(args, "file_args", ()):
         value = getattr(args, dest, None)
         # K5: a FILE argument may arrive as an unexpanded glob (spec D14
         # prints one); it is a path when it names at least one file.
         for path in expand_file_globs(value if isinstance(value, list) else [value]):
             if path and not Path(path).is_file():
-                missing.append(flag)
+                # Name the path that was actually looked up: the model passing
+                # a relative path from the wrong directory cannot see it.
+                missing.append(
+                    f"{flag}: no file at {Path(path).resolve()} (cwd {cwd}); "
+                    "paths are relative to the current directory or use --dir"
+                )
     return missing
 
 
@@ -4018,12 +4061,8 @@ def main(argv=None):
     if code is not None:
         return code
     missing = missing_file_arguments(args)
-    for flag in missing:
-        print(
-            f"{flag} expects a file path; write the text to a file and pass "
-            "the path (D10)",
-            file=sys.stderr,
-        )
+    for message in missing:
+        print(message, file=sys.stderr)
     if missing:
         return 2
     try:

@@ -82,7 +82,7 @@ class GateErrorsDocTests(unittest.TestCase):
         # R29: every deleted family keeps its name only under "Removed families".
         for deleted in (
             "content/claim-support", "content/claim-binding",
-            "review/content-missing", "rewild/humanization",
+            "rewild/humanization",
         ):
             with self.subTest(deleted=deleted):
                 self.assertNotIn(f"### `{deleted}`", text)

@@ -319,10 +319,16 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Reviews (`check` f / `content_gate`, `rewild_gate`, `alx`)
 
 ### `review/rewild` — W
-- **rule:** the blind-review note exists but is incomplete, or no longer matches the reviewed report/source/language/profile. R29: a missing review is not a finding.
+- **rule:** the blind-review note is missing, incomplete, or no longer matches the reviewed report/source/language/profile.
 - **fix:** `alx review start rewild --iter`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** note does not match the reviewed report: report_sha256.
+
+### `review/content-missing` — W
+- **rule:** no finished content review.
+- **fix:** `alx review start content --iter`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `reviews/content.json` absent.
 
 ### `review/content-stale` — W
 - **rule:** report or ledger changed beyond the §6.8 mechanical-delta allowlist since the content review.

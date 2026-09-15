@@ -461,9 +461,8 @@ def _map_fetch_exception(url, exc):
     return _empty_fetch(url, status="unreachable", reason_class=klass, reason=message)
 
 
-def fetch_document(url, *, cache_dir=None, refresh=False, timeout=DEFAULT_TIMEOUT_SECONDS, deadline=None):
+def fetch_document(url, *, cache_dir=None, refresh=False, timeout=DEFAULT_TIMEOUT_SECONDS):
     """Fetch one URL through the production transport and decode it."""
-    del deadline
     raw_url = str(url or "")
     if raw_url.casefold().startswith("http://"):
         return _empty_fetch(
@@ -1116,7 +1115,7 @@ def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
                             f"{source_id} context changed since research; re-read. "
                             f"Window: {window}{marker_note}"
                         ),
-                        fix=f"alx fetch --id {source_id} --refresh",
+                        fix=f"alx fetch --id {source_id}",
                         remove=f"alx claim drop {claim_id} --apply",
                     )
                 )
@@ -1393,7 +1392,6 @@ def check_source_fidelity(
     online=False,
     timeout=DEFAULT_TIMEOUT_SECONDS,
     cache_dir=None,
-    deadline=None,
 ):
     """Re-read a weighted sample of sources and return a machine-readable result."""
     samples = select_samples(ledger, sample_size)
@@ -1431,7 +1429,6 @@ def check_source_fidelity(
                 cache_dir=cache_dir,
                 refresh=True,
                 timeout=timeout,
-                deadline=deadline,
             )
     if not online:
         transport = None
@@ -1457,7 +1454,7 @@ def check_source_fidelity(
                             f"{source_id}: cache missing (need "
                             f"sources/{source_id}.txt)"
                         ),
-                        fix=f"alx fetch --id {source_id} --refresh",
+                        fix=f"alx fetch --id {source_id}",
                         remove=f"alx claim drop {sample['claim_id']} --apply",
                     )
                 )
@@ -1736,7 +1733,6 @@ def issue_source_fidelity_receipt(
     fetcher=None,
     policy=POLICY_V2,
     cache_dir=None,
-    deadline=None,
     force=False,
     result=None,
 ):
@@ -1754,7 +1750,6 @@ def issue_source_fidelity_receipt(
             online=True,
             timeout=timeout,
             cache_dir=cache_dir,
-            deadline=deadline,
         )
     checks = result.get("checks") if isinstance(result, dict) else []
     mismatch = any(

@@ -56,12 +56,6 @@
         "pattern": "^P[0-9]+$"
       }
     },
-    "person_claim_role": {
-      "type": "string"
-    },
-    "person_claim_assessment": {
-      "type": "object"
-    },
     "supports": {
       "type": "array",
       "items": {
@@ -91,9 +85,6 @@
     },
     "evidence_of_absence": {
       "type": "object"
-    },
-    "human_harm_review": {
-      "type": ["object", "null"]
     },
     "reasoning": {
       "type": "string"

@@ -245,51 +245,6 @@ def _checker_result(stdout):
     raise ValueError("checker did not emit its JSON result")
 
 
-def _load_style_waivers(path):
-    """Return (waivers, errors).
-
-    A malformed waiver used to be skipped in silence, so the agent saw the
-    unresolved style warning instead of the reason its waiver was ignored.
-    Every rejected entry now names its index and the rule it broke, and the
-    gate fails closed on the diagnostics rather than proceeding with a
-    partially loaded waiver set.
-    """
-    if path is None:
-        return {}, []
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    entries = data.get("style_waivers", []) if isinstance(data, dict) else None
-    if not isinstance(entries, list):
-        return {}, [
-            "Style-waiver file must be a JSON object with a 'style_waivers' "
-            "array."
-        ]
-    waivers = {}
-    errors = []
-    for index, entry in enumerate(entries, start=1):
-        if not isinstance(entry, dict):
-            errors.append(f"Style waiver {index} must be a JSON object.")
-            continue
-        section = str(entry.get("section", "")).strip()
-        message = str(entry.get("message", "")).strip()
-        reason = str(entry.get("reason", "")).strip()
-        if not section:
-            errors.append(
-                f"Style waiver {index} needs the checker's exact 'section'."
-            )
-        if not message:
-            errors.append(
-                f"Style waiver {index} needs the checker's exact 'message'."
-            )
-        if len(reason) < 10:
-            errors.append(
-                f"Style waiver {index} has a 'reason' of {len(reason)} "
-                "characters after trimming; the minimum is 10."
-            )
-        if section and message and len(reason) >= 10:
-            waivers[(section, message)] = reason
-    return waivers, errors
-
-
 # The split-remnant heuristics suppress the same class of finding as a
 # fidelity note, so they are rationed the same way. A report producing more
 # structural remnants than this was restructured, not copy-edited, and its
@@ -1605,7 +1560,6 @@ def run_gate(
     report_lang,
     review_note_path,
     receipt_path,
-    waiver_path=None,
     force=False,
     timeout=CHECKER_TIMEOUT_S,
     snapshot_sha256=None,
@@ -1620,7 +1574,6 @@ def run_gate(
             "final report": report_path,
             "pre-Rewild source": source_path,
             "blind-review note": review_note_path,
-            "style waivers": waiver_path,
         },
         {"Rewild receipt": receipt_path},
     )
@@ -1722,28 +1675,14 @@ def run_gate(
     if errors:
         return errors
 
-    try:
-        waivers, waiver_errors = _load_style_waivers(waiver_path)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return [f"Style-waiver file could not be read: {exc}"]
-    if waiver_errors:
-        return waiver_errors
     style_warnings = [
         warning for warning in warnings if warning not in hard_warnings
     ]
     # Style is the one tier the gate does not fail on. A retained style
     # warning is a judgment about phrasing, not evidence, so it is reported
     # and the receipt still issues; a waiver only records the reason.
-    waived_warnings = []
     findings = soft
     for item in style_warnings:
-        key = (
-            str(item.get("section", "")),
-            str(item.get("message", "")),
-        )
-        if key in waivers:
-            waived_warnings.append(item)
-            continue
         findings.append(
             warning(
                 "Unresolved style warning: "
@@ -1769,19 +1708,6 @@ def run_gate(
         "review_note_path": str(review_note_path),
         "review_note_sha256": file_sha256(review_note_path),
         "review_status": review_note["status"],
-        "style_waivers": [
-            {
-                "section": item.get("section"),
-                "message": item.get("message"),
-                "reason": waivers[
-                    (
-                        str(item.get("section", "")),
-                        str(item.get("message", "")),
-                    )
-                ],
-            }
-            for item in waived_warnings
-        ],
         "heuristic_exemptions": heuristic_exemptions,
     }
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1822,7 +1748,6 @@ def build_parser():
         "--review-note",
         help="blind-review findings and dispositions",
     )
-    parser.add_argument("--style-waivers", help="JSON reasons for retained warnings")
     parser.add_argument("--receipt", help="gate receipt JSON to write")
     parser.add_argument(
         "--check",
@@ -1864,7 +1789,6 @@ def main(argv=None):
         report_lang=args.lang,
         review_note_path=args.review_note,
         receipt_path=args.receipt,
-        waiver_path=args.style_waivers,
         force=args.force,
     )
     return emit_findings(

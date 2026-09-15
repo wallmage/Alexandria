@@ -124,13 +124,9 @@ class RelocationTests(RuntimeCase):
         command, record = self.recorder()
         os.environ["ALEXANDRIA_REEXEC"] = "1"
         with mock.patch.object(alx, "runtime_command", return_value=command):
-            code, out, err = self.run_main("--dir", str(self.root), "status")
+            code, _out, err = self.run_main("--dir", str(self.root), "status")
         self.assertFalse(record.exists())
         self.assertEqual(1, code)
-        self.assertEqual(
-            f"runtime: {sys.executable} (host — relocation failed)",
-            out.splitlines()[0],
-        )
         self.assertIn("No Alexandria workspace", err)
 
     def test_missing_runtime_refuses_every_subcommand(self):
@@ -140,18 +136,6 @@ class RelocationTests(RuntimeCase):
         self.assertIn("RUNTIME MISSING — install it: sh ", err)
         self.assertIn(f"{self.skill}/scripts/install.sh", err)
         self.assertIn("Never pip-install into a host interpreter.", err)
-
-
-class StatusLineTests(RuntimeCase):
-    def test_status_reports_the_managed_interpreter_first(self):
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            code = alx.main(["--dir", str(self.root), "status"])
-        self.assertEqual(1, code)
-        self.assertEqual(
-            f"runtime: {sys.executable} (managed)", out.getvalue().splitlines()[0]
-        )
-        self.assertIn("No Alexandria workspace", err.getvalue())
 
 
 if __name__ == "__main__":

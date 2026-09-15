@@ -216,24 +216,9 @@ class RewildReceiptTests(unittest.TestCase):
             source = work / "pre-rewild.md"
             review = work / "blind-review.md"
             receipt = work / "rewild-receipt.json"
-            waivers = work / "waivers.json"
             report.write_text(text, encoding="utf-8")
             source.write_text(text, encoding="utf-8")
             write_review(review, report_lang="zh-HK")
-            waivers.write_text(
-                json.dumps(
-                    {
-                        "style_waivers": [
-                            {
-                                "section": "Hong Kong flavor (informational)",
-                                "message": "Cantonese syntax in 書面語",
-                                "reason": "Attempting to waive a hard register defect.",
-                            }
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
 
             findings = run_gate(
                 report,
@@ -241,7 +226,6 @@ class RewildReceiptTests(unittest.TestCase):
                 report_lang="zh-HK",
                 review_note_path=review,
                 receipt_path=receipt,
-                waiver_path=waivers,
             )
             self.assertIn("Hard Rewild warning", " ".join(findings))
             self.assertTrue(all(is_warning(item) for item in findings), findings)
@@ -601,7 +585,6 @@ class RewildReceiptTests(unittest.TestCase):
                         "review_note_path": str(review.resolve()),
                         "review_note_sha256": file_sha256(review),
                         "review_status": "completed",
-                        "style_waivers": [],
                     }
                 ),
                 encoding="utf-8",
@@ -834,7 +817,6 @@ class RewildReceiptTests(unittest.TestCase):
                 "review_note_path": str(review.resolve()),
                 "review_note_sha256": file_sha256(review),
                 "review_status": "completed",
-                "style_waivers": [],
             }
 
             self.assertEqual(
@@ -863,7 +845,6 @@ class ReceiptAuditTrailTests(unittest.TestCase):
             "report_lang": "en",
             "checker_path": "checker.py",
             "review_status": "completed",
-            "style_waivers": [],
             "source_path": "source.md",
             "review_note_path": "review.json",
         }

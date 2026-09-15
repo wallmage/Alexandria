@@ -4,7 +4,6 @@ import json
 import ssl
 import subprocess
 import tempfile
-import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
@@ -1117,24 +1116,6 @@ class ResilienceFetchTests(unittest.TestCase):
         ):
             source_fidelity.fetch_document("https://example.com/")
         self.assertEqual([20], recorded)
-
-    def test_deadline_expires_before_fetch(self):
-        with mock_production_transport(
-            {
-                "example.org": (
-                    200,
-                    {"content-type": "text/html"},
-                    b"<html><body><p>still fetched</p></body></html>",
-                )
-            },
-            module=source_fidelity,
-        ):
-            result = source_fidelity.fetch_document(
-                "https://example.org/page",
-                deadline=time.time() - 3600,
-            )
-        self.assertEqual("ok", result.status)
-        self.assertIn("still fetched", result.text)
 
     def test_plaintext_http_reason_class_exists(self):
         result = source_fidelity.fetch_document("http://example.org/page")

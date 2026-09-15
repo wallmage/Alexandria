@@ -4437,8 +4437,6 @@ def cmd_render(args):
 
 
 def cmd_status(args):
-    managed = "managed" if runtime_packages_present() else "host — relocation failed"
-    print(f"runtime: {sys.executable} ({managed})")
     ws, state, ledger = _open(args)
     last = state.get("last_check") or {}
     reviews = state.get("reviews", {})

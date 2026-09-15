@@ -464,7 +464,6 @@ class LivingPersonRulesAreGoneTests(unittest.TestCase):
         return dict(
             named_claim(),
             person_ids=["P3"],
-            person_claim_role="subject_assessment",
         )
 
     def test_a_living_person_with_a_bogus_role_raises_no_person_finding(self):

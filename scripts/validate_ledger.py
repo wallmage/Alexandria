@@ -2393,10 +2393,10 @@ def _reference_findings(data, cache_dir=None):
                     "ledger/https",
                     f"{source_id}: source.url must be https "
                     f"(threshold: https; actual: {url}). "
-                    f"Fix: `alx fetch --id {source_id} --refresh`.",
+                    f"Fix: `alx fetch --id {source_id}`.",
                     severity="warn",
                     ids=[source_id],
-                    fix=f"alx fetch --id {source_id} --refresh",
+                    fix=f"alx fetch --id {source_id}",
                 )
             )
 

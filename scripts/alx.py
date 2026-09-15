@@ -3682,6 +3682,9 @@ def _auto_remedies(ws, state, ledger, findings, lines):
             # The producer of a lost quotation is `rewild_gate`, which names the
             # family `fidelity/quotation-lost`; both must auto-restore.
             "fidelity/quotation-lost",
+            # R30: a figure the humanize pass invented is the same class of
+            # damage as a lost quotation; the snapshot is the only true text.
+            "fidelity/rewild",
         }
     ]
     if restore and ws.latest_snapshot() is not None:

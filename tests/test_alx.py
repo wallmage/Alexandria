@@ -908,6 +908,25 @@ class CheckTests(AlxTestCase):
         self.assertEqual(1, code)
         self.assertIn("elsewhere.example", out)
 
+    def test_a_figure_invented_after_the_snapshot_is_restored_at_issue(self):
+        """R30: `issue` restores the snapshot on fidelity/rewild, never ships it."""
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertIn("1,204", report)
+        code, out = self.run_in("snapshot")
+        self.assertEqual(0, code, out)
+        (self.dir / "report.md").write_text(
+            report.replace("1,204", "1,304"), encoding="utf-8"
+        )
+        code, out = self.run_in("check")
+        self.assertEqual(1, code, out)
+        self.assertIn("fidelity/rewild", out)
+        code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertIn("restored from the latest snapshot", out)
+        self.assertIn("1,204", (self.dir / "report.md").read_text(encoding="utf-8"))
+
     def test_control_characters_and_quotation_loss_after_snapshot(self):
         self.bootstrap()
         self.run_in("check", "--fix")

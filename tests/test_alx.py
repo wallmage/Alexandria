@@ -4751,3 +4751,92 @@ class LedgerMergeMissingClaimTests(AlxTestCase):
         self.assertEqual(1, code, out)
         self.assertIn("is not valid JSON: Extra data at line 1 column 8", out)
         self.assertNotIn("Traceback", out)
+TRADITIONAL_PAGE = """<html><head><title>中山艦</title></head><body>
+<p>中山艦事件發生於一九二六年三月，其真實性仍有爭議。</p>
+</body></html>"""
+
+
+class FindScriptVariantTests(AlxTestCase):
+    def fetch_traditional(self):
+        self.init()
+        code, out = self.fetch("https://example.org/zhongshan", page=TRADITIONAL_PAGE)
+        self.assertEqual(0, code, out)
+
+    def test_a_simplified_keyword_finds_the_traditional_source(self):
+        self.fetch_traditional()
+        code, out = self.run_in("find", "all", "中山舰")
+        self.assertEqual(0, code, out)
+        line = next(
+            item for item in out.splitlines() if "extract_or_location:" in item
+        )
+        self.assertIn("中山艦", line)
+        self.assertNotIn("no source contains 中山舰", out)
+
+    def test_the_traditional_keyword_still_hits(self):
+        self.fetch_traditional()
+        code, out = self.run_in("find", "all", "中山艦")
+        self.assertEqual(0, code, out)
+        self.assertIn("中山艦", out)
+        self.assertNotIn("no source contains", out)
+
+    def test_a_keyword_with_no_variant_behaves_as_before(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        code, out = self.run_in("find", "S1", "1,204")
+        self.assertEqual(0, code, out)
+        self.assertIn("S1 #1 extract_or_location: ", out)
+        code, out = self.run_in("find", "S1", "nowhere-in-any-source")
+        self.assertEqual(0, code, out)
+        self.assertIn("no source contains nowhere-in-any-source", out)
+
+    def test_variants_are_ordered_and_deduplicated(self):
+        self.assertEqual(["1,204"], alx._script_variants("1,204"))
+        self.assertEqual(["中山舰", "中山艦"], alx._script_variants("中山舰"))
+
+
+class MarkerLinkDedupeTests(AlxTestCase):
+    def test_two_claims_on_one_source_render_one_link(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        # C2 now shares S1 with C1, so `[C1, C2]` must not print S1 twice.
+        for claim in ledger["claims"]:
+            if claim["claim_id"] == "C2":
+                claim["source_ids"] = ["S1"]
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        first = ledger["sources"][0]["url"]
+        text = (self.dir / "report.md").read_text(encoding="utf-8")
+        text = text.replace(
+            f"[recorded in the study]({first})",
+            "recorded in the study [C1, C2] [C22]",
+        )
+        converted = alx._convert_claim_markers(
+            alx.Workspace(self.dir), self.ledger(), text
+        )
+        self.assertIn(f"[S1]({first})", converted)
+        self.assertEqual(1, converted.count(f"[S1]({first})"))
+        self.assertIn("[C22]", converted)
+
+
+class InitLengthTargetTests(AlxTestCase):
+    def test_init_echoes_the_target_length_and_writes_it_into_the_report(self):
+        subject = self.root / "subject.txt"
+        subject.write_text("账本研究\n", encoding="utf-8")
+        code, out = self.run_alx(
+            "init", self.dir, "--lang", "zh-CN", "--subject", subject
+        )
+        self.assertEqual(0, code, out)
+        self.assertIn("target length: 5000–10000", out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        first_quote = next(
+            line for line in report.splitlines() if line.startswith(">")
+        )
+        self.assertIn("5000", first_quote)
+
+    def test_the_english_target_reaches_both_places(self):
+        code, out = self.init()
+        self.assertEqual(0, code, out)
+        self.assertIn("target length: 7500–15000 words", out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertIn("Target 7500–15000 words.", report)

@@ -7,6 +7,7 @@ appends one worklog line and prints the elapsed/remaining footer last.
 """
 
 import argparse
+import functools
 import glob
 import hashlib
 import importlib.util
@@ -1232,11 +1233,18 @@ def record_probe_contexts(ws, claim):
 
 def _skeleton_report(subject, lang, report_day):
     date_line = report_contract.localized_date(lang, report_day)
+    floor, ceiling, unit = report_contract.report_length_policy(lang)
     if lang == "en":
-        standfirst = "Standfirst placeholder: one sentence on what this report decides."
+        standfirst = (
+            "Standfirst placeholder: one sentence on what this report decides. "
+            f"Target {floor}–{ceiling} {unit}."
+        )
         sources = "## Sources"
     else:
-        standfirst = "导语占位：一句话说明本报告要回答的问题。"
+        standfirst = (
+            "导语占位：一句话说明本报告要回答的问题。"
+            f"目标 {floor}–{ceiling} 字（正文字数）。"
+        )
         sources = "## 资料来源"
     return f"# {subject}\n\n> {standfirst}\n> {date_line}\n\n{sources}\n"
 
@@ -1345,6 +1353,9 @@ def cmd_init(args):
     }
     ws.save_state(state)
     ws.worklog.touch()
+    length_floor, length_ceiling, length_unit = report_contract.report_length_policy(
+        args.lang
+    )
     _emit(
         ws,
         state,
@@ -1361,6 +1372,8 @@ def cmd_init(args):
             ),
             f"language: {args.lang} — change with "
             f"`alx init … --lang <{'|'.join(LANGUAGES)}>`",
+            f"target length: {length_floor}–{length_ceiling} {length_unit} "
+            "(alx check prints the count)",
             "Next: `alx fetch <url> ...` for 8-15 reachable sources.",
         ],
     )
@@ -1610,6 +1623,37 @@ def _find_sources(ledger, value):
     return [part.strip() for part in str(value).split(",") if part.strip()]
 
 
+@functools.lru_cache(maxsize=1)
+def _script_character_maps():
+    """Single-character Simplified→Traditional and Traditional→Simplified maps."""
+    s2t = {}
+    t2s = {}
+    for line in validate_report.S2T_CHARACTER_MAP.read_text(
+        encoding="utf-8"
+    ).splitlines():
+        if not line or line.startswith("#"):
+            continue
+        source, targets = line.split("\t", 1)
+        targets = targets.split()
+        if not targets:
+            continue
+        s2t[source] = targets[0]
+        for target in targets:
+            t2s.setdefault(target, source)
+    return s2t, t2s
+
+
+def _script_variants(keyword):
+    """`find` keyword plus its Traditional and Simplified transliterations."""
+    s2t, t2s = _script_character_maps()
+    variants = [
+        keyword,
+        "".join(s2t.get(char, char) for char in keyword),
+        "".join(t2s.get(char, char) for char in keyword),
+    ]
+    return list(dict.fromkeys(variants))
+
+
 def cmd_find(args):
     ws, state, ledger = _open(args)
     source_ids = _find_sources(ledger, args.sources)
@@ -1623,15 +1667,17 @@ def cmd_find(args):
         caches[source_id] = entry[0]
     for keyword in args.keywords:
         hits = 0
+        variants = _script_variants(keyword)
         for source_id, text in caches.items():
-            for index, match in enumerate(
-                re.finditer(re.escape(keyword), text, re.IGNORECASE), start=1
-            ):
+            # A Simplified keyword has to hit a Traditional source, and back.
+            starts = {}
+            for variant in variants:
+                for match in re.finditer(re.escape(variant), text, re.IGNORECASE):
+                    starts.setdefault(match.start(), len(variant))
+            for index, start in enumerate(sorted(starts), start=1):
                 if index > args.max:
                     break
-                window = sentence_window(
-                    text, match.start(), len(keyword), args.context
-                )
+                window = sentence_window(text, start, starts[start], args.context)
                 hits += 1
                 # One line per hit: the paste line is the window, so printing
                 # the prose window as well doubled `find` output for nothing.
@@ -2405,7 +2451,12 @@ def _convert_claim_markers(ws, ledger, text):
         if not any(claim_id in links for claim_id in claim_ids):
             return match.group(0)
         # An id with no ledger claim stays a visible `[C22]` for the author.
-        return " ".join(links.get(claim_id, f"[{claim_id}]") for claim_id in claim_ids)
+        rendered = []
+        for claim_id in claim_ids:
+            link = links.get(claim_id, f"[{claim_id}]")
+            if link not in rendered:
+                rendered.append(link)
+        return " ".join(rendered)
 
     converted = _CLAIM_MARKER_RE.sub(replace, text)
     if converted != text:

@@ -556,6 +556,7 @@ def binding_findings(text, ledger):
                     _finding(
                         "binding/claim-paragraph",
                         f"Claim {claim_id} report_paragraph {bound} is out of range.",
+                        severity="warn",
                         ids=[claim_id],
                         fix=f"run `alx claim bind {claim_id} --paragraph N`",
                         remove=f"alx claim drop {claim_id} --apply",
@@ -574,6 +575,7 @@ def binding_findings(text, ledger):
                 _finding(
                     "binding/claim-paragraph",
                     f"ambiguous: run `alx claim bind {claim_id} --paragraph N`; candidates: {listed}",
+                    severity="warn",
                     ids=[claim_id],
                     fix=f"run `alx claim bind {claim_id} --paragraph N`",
                     remove=f"alx claim drop {claim_id} --apply",
@@ -585,8 +587,8 @@ def binding_findings(text, ledger):
             _finding(
                 "binding/sources-section",
                 "Sources H2 must be last and equal the cited-source list.",
+                severity="warn",
                 fix="run `alx check --fix`",
-                klass="A",
             )
         )
     else:
@@ -595,8 +597,8 @@ def binding_findings(text, ledger):
                 _finding(
                     "binding/sources-section",
                     "Sources must be the last H2 section.",
+                    severity="warn",
                     fix="run `alx check --fix`",
-                    klass="A",
                 )
             )
         cited = {normalize_url(url) for url in extract_markdown_urls(body)}
@@ -606,8 +608,8 @@ def binding_findings(text, ledger):
                 _finding(
                     "binding/sources-section",
                     "Sources section must equal the cited-source list.",
+                    severity="warn",
                     fix="run `alx check --fix`",
-                    klass="A",
                 )
             )
     return findings
@@ -638,8 +640,8 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
             _finding(
                 "integrity/structure",
                 "Report needs one H1 title.",
+                severity="warn",
                 fix="add an H1 title",
-                klass="A",
             )
         )
     if not blockquote_lines:
@@ -647,8 +649,8 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
             _finding(
                 "integrity/structure",
                 "Report needs a standfirst blockquote immediately under the H1.",
+                severity="warn",
                 fix="add the standfirst blockquote under the H1",
-                klass="A",
             )
         )
     expected_date = None
@@ -664,19 +666,13 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
     except ValueError:
         expected_date = None
     if expected_date and expected_date not in blockquote_lines:
-        # `check --fix` repairs date-line whitespace only; anything else is a
-        # formatting defect it cannot repair, so spec §6.10 makes it Class A.
-        folded = re.sub(r"\s+", "", expected_date)
-        repairable = any(
-            re.sub(r"\s+", "", line) == folded for line in blockquote_lines
-        )
         findings.append(
             _finding(
                 "integrity/date-line",
                 "Date line must use the strict locale format and sit in the "
                 f"immediate blockquote under the H1: {expected_date}.",
+                severity="warn",
                 fix="put the locale date on the immediate blockquote under the H1",
-                klass="F" if repairable else "A",
             )
         )
     if lang:
@@ -693,20 +689,32 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
                         "integrity/length",
                         f"Report has {actual} {label}; threshold is {minimum}–{maximum} {label}.",
                         fix="expand or cut the report body to the length floor/ceiling",
-                        severity="warn" if actual < minimum else "hard",
+                        severity="warn",
                     )
                 )
     if snapshot_text:
+        # R28 splits this family: a span still in the report but rewritten is
+        # evidence tampering (HARD); a span the edit cut out is not (WARN).
+        report_spans = _quoted_spans(text)
         missing = [
             span for span in _quoted_spans(snapshot_text) if span not in text
         ]
         for span in missing[:5]:
+            altered = any(
+                SequenceMatcher(None, span, candidate).ratio() >= 0.6
+                for candidate in report_spans
+            )
             findings.append(
                 _finding(
                     "integrity/quotation-lost",
-                    f"Quoted span missing from the report: {span}",
+                    (
+                        f"Quoted span altered in the report: {span}"
+                        if altered
+                        else f"Quoted span removed from the report: {span}"
+                    ),
+                    severity="hard" if altered else "warn",
                     fix="alx snapshot --restore",
-                    remove="alx snapshot --restore",
+                    remove="alx snapshot --restore" if altered else "",
                 )
             )
     return findings
@@ -787,7 +795,11 @@ def validate_markdown(
 
 
 def validate_report_against_ledger(text, ledger):
-    """Check that report links and claim locations exist in the ledger."""
+    """Check that report links and claim locations exist in the ledger.
+
+    R28: only the link-membership check is HARD (`binding/link-not-in-ledger`);
+    excerpt placement, nearby citation and Sources listing are WARN.
+    """
     if not isinstance(ledger, dict):
         return ["Evidence ledger root must be an object."]
     sources = ledger.get("sources", [])
@@ -856,7 +868,9 @@ def validate_report_against_ledger(text, ledger):
         claim_id = claim.get("claim_id", "<unknown>")
         excerpts = claim.get("report_excerpts", [])
         if not isinstance(excerpts, list) or not excerpts:
-            errors.append(f"Report location is missing for claim {claim_id}.")
+            errors.append(
+                warning(f"Report location is missing for claim {claim_id}.")
+            )
             continue
         for excerpt in excerpts:
             normalized = re.sub(r"\s+", " ", str(excerpt)).strip()
@@ -870,7 +884,10 @@ def validate_report_against_ledger(text, ledger):
             ]
             if not matching_paragraphs:
                 errors.append(
-                    f"Claim {claim_id} cannot be located in the report: {normalized}"
+                    warning(
+                        f"Claim {claim_id} cannot be located in the report: "
+                        f"{normalized}"
+                    )
                 )
                 continue
             expected_source_ids = foundation_source_ids(claim_id)
@@ -884,11 +901,16 @@ def validate_report_against_ledger(text, ledger):
                 for paragraph in matching_paragraphs
             ):
                 errors.append(
-                    f"Claim {claim_id} has no nearby citation to its ledger source."
+                    warning(
+                        f"Claim {claim_id} has no nearby citation to its ledger source."
+                    )
                 )
             for url in sorted(expected_urls - source_section_urls):
                 errors.append(
-                    f"Claim {claim_id} source is missing from the final Sources section: {url}"
+                    warning(
+                        f"Claim {claim_id} source is missing from the final "
+                        f"Sources section: {url}"
+                    )
                 )
     return errors
 

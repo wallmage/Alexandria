@@ -18,7 +18,7 @@ try:
         publish_temp_file,
         validated_artifact_path,
     )
-    from .gate_severity import emit_findings, hard_errors
+    from .gate_severity import WARNING_PREFIX, emit_findings, hard_errors, warning
     from .html_policy import (
         SAFE_ATTRIBUTES,
         SAFE_TAGS,
@@ -47,7 +47,7 @@ except ImportError:
         publish_temp_file,
         validated_artifact_path,
     )
-    from gate_severity import emit_findings, hard_errors
+    from gate_severity import WARNING_PREFIX, emit_findings, hard_errors, warning
     from html_policy import (
         SAFE_ATTRIBUTES,
         SAFE_TAGS,
@@ -442,7 +442,9 @@ def _write_receipt(path, payload, *, force=False):
         raise
 
 
-def _finding(family, message, *, ids=None, severity="hard", fix="", remove=""):
+def _finding(family, message, *, ids=None, severity="warn", fix="", remove=""):
+    # R28: every family this module emits (content/*) is WARN, so "warn" is the
+    # default and no caller here overrides it.
     klass = "F" if severity == "hard" else "A"
     return Finding(
         family=family,
@@ -519,7 +521,9 @@ def run_check(
     claim_support = _claim_support_map(review)
     if isinstance(ledger, dict):
         for error in validate_report_against_ledger(report_text, ledger):
-            findings.append(_finding("content/check", error))
+            findings.append(
+                _finding("content/check", error.removeprefix(WARNING_PREFIX))
+            )
         if include_ledger_checks:
             for error in validate_references(ledger):
                 findings.append(_finding("content/check", error))
@@ -758,7 +762,9 @@ def run_content_gate(
     if not isinstance(ledger, dict) or not isinstance(review, dict):
         return errors
     errors.extend(validate_references(ledger))
-    errors.extend(_section_review_errors(report_text, review))
+    errors.extend(
+        warning(error) for error in _section_review_errors(report_text, review)
+    )
     errors.extend(validate_report_against_ledger(report_text, ledger))
     ledger_language = (
         ledger.get("brief", {}).get("report_language")
@@ -767,7 +773,7 @@ def run_content_gate(
     )
     if review.get("report_lang") != ledger_language:
         errors.append(
-            "Content review language does not match the evidence ledger."
+            warning("Content review language does not match the evidence ledger.")
         )
 
     scores = review.get("scores", {})
@@ -779,14 +785,18 @@ def run_content_gate(
                 and result["score"] < 4
             ):
                 errors.append(
-                    f"Content review score {name} is {result['score']}; "
-                    "minimum passing score is 4."
+                    warning(
+                        f"Content review score {name} is {result['score']}; "
+                        "minimum passing score is 4."
+                    )
                 )
     checks = review.get("checks", {})
     if isinstance(checks, dict):
         for name, passed in checks.items():
             if passed is False:
-                errors.append(f"Content review check {name} did not pass.")
+                errors.append(
+                    warning(f"Content review check {name} did not pass.")
+                )
 
     report_hash = file_sha256(report_path)
     ledger_hash = file_sha256(ledger_path)
@@ -834,10 +844,15 @@ def run_content_gate(
             severity = finding.get("severity")
             disposition = finding.get("disposition")
             if severity == "critical" and disposition != "fixed":
-                errors.append(f"Critical finding {finding_id} must be fixed.")
+                errors.append(
+                    warning(f"Critical finding {finding_id} must be fixed.")
+                )
             if severity == "major" and disposition == "rejected":
                 errors.append(
-                    f"Major finding {finding_id} cannot be rejected at final review."
+                    warning(
+                        f"Major finding {finding_id} cannot be rejected at "
+                        "final review."
+                    )
                 )
             if severity == "major" and disposition == "accepted_limitation":
                 disclosure = _normalized(
@@ -845,7 +860,10 @@ def run_content_gate(
                 )
                 if len(disclosure) < 40 or disclosure not in report_normalized:
                     errors.append(
-                        f"{finding_id} disclosure cannot be located in the final report."
+                        warning(
+                            f"{finding_id} disclosure cannot be located in the "
+                            "final report."
+                        )
                     )
 
     if hard_errors(errors):

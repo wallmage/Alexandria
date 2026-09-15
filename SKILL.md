@@ -21,8 +21,10 @@ An Alexandria report must:
 3. Preserve a traceable path from consequential claims to sources.
 4. Prefer evidence quality and coverage over source quotas; meet the hard length range through depth, not filler.
 5. State uncertainty, conflicts, and evidence gaps plainly.
-6. Read like a thoughtful human editor wrote it.
-7. Survive structural, PDF, and visual checks before delivery.
+6. Test the central judgment against counterevidence, rival explanations, and decision-changing facts.
+7. Pass the bundled, language-specific Rewild gate so it reads like a thoughtful human editor wrote it.
+8. Pass the report-bound content quality gate before rendering.
+9. Survive structural, PDF, and visual checks before delivery.
 
 Never invent a fact, quotation, source, date, URL, or subject. Verify unfamiliar names and spellings before building the report around them; nothing ships that failed a fabrication check — `alx issue` drops it and says so. Cite only fetched URLs (the ledger's sources). Never edit `ledger.json`, `.alx/`, `receipts/`, `sources/` by hand; never pip-install; never run alx with a host or system interpreter.
 
@@ -110,7 +112,7 @@ Treat promotional claims, filings, preprints, peer-reviewed studies, independent
 - a stable claim ID;
 - a precise claim;
 - fact, reported claim, estimate, or analysis (`kind`);
-- source ID and faithful extract or source location (`source_evidence`);
+- source ID and faithful extract or source location (`source_evidence`); never reuse one source's wording as proof for another;
 - evidence type and independence (carried by the fetched source's classification);
 - confidence and limitations (`confidence`, `limitations`);
 - supporting or contradicting claim IDs (`supports`, `contradicts`);
@@ -135,7 +137,7 @@ No source minimum is mandatory. Use enough independent evidence to support the c
 
 ## 4. Build the argument
 
-Use the archetype as a coverage guide, not a rigid chapter template. Find the report's governing question and answer it early.
+Use the archetype as a coverage guide, not a rigid chapter template. Find the report's governing question and answer it early. Build the argument through observation, interpretation, judgment, implication, then action or takeaway; repair any missing link before drafting.
 
 A strong structure usually includes:
 
@@ -152,7 +154,7 @@ Outline around reader questions and causal relationships. Combine weak or repeti
 
 ## 5. Draft with citations
 
-The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md`: choose one main mode for the subject and record it in the ledger brief (`editorial_mode`).
+The primary agent writes and owns the final argument. Use `references/editorial-en.md` for English or `references/editorial-zh.md` for Chinese, plus `references/editorial-modes.md`: choose one main mode for the subject and record it in the ledger brief (`editorial_mode`). Read the visual-component section of `references/pdf-templates.md` before drafting; use metric, insight, and takeaway blocks only for content that deserves that visual weight. Apply the section contract and value-density edit in `references/content-quality.md`. The section contract is satisfied across a section's whole span and must not become a repeated paragraph rhythm; vary section shape across the report.
 
 Requirements:
 
@@ -160,6 +162,10 @@ Requirements:
 - Use concrete nouns and verbs.
 - Explain specialist terms on first use.
 - Keep paragraphs focused on one movement of thought.
+- Most paragraphs end on their last fact; reserve evaluative closers for section ends.
+- Observe the measurable caps in the editorial reference for the report language, and count them on the finished draft.
+- Place caveats at the front of the sentence so the paragraph lands on substance.
+- Carry named human specifics: practitioners, quotations, dated incidents, or worked failure cases, drawn only from the ledger.
 - Use tables only for real comparisons.
 - Place citations next to the claims they support.
 - Cite direct evidence, not a search result or an article that merely links to it.
@@ -196,10 +202,11 @@ Lock these elements during the edit:
 - the central conclusion unless new evidence requires a change.
 
 6 `snapshot`, then light humanizing per `references/rewild/rewild/SKILL.md` (zh-CN `rewild-zh`, zh-HK `rewild-hk`) without touching quoted text, then `check`: it compares the edit with the snapshot; style findings are warnings, an altered quotation or figure is HARD and `issue` restores the snapshot.
+If Rewild takes the report below the minimum length, deepen the research, analysis, counterevidence, or implications. Never restore filler or dilute the edit to hit the count.
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" snapshot`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" check`
 
-7 The two reviews. `review start rewild` and `review start content` each print a skeleton into `reviews/`; the skeleton lists every field; fill only those (the content review scores eight dimensions 1–5 with a rationale each and reviews every section's structure); never read scripts/ or references/*.schema.json; `review finish` names anything still missing and never blocks. A dimension below 4 or a substantive finding sends the report back for revision: revise, then `check --fix`, then finish the review again. When a separate reviewer is available, give it the draft and the checklist and ask for a patch or a list of changed passages, not an untraceable replacement; the primary agent reviews every material change against the evidence ledger.
+7 The two reviews. `review start rewild` and `review start content` each print a skeleton into `reviews/`; the skeleton lists every field; fill only those (the content review scores eight dimensions 1–5 with a rationale each and reviews every section's structure); never read scripts/ or references/*.schema.json; `review finish` names anything still missing and never blocks. A dimension below 4 or a substantive finding sends the report back for revision: revise, then `check --fix`, then finish the review again. When a separate reviewer is available, give it the draft and the checklist and ask for a patch or a list of changed passages, not an untraceable replacement; the primary agent reviews every material change against the evidence ledger. Include the three structural counts in Section 13 of `references/content-quality.md`: the closing-sentence census, the section-shape census, and the section-length spread. Record structural uniformity as a `structure` finding.
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" review start rewild`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" review finish rewild`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" review start content`
@@ -213,7 +220,9 @@ Lock these elements during the edit:
 
 `render` then reopens each PDF and prints its checks (text, links, fonts, page count and size, bookmarks, near-blank pages, header collisions) as `<template> PDF check:` lines; fix what they name and render again.
 
-Render the PDF to images and inspect every page or a complete contact sheet (`pages-executive/`, `pages-atlas/`). Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean. Do not use file size as a content or quality signal. When automated tools are unavailable, carry out the corresponding verification and review by hand and say so in the delivery.
+Render the PDF to images and inspect every page or a complete contact sheet (`pages-executive/`, `pages-atlas/`). For compatibility work, cross-render with `scripts/pdf_compatibility.py`; use PDFium, Poppler, MuPDF, and Ghostscript, plus PDFKit on macOS. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean. Do not use file size as a content or quality signal. When automated tools are unavailable, carry out the corresponding verification and review by hand and say so in the delivery.
+
+Do not fabricate receipts or claim that unavailable checks passed; say what was actually checked.
 
 ## 8. Deliver
 
@@ -223,6 +232,7 @@ The task is complete only when:
 
 - the research question is answered;
 - the evidence ledger and report agree;
+- the current Rewild and content quality receipts pass, or `alx issue` printed why not;
 - deterministic checks pass;
 - the final PDFs were reopened and visually inspected;
 - all deliverables exist at the reported paths.

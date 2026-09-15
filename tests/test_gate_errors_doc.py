@@ -57,8 +57,8 @@ class GateErrorsDocTests(unittest.TestCase):
             for name, letter in re.findall(r"### `([^`]+)`[^\n]*? — ([FW])(?:/[FW])?\b", text)
         }
         hard = {
-            "runtime/missing", "ledger/quantity",
-            "ledger/derived", "ledger/claim-input", "ledger/reference",
+            "runtime/missing",
+            "ledger/claim-input", "ledger/reference",
             "integrity/control-chars", "integrity/replacement-char", "integrity/encoding",
             "integrity/quotation-lost", "binding/link-not-in-ledger",
             "binding/leftover-prose", "fidelity/mismatch", "fidelity/cache-missing",
@@ -68,9 +68,9 @@ class GateErrorsDocTests(unittest.TestCase):
             with self.subTest(family=name):
                 self.assertEqual("F" if name in hard else "W", letter)
         for downgraded in (
-            "ledger/key-claim", "ledger/person", "ledger/portfolio", "integrity/length",
+            "ledger/quantity", "integrity/length",
             "binding/claim-paragraph", "fidelity/context-changed", "fidelity/semantic",
-            "rewild/region", "ledger/status", "ledger/direction", "ledger/schema",
+            "rewild/region",
             "rewild/style", "content/score", "tooling/receipt",
         ):
             with self.subTest(family=downgraded):
@@ -82,6 +82,13 @@ class GateErrorsDocTests(unittest.TestCase):
         for deleted in (
             "content/claim-support", "content/claim-binding",
             "review/content-missing", "rewild/humanization",
+            "ledger/status", "ledger/direction", "ledger/schema",
+            "ledger/key-claim", "ledger/provenance", "ledger/portfolio",
+            "ledger/triangulation", "ledger/host-conflict", "ledger/source-family",
+            "ledger/source-ids", "ledger/https", "ledger/freshness",
+            "ledger/undated-reason", "ledger/person", "ledger/excluded-supports",
+            "ledger/coverage", "ledger/synthesis", "ledger/derived",
+            "ledger/extract-length",
         ):
             with self.subTest(deleted=deleted):
                 self.assertNotIn(f"### `{deleted}`", text)

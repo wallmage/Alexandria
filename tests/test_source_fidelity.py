@@ -4,6 +4,7 @@ import json
 import ssl
 import subprocess
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
@@ -1093,12 +1094,22 @@ class ResilienceFetchTests(unittest.TestCase):
         self.assertEqual(2, len(calls))
 
     def test_deadline_expires_before_fetch(self):
-        result = source_fidelity.fetch_document(
-            "https://example.org/page",
-            deadline=0,
-        )
-        self.assertEqual("unreachable", result.status)
-        self.assertEqual("timeout", result.reason_class)
+        with mock_production_transport(
+            {
+                "example.org": (
+                    200,
+                    {"content-type": "text/html"},
+                    b"<html><body><p>still fetched</p></body></html>",
+                )
+            },
+            module=source_fidelity,
+        ):
+            result = source_fidelity.fetch_document(
+                "https://example.org/page",
+                deadline=time.time() - 3600,
+            )
+        self.assertEqual("ok", result.status)
+        self.assertIn("still fetched", result.text)
 
     def test_plaintext_http_reason_class_exists(self):
         result = source_fidelity.fetch_document("http://example.org/page")
@@ -2024,3 +2035,50 @@ class WhitespaceFreeComparisonTests(unittest.TestCase):
             "怎么来的. 蒋介石写日记,是出了名的认真 .从1915年开始.",
         )
         self.assertEqual(["fidelity/mismatch"], [item.family for item in findings])
+
+
+class ClosestPassageTests(unittest.TestCase):
+    def test_one_character_miss_prints_cache_passage_as_json(self):
+        cache = "The fleet landed at Leyte on 20 October 1944 after the landings."
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C1",
+                "extract_or_location": cache.replace("Leyte", "Leyta"),
+            },
+            {"source_id": "S3", "url": "https://example.org/leyte"},
+            cache,
+        )
+        self.assertEqual(["fidelity/mismatch"], [item.family for item in findings])
+        message = findings[0].message
+        self.assertIn("Closest passage in S3:", message)
+        literal = message.split("Closest passage in S3:", 1)[1].strip()
+        self.assertEqual(cache, json.loads(literal))
+        self.assertIn("paste the closest passage as extract_or_location", findings[0].fix)
+
+
+class ScriptFoldingTests(unittest.TestCase):
+    def test_simplified_extract_matches_traditional_cache(self):
+        self.assertEqual(
+            [],
+            source_fidelity.probe_findings(
+                {"claim_id": "C1", "extract_or_location": "中山舰事件发生在广州。"},
+                {"source_id": "S1", "url": "https://example.org/page"},
+                "報導寫道：中山艦事件發生在廣州。",
+            ),
+        )
+
+    def test_traditional_extract_matches_simplified_cache(self):
+        self.assertEqual(
+            [],
+            source_fidelity.probe_findings(
+                {"claim_id": "C1", "extract_or_location": "中山艦事件發生在廣州。"},
+                {"source_id": "S1", "url": "https://example.org/page"},
+                "报道写道：中山舰事件发生在广州。",
+            ),
+        )
+
+    def test_english_extract_is_unchanged(self):
+        self.assertEqual(
+            source_fidelity.normalize_text("The fleet landed at Leyte."),
+            "thefleetlandedatleyte.",
+        )

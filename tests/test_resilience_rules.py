@@ -394,15 +394,19 @@ class ReportAliasLinkTests(unittest.TestCase):
             "Body [cite](http://paper.example.cn/a.htm?div=-1).\n\n"
             "## Sources\n\n- [a](https://paper.example.cn/a.htm?div=-1)\n"
         )
-        errors = validate_report.validate_report_against_ledger(text, ledger)
+        findings = validate_report.binding_findings(text, ledger)
         self.assertEqual(
-            [], [e for e in errors if "Report URL is not present" in e], errors
+            [],
+            [f for f in findings if f.family == "binding/link-not-in-ledger"],
+            findings,
         )
         text_foreign = text.replace(
             "http://paper.example.cn/a.htm?div=-1", "https://elsewhere.example/x"
         )
-        errors = validate_report.validate_report_against_ledger(text_foreign, ledger)
-        self.assertTrue([e for e in errors if "Report URL is not present" in e])
+        findings = validate_report.binding_findings(text_foreign, ledger)
+        self.assertTrue(
+            [f for f in findings if f.family == "binding/link-not-in-ledger"]
+        )
 
 
 class EvidenceEntryProbeTests(unittest.TestCase):

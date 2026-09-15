@@ -471,8 +471,14 @@ Words after the sources section.
                 },
             ],
         }
+        findings = validate_report.binding_findings(report, ledger)
+        self.assertTrue(
+            any(f.family == "binding/link-not-in-ledger" for f in findings)
+        )
+        self.assertTrue(
+            any("not present in the ledger" in f.message for f in findings)
+        )
         errors = validate_report.validate_report_against_ledger(report, ledger)
-        self.assertTrue(any("not present in the ledger" in error for error in errors))
         self.assertTrue(any("cannot be located" in error for error in errors))
 
     def test_markdown_url_parser_keeps_balanced_parentheses(self):

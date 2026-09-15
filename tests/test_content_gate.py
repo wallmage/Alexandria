@@ -1115,7 +1115,9 @@ class ContentGateTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with_ledger = run_check(report, ledger, review)
+            with_ledger = run_check(
+                report, ledger, review, include_ledger_checks=True
+            )
             without_ledger = run_check(
                 report, ledger, review, include_ledger_checks=False
             )

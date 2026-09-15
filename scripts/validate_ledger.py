@@ -3075,8 +3075,9 @@ def _reference_findings(data, cache_dir=None):
     return [_ref(item) for item in errors]
 
 
-def validate_references(data):
-    return _as_legacy(_reference_findings(data))
+def validate_references(data, cache_dir=None):
+    """Legacy strings; pass the sources cache so R14 sees the page (run 6, C25)."""
+    return _as_legacy(_reference_findings(data, cache_dir))
 
 
 def collect_findings(ledger, *, schema_path=None, cache_dir=None):

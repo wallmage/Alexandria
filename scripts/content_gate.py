@@ -486,6 +486,12 @@ def _receipt_is_stale(receipt_path, report_path, ledger_path):
     return recorded_report != report_hash or recorded_ledger != ledger_hash
 
 
+def _sources_cache(ledger_path):
+    """The workspace's sources/ cache next to ledger.json, when it exists."""
+    cache = Path(ledger_path).parent / "sources"
+    return cache if cache.is_dir() else None
+
+
 def run_check(
     report_path, ledger_path, review_note_path=None, *, include_ledger_checks=True
 ):
@@ -525,7 +531,7 @@ def run_check(
                 _finding("content/check", error.removeprefix(WARNING_PREFIX))
             )
         if include_ledger_checks:
-            for error in validate_references(ledger):
+            for error in validate_references(ledger, _sources_cache(ledger_path)):
                 findings.append(_finding("content/check", error))
             findings.extend(binding_findings(report_text, ledger))
     if isinstance(review, dict) and review:
@@ -761,7 +767,7 @@ def run_content_gate(
     )
     if not isinstance(ledger, dict) or not isinstance(review, dict):
         return errors
-    errors.extend(validate_references(ledger))
+    errors.extend(validate_references(ledger, _sources_cache(ledger_path)))
     errors.extend(
         warning(error) for error in _section_review_errors(report_text, review)
     )

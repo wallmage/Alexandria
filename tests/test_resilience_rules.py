@@ -18,7 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts import alx
+from scripts import alx, content_gate
 from tests.test_alx import (
     CLAIM_ONE,
     CLAIM_TWO,
@@ -319,6 +319,61 @@ class YearInsideTheExtractCoverageTests(unittest.TestCase):
         self.assertEqual(
             [], quantity_findings(self.claim(), valid_quality_ledger(), None)
         )
+
+
+class ContentGateSeesThePageTests(unittest.TestCase):
+    """Run 6, C25: the content gate re-ran the date check without the sources
+    cache, so a month-day fragment whose year is only on the page was flagged
+    again after claim add had accepted it. validate_references now takes the
+    cache, and the gate passes the workspace's sources/ directory."""
+
+    EXTRACT = "9月4日,蒋写道愿共毛能悔悟."
+
+    def ledger_with_claim(self):
+        ledger = valid_quality_ledger()
+        ledger["claims"] = [
+            {
+                "claim_id": "C25",
+                "claim": "1945年9月4日蒋写道愿共毛能悔悟。",
+                "kind": "fact",
+                "importance": "supporting",
+                "include_in_report": True,
+                "source_ids": ["S2"],
+                "source_evidence": [
+                    {"source_id": "S2", "extract_or_location": self.EXTRACT}
+                ],
+            }
+        ]
+        return ledger
+
+    def quantity_errors(self, cache_dir):
+        return [
+            error
+            for error in validate_ledger.validate_references(
+                self.ledger_with_claim(), cache_dir
+            )
+            if "quantity" in error and "1945-09-04" in error
+        ]
+
+    def test_the_year_on_the_cached_page_covers_the_fragment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache(directory, "1945年的记录如下。" + self.EXTRACT)
+            self.assertEqual([], self.quantity_errors(directory))
+
+    def test_without_the_cache_the_fragment_is_still_reported(self):
+        self.assertTrue(self.quantity_errors(None))
+
+    def test_the_content_gate_passes_the_workspace_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "sources").mkdir()
+            self.assertEqual(
+                workspace / "sources",
+                content_gate._sources_cache(workspace / "ledger.json"),
+            )
+            self.assertIsNone(
+                content_gate._sources_cache(workspace / "missing" / "ledger.json")
+            )
 
 
 class EvidenceEntryProbeTests(unittest.TestCase):

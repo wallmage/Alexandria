@@ -959,7 +959,7 @@ class CheckTests(AlxTestCase):
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         code, out = self.run_in("check")
         self.assertEqual(1, code)
-        self.assertRegex(out, r"=== HARD \d+ \(blocks issue\) ===")
+        self.assertRegex(out, r"=== HARD \d+ \(fix, or alx issue drops them\) ===")
         self.assertRegex(out, r"=== STATUS: check #1, elapsed \d+ min, remaining \d+ min")
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
         self.assertIn("last_check", json.dumps(self.state()))
@@ -1819,7 +1819,7 @@ class CheckOutputTests(AlxTestCase):
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         _code, out = self.run_in("check")
         self.assertRegex(out, r"\[fidelity/cache-detached\] \d+\n")
-        self.assertRegex(out, r"=== HARD \d+ \(blocks issue\) ===")
+        self.assertRegex(out, r"=== HARD \d+ \(fix, or alx issue drops them\) ===")
         self.assertRegex(out, r"=== WARN \d+ ===")
         self.assertNotIn("Class A", out)
 
@@ -4839,7 +4839,7 @@ class CompactWarnTierTests(AlxTestCase):
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         _code, out = self.run_in("check")
         self.assertIn("[fidelity/cache-detached]", out)
-        self.assertRegex(out, r"=== HARD \d+ \(blocks issue\) ===")
+        self.assertRegex(out, r"=== HARD \d+ \(fix, or alx issue drops them\) ===")
         self.assertRegex(out, r"=== WARN \d+ ===")
         hard = out.split("=== HARD ")[1].split("=== WARN")[0].splitlines()[1:]
         self.assertTrue(any(line.startswith("  ") for line in hard), out)

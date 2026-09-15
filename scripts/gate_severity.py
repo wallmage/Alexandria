@@ -77,7 +77,7 @@ def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
     records = [item for item in findings if is_finding(item)]
     hard = [item for item in records if item.severity == "hard"]
     warn = [item for item in records if item.severity == "warn"]
-    lines = [f"=== HARD {len(hard)} (blocks issue) ==="]
+    lines = [f"=== HARD {len(hard)} (fix, or alx issue drops them) ==="]
 
     def label(members):
         if not with_class or not any(item.klass == "F" for item in members):

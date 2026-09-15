@@ -73,7 +73,7 @@ class FindingRecordTests(unittest.TestCase):
         self.assertEqual(["ledger/quantity", "ledger/coverage"], list(grouped))
         self.assertEqual(6, len(grouped["ledger/quantity"]))
         rendered = render_grouped(findings, per_family=5)
-        self.assertIn("=== HARD 6 (blocks issue) ===", rendered)
+        self.assertIn("=== HARD 6 (fix, or alx issue drops them) ===", rendered)
         self.assertIn("[ledger/quantity] 6", rendered)
         self.assertIn("+1 more", rendered)
         self.assertIn("=== WARN 1 ===", rendered)
@@ -124,7 +124,7 @@ class FindingRecordTests(unittest.TestCase):
         self.assertEqual(["fidelity/semantic"], list(group([foreign])))
         self.assertEqual(1, len(hard_errors([foreign])))
         rendered = render_grouped([foreign])
-        self.assertIn("=== HARD 1 (blocks issue) ===", rendered)
+        self.assertIn("=== HARD 1 (fix, or alx issue drops them) ===", rendered)
         self.assertIn("direction drifted.", rendered)
         self.assertEqual("[FAIL] direction drifted", as_text(foreign))
 

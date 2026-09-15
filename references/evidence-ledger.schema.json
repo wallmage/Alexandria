@@ -44,21 +44,18 @@
     },
     "coverage": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "$ref": "#/$defs/coverageItem"
       }
     },
     "sources": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "$ref": "#/$defs/source"
       }
     },
     "claims": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "$ref": "#/$defs/claim"
       }
@@ -224,14 +221,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "area",
-        "question",
-        "priority",
-        "decision_relevance",
-        "completion_criteria",
-        "status",
-        "claim_ids",
-        "gap_impact"
+        "claim_ids"
       ],
       "allOf": [
         {
@@ -1161,7 +1151,7 @@
     "implication": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["statement", "claim_ids"],
+      "required": ["claim_ids"],
       "properties": {
         "statement": {
           "type": "string",
@@ -1188,11 +1178,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "statement",
-        "rationale_claim_ids",
-        "tradeoff",
-        "success_signal",
-        "failure_signal"
+        "rationale_claim_ids"
       ],
       "properties": {
         "statement": {
@@ -1226,11 +1212,6 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "name",
-        "conditions",
-        "leading_indicators",
-        "disconfirming_indicators",
-        "implication",
         "claim_ids"
       ],
       "properties": {
@@ -1280,20 +1261,9 @@
     "synthesis": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "central_judgment_claim_ids",
-        "counterevidence_claim_ids",
-        "adversarial_tests",
-        "implications",
-        "decisions_or_takeaways",
-        "scenarios",
-        "limitations",
-        "research_stop_reason"
-      ],
       "properties": {
         "central_judgment_claim_ids": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "string",
             "pattern": "^C[0-9]+$"
@@ -1310,21 +1280,18 @@
         },
         "adversarial_tests": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/adversarialTest"
           }
         },
         "implications": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/implication"
           }
         },
         "decisions_or_takeaways": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/takeaway"
           }
@@ -1336,7 +1303,7 @@
           }
         },
         "limitations": {
-          "type": "array",
+          "type": ["array", "string"],
           "items": {
             "type": "string",
             "minLength": 1
@@ -1353,12 +1320,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "hypothesis",
-        "test",
-        "claim_ids",
-        "outcome",
-        "result",
-        "effect_on_conclusion"
+        "claim_ids"
       ],
       "properties": {
         "hypothesis": {

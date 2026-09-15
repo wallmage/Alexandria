@@ -71,7 +71,10 @@ def _f(family, message, *, severity="hard", ids=None, fix="", remove=""):
     )
 
 
-def _ref(message, *, family="ledger/reference", severity="hard", ids=None, fix="", remove=""):
+#: R28: a cross-reference is bookkeeping, not fabrication. Every legacy string
+#: raised here is a WARN; the one hard case (a source_id no fetched source
+#: carries) says so at its own call site.
+def _ref(message, *, family="ledger/reference", severity="warn", ids=None, fix="", remove=""):
     if isinstance(message, Finding):
         return message
     text = str(message)
@@ -396,9 +399,6 @@ _CJK_ABBREVIATED_TAIL_RE = re.compile(
 #: context ("一起", "一些", "二手", "十分"): requiring a classifier keeps those
 #: silent without a stoplist. Deliberately narrow to 個/个, the classifier in
 #: both worked examples ("三個漏洞", "十八個月"); broadening it is deferred.
-#: R27: the provenance `alx fetch` writes before anyone classifies the source.
-UNCLASSIFIED_PROVENANCE = "unverified"
-
 _CJK_COUNT_CLASSIFIERS = frozenset("個个項项名家次種种款位條条篇卷册冊")
 
 #: R26: a quantity spelled with Han numeral words ("三位作者"), with or without
@@ -2029,6 +2029,7 @@ def _verification_errors(
                 f"{(claim_day - verified_day).days} days after verified_at "
                 f"{verified_day.isoformat()} (threshold {AS_OF_DRIFT_DAYS} "
                 "day); a claim cannot be verified before the state it describes.",
+                severity="warn",
                 ids=[claim_id],
                 fix="set field as_of",
                 remove=_drop(claim_id),
@@ -2183,6 +2184,7 @@ def _source_family_errors(sources_by_id):
                     f"family_justification ({', '.join(unjustified)}): "
                     f"{provenances}. Pages on one host are one interested "
                     "party unless the difference is justified.",
+                    severity="warn",
                     ids=source_ids,
                     fix=f"alx source set {sid}",
                     remove="",
@@ -2273,12 +2275,6 @@ def _reference_findings(data, cache_dir=None):
         "unverified",
     }
 
-    def unclassified(source_ids):
-        """R27: nobody classified these sources; the default is not a verdict."""
-        return all(
-            sources_by_id[source_id].get("provenance") == UNCLASSIFIED_PROVENANCE
-            for source_id in source_ids
-        )
     excluded_claims = data.get("excluded_claims")
     excluded_claims = excluded_claims if isinstance(excluded_claims, list) else []
     excluded_ids = {
@@ -2410,6 +2406,7 @@ def _reference_findings(data, cache_dir=None):
                     f"{source_id}: source.url must be https "
                     f"(threshold: https; actual: {url}). "
                     f"Fix: `alx fetch --id {source_id} --refresh`.",
+                    severity="warn",
                     ids=[source_id],
                     fix=f"alx fetch --id {source_id} --refresh",
                 )
@@ -2462,6 +2459,7 @@ def _reference_findings(data, cache_dir=None):
                     f"{source_id}: accountability_note must say what makes the "
                     "source accountable (threshold "
                     f"{threshold}, actual {len(note)}).",
+                    severity="warn",
                     ids=[source_id],
                     fix=(
                         f"alx source set {source_id} "
@@ -2489,7 +2487,7 @@ def _reference_findings(data, cache_dir=None):
                     f"Supported coverage {item.get('area', '<unknown>')} relies "
                     "only on interested sources; mark it as a gap or add "
                     "independent evidence.",
-                    severity="warn" if unclassified(linked_sources) else "hard",
+                    severity="warn",
                     fix="alx source set S1",
                 )
             )
@@ -2537,7 +2535,17 @@ def _reference_findings(data, cache_dir=None):
             source_links = list(raw_source_ids)
         for source_id in source_links:
             if source_id not in source_set:
-                errors.append(f"{claim_id} references unknown source {source_id}.")
+                # R28: the one hard cross-reference — a claim may cite only a
+                # source the ledger actually fetched.
+                errors.append(
+                    _f(
+                        "ledger/reference",
+                        f"{claim_id} references unknown source {source_id}.",
+                        ids=[claim_id, source_id],
+                        fix="set field source_ids",
+                        remove=_drop(claim_id),
+                    )
+                )
         # R22: two passages from one page are legitimate evidence; source_ids
         # derivation dedupes, and every entry is probed on its own.
         for source_id in evidence_ids:
@@ -2558,6 +2566,7 @@ def _reference_findings(data, cache_dir=None):
                     f"{claim_id}: extra source_ids {extras} not in "
                     f"source_evidence (threshold: 0 extras; actual: {len(extras)}). "
                     "Fix: `alx check --fix`.",
+                    severity="warn",
                     ids=_ids_in(claim_id),
                     fix="alx check --fix",
                     remove=_drop(claim_id),
@@ -2601,6 +2610,7 @@ def _reference_findings(data, cache_dir=None):
                             f"{claim_id}: surviving {relation} naming excluded "
                             f"claim {related_id}. Fix: set field {relation}. "
                             f"Remove: `{_drop(claim_id)}`.",
+                            severity="warn",
                             ids=[claim_id, related_id],
                             fix=f"set field {relation}",
                             remove=_drop(claim_id),
@@ -2687,6 +2697,7 @@ def _reference_findings(data, cache_dir=None):
                         "ledger/freshness",
                         f"{claim_id}: time-sensitive claim is dated "
                         f"{(report_day - claim_day).days} days before the report date.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="set field as_of",
                         remove=_drop(claim_id),
@@ -2737,6 +2748,7 @@ def _reference_findings(data, cache_dir=None):
                             "continuously updated. Accepted phrasings, for example: "
                             "'continuously updated', 'updated continuously', "
                             "'living page', '持续更新', '持續更新'.",
+                            severity="warn",
                             ids=[source_id, claim_id],
                             fix=f"alx source set {source_id}",
                             remove=_drop(claim_id),
@@ -2778,6 +2790,7 @@ def _reference_findings(data, cache_dir=None):
                         "ledger/triangulation",
                         f"{claim_id} declares triangulation met but has "
                         f"{len(families)} normalized source family.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="set field triangulation",
                         remove=_drop(claim_id),
@@ -2794,6 +2807,7 @@ def _reference_findings(data, cache_dir=None):
                         "ledger/triangulation",
                         f"{claim_id} declares triangulation met but has "
                         "no independent source.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="alx source set S1",
                         remove=_drop(claim_id),
@@ -2806,6 +2820,7 @@ def _reference_findings(data, cache_dir=None):
                             "ledger/triangulation",
                             f"{claim_id}: high-confidence key judgment cannot "
                             "use limited triangulation.",
+                            severity="warn",
                             ids=[claim_id],
                             fix="set field triangulation",
                             remove=_drop(claim_id),
@@ -2816,6 +2831,7 @@ def _reference_findings(data, cache_dir=None):
                         _f(
                             "ledger/triangulation",
                             f"{claim_id} has limited triangulation but no limitation.",
+                            severity="warn",
                             ids=[claim_id],
                             fix="set field limitations",
                             remove=_drop(claim_id),
@@ -2827,6 +2843,7 @@ def _reference_findings(data, cache_dir=None):
                         "ledger/triangulation",
                         f"{claim_id} is a key analysis; triangulation cannot be "
                         "not applicable.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="set field triangulation",
                         remove=_drop(claim_id),
@@ -2844,6 +2861,7 @@ def _reference_findings(data, cache_dir=None):
                         "ledger/key-claim",
                         f"{claim_id}: key claim has no direct source and no "
                         "first-level supporting claim with one.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="alx source set S1",
                         remove=_drop(claim_id),
@@ -2860,7 +2878,7 @@ def _reference_findings(data, cache_dir=None):
                         f"{claim_id}: key claim rests only on interested/unverified sources "
                         f"({', '.join(sorted(judged))}); add independent "
                         "evidence or record the area as a gap.",
-                        severity="warn" if unclassified(judged) else "hard",
+                        severity="warn",
                         ids=[claim_id, *sorted(judged)],
                         fix=f"alx source set {sorted(judged)[0]}",
                         remove=_drop(claim_id),
@@ -2935,6 +2953,7 @@ def _reference_findings(data, cache_dir=None):
                     _f(
                         "ledger/synthesis",
                         f"Synthesis references unknown central judgment {claim_id}.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="set field synthesis",
                     )
@@ -2947,6 +2966,7 @@ def _reference_findings(data, cache_dir=None):
                     _f(
                         "ledger/synthesis",
                         f"Central judgment {claim_id} must be an included key claim.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="set field synthesis",
                     )
@@ -2961,6 +2981,7 @@ def _reference_findings(data, cache_dir=None):
                     _f(
                         "ledger/synthesis",
                         f"Key report claim {claim_id} is missing from the central synthesis.",
+                        severity="warn",
                         ids=[claim_id],
                         fix="set field synthesis",
                     )
@@ -3114,6 +3135,10 @@ def _offline_probe_findings(ledger, cache_dir):
 #: result validates against the ledger schema (pinned contract: claim-input ->
 #: full v4 claim).
 CLAIM_DEFAULTS = {
+    # R28: kind and importance are no longer required of a claim input; the
+    # least-committal reading is the default.
+    "kind": "fact",
+    "importance": "supporting",
     "as_of": None,
     "confidence": "medium",
     "status": "supported",
@@ -3192,20 +3217,45 @@ def expand_claim_input(item, ledger, *, cache_meta):
     return claim
 
 
+def _claim_input_field(error):
+    """Addendum 11: the field a claim-input schema error names (as J2 derives it)."""
+    location, _, detail = str(error).partition(": ")
+    path = (
+        ""
+        if location in {"", "<root>"} or not _SCHEMA_PATH_RE.match(location)
+        else location
+    )
+    required = _SCHEMA_REQUIRED_RE.search(detail)
+    if required:
+        path = f"{path}.{required.group(1)}" if path else required.group(1)
+    return path if path and _SCHEMA_PATH_RE.match(path) else "claim"
+
+
+def _claim_input_remedy(field):
+    """A claim input is repaired in its own file and re-enters through `claim add`."""
+    return f"set field {field} in claims/*.json, then alx claim add claims/*.json"
+
+
 def _claim_input_schema_findings(claim):
     if not CLAIM_INPUT_SCHEMA.is_file():
         return []
     schema = json.loads(CLAIM_INPUT_SCHEMA.read_text(encoding="utf-8"))
-    if not claim.get("claim_id"):
+    claim_id = claim.get("claim_id")
+    if not claim_id:
         return [
             _f(
                 "ledger/claim-input",
                 "add claim_id",
-                fix="set field claim_id",
+                fix=_claim_input_remedy("claim_id"),
             )
         ]
     return [
-        _f("ledger/claim-input", item, fix="set field claim")
+        _f(
+            "ledger/claim-input",
+            item,
+            ids=[claim_id],
+            fix=_claim_input_remedy(_claim_input_field(item)),
+        )
         for item in validate_schema(claim, schema)
     ]
 

@@ -45,6 +45,28 @@ jobs:
           $arguments = $runtime.command[1..($runtime.command.Count - 1)]
           & $program @arguments scripts/install_runtime.py --runtime $env:ALEXANDRIA_RUNTIME_DIR --verify-only
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Diagnose the Windows launcher layers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $r = $env:ALEXANDRIA_RUNTIME_DIR
+          Write-Output "--- launcher via cmd /c"
+          cmd /c "`"$r\bin\python.cmd`" scripts/alx.py --help" 2>&1 | Out-String | Write-Output
+          Write-Output "exit=$LASTEXITCODE"
+          Write-Output "--- launcher bytes"
+          Format-Hex -Path "$r\bin\python.cmd" | Select-Object -First 4 | Out-String | Write-Output
+          Write-Output "--- micromamba run from pwsh"
+          & "$r\Library\bin\micromamba.exe" --no-rc run --prefix "$r\env" python scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "exit=$LASTEXITCODE"
+          Write-Output "--- env python direct"
+          & "$r\env\python.exe" scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "exit=$LASTEXITCODE"
+          & "$r\env\python.exe" -c "import weasyprint, jsonschema, pypdf; print('direct imports ok')" 2>&1 | Out-String | Write-Output
+          Write-Output "exit=$LASTEXITCODE"
+          Write-Output "--- listing"
+          Get-ChildItem "$r" | Out-String | Write-Output
+          Get-ChildItem "$r\Library\bin" -Filter micromamba* | Out-String | Write-Output
       - name: Run alx through the one-path launcher SKILL.md uses
         shell: pwsh
         run: |

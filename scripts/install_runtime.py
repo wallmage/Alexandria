@@ -153,7 +153,8 @@ def write_launchers(runtime):
         encoding="utf-8",
     )
     posix.chmod(0o755)
-    (launchers / "python.cmd").write_text(WINDOWS_LAUNCHER, encoding="utf-8")
+    # Bytes, not text: text mode on Windows would turn `\r\n` into `\r\r\n`.
+    (launchers / "python.cmd").write_bytes(WINDOWS_LAUNCHER.encode("utf-8"))
 
 
 #: `%~fI` folds the `..` away so micromamba sees a plain prefix; a missing

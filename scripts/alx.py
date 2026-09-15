@@ -223,10 +223,13 @@ REMEDY_TEMPLATES = {
     "edit-prose": "(edit prose; waivable by alx issue --deliver)",
     # Ruling R9: inserting a link leaves the visible text unchanged, so it is a
     # mechanical delta and never stales a review.
-    "add-link": "add the source link to paragraph {paragraph} of report.md",
+    "add-link": (
+        "write [{claim_id}] at the end of the sentence in paragraph "
+        "{paragraph} of report.md, then alx check --fix"
+    ),
     "add-link-claim": (
-        "add the source link to the paragraph that states claim {claim_id} "
-        "in report.md"
+        "write [{claim_id}] at the end of the sentence that states claim "
+        "{claim_id} in report.md, then alx check --fix"
     ),
 }
 
@@ -252,10 +255,13 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^remove link \S+ from report\.md$"),
     re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
-    re.compile(r"^add the source link to paragraph \d+ of report\.md$"),
     re.compile(
-        r"^add the source link to the paragraph that states claim C\d+ "
-        r"in report\.md$"
+        r"^write \[C\d+\] at the end of the sentence in paragraph \d+ of "
+        r"report\.md, then alx check --fix$"
+    ),
+    re.compile(
+        r"^write \[C\d+\] at the end of the sentence that states claim C\d+ "
+        r"in report\.md, then alx check --fix$"
     ),
 )
 
@@ -374,7 +380,7 @@ def set_field(field, file):
 def add_link(paragraph, claim_id):
     """Ruling R9: cite the claim where it is stated; `n` when it is known."""
     if paragraph:
-        return remedy("add-link", paragraph=paragraph)
+        return remedy("add-link", claim_id=claim_id or "C1", paragraph=paragraph)
     return remedy("add-link-claim", claim_id=claim_id or "C1")
 
 
@@ -1029,7 +1035,7 @@ def _blocks(text):
 def sources_heading_offset(text):
     offset = None
     for match in re.finditer(r"^##\s+(.+)$", text, re.MULTILINE):
-        if match.group(1).strip().casefold() in validate_report.SOURCE_HEADINGS:
+        if validate_report.is_sources_heading(match.group(1).strip()):
             offset = match.start()
     return offset
 
@@ -2026,7 +2032,7 @@ def apply_drop(ws, state, ledger, claim_id, reason):
             drops.append(value)
     ws.save_ledger(ledger)
     ws.save_state(state)
-    _regenerate_sources(ws, ledger)
+    _regenerate_sources(ws, _bound_ledger(state, ledger), state.get("lang", "en"))
     lines.append(f"Excluded: {', '.join(dropped)}")
     return lines
 
@@ -2323,9 +2329,51 @@ def _ledger_findings(ws, ledger):
     return findings
 
 
+#: An inline claim citation: `[C17]`, `[C3, C4]`, `[C3、C4]`, `【C3】`.
+_CLAIM_MARKER_RE = re.compile(
+    r"[\[【]\s*(C[0-9]+(?:\s*[,、，]\s*C[0-9]+)*)\s*[\]】]"
+)
+
+
+def _marker_bindings(text):
+    """{claim_id: paragraph} for the inline claim markers; first occurrence wins."""
+    bindings = {}
+    for number, _start, _end, block in body_paragraphs(text):
+        for match in _CLAIM_MARKER_RE.finditer(block):
+            for claim_id in re.findall(r"C[0-9]+", match.group(1)):
+                bindings.setdefault(claim_id, number)
+    return bindings
+
+
+def _convert_claim_markers(ws, ledger, text):
+    """Rewrite `[C17]` into the markdown link of the claim's first source."""
+    sources = {
+        source.get("source_id"): source for source in ledger.get("sources", [])
+    }
+    links = {}
+    for claim in ledger.get("claims", []):
+        for source_id in claim.get("source_ids") or []:
+            source = sources.get(source_id) or {}
+            if source.get("url"):
+                links[claim.get("claim_id")] = f"[{source_id}]({source['url']})"
+                break
+
+    def replace(match):
+        claim_ids = re.findall(r"C[0-9]+", match.group(1))
+        if not all(claim_id in links for claim_id in claim_ids):
+            return match.group(0)
+        return " ".join(links[claim_id] for claim_id in claim_ids)
+
+    converted = _CLAIM_MARKER_RE.sub(replace, text)
+    if converted != text:
+        ws.report.write_text(converted, encoding="utf-8")
+    return converted
+
+
 def paragraph_mapping(ws, state, ledger, text):
     """({claim_id: paragraph}, {claim_id: candidates}) — spec §6.7c."""
     paragraphs = body_paragraphs(text)
+    markers = _marker_bindings(text)
     urls_by_paragraph = {
         number: {normalize_url(url) for _label, url in markdown_links(block)}
         for number, _start, _end, block in paragraphs
@@ -2339,6 +2387,9 @@ def paragraph_mapping(ws, state, ledger, text):
         explicit = _claim_paragraph(state, claim)
         if explicit:
             mapping[claim_id] = explicit
+            continue
+        if claim_id in markers:
+            mapping[claim_id] = markers[claim_id]
             continue
         claim_urls = set()
         for source in ledger.get("sources", []):
@@ -2385,20 +2436,48 @@ def _cited_sources(ledger, text):
         source = by_url.get(normalize_url(url))
         if source is not None and source not in ordered:
             ordered.append(source)
+    # A bound claim cites its own sources even when the body carries no link.
+    by_id = {
+        source.get("source_id"): source for source in ledger.get("sources", [])
+    }
+    bound = [
+        claim
+        for claim in ledger.get("claims", [])
+        if claim.get("include_in_report") is True
+        and (claim.get("report_paragraph") is not None or claim.get("report_excerpts"))
+    ]
+    for claim in sorted(bound, key=lambda claim: claim.get("report_paragraph") or 0):
+        for source_id in claim.get("source_ids") or []:
+            source = by_id.get(source_id)
+            if source is not None and source not in ordered:
+                ordered.append(source)
     return ordered
 
 
-def _regenerate_sources(ws, ledger):
+#: The Sources heading `check --fix` writes when the report has none.
+SOURCES_HEADINGS = {
+    "en": "## Sources",
+    "zh-CN": "## 资料来源",
+    "zh-HK": "## 資料來源",
+}
+
+
+def _regenerate_sources(ws, ledger, lang="en"):
     text = ws.report_text()
     offset = sources_heading_offset(text)
-    if offset is None:
-        return False
-    heading_end = text.index("\n", offset) if "\n" in text[offset:] else len(text)
-    heading = text[offset:heading_end]
     listing = "\n".join(
         f"- [{source.get('title', source.get('url'))}]({source.get('url')})"
         for source in _cited_sources(ledger, text)
     )
+    if offset is None:
+        heading = SOURCES_HEADINGS.get(lang, SOURCES_HEADINGS["en"])
+        ws.report.write_text(
+            text.rstrip("\n") + "\n\n" + heading + "\n\n" + listing + "\n",
+            encoding="utf-8",
+        )
+        return True
+    heading_end = text.index("\n", offset) if "\n" in text[offset:] else len(text)
+    heading = text[offset:heading_end]
     ws.report.write_text(
         text[:offset] + heading + "\n\n" + listing + "\n", encoding="utf-8"
     )
@@ -2479,6 +2558,15 @@ def _binding_findings(ws, state, ledger, *, fix=False):
     mapping, unbound = paragraph_mapping(ws, state, ledger, text)
     paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
     if fix:
+        # A marker binding is recorded before the marker becomes a link, so the
+        # binding survives the rewrite; an explicit `claim bind` still wins.
+        bindings = state.setdefault("bindings", {})
+        known = {claim.get("claim_id") for claim in ledger.get("claims", [])}
+        for claim_id, number in _marker_bindings(text).items():
+            if claim_id in known:
+                bindings.setdefault(claim_id, number)
+        text = _convert_claim_markers(ws, ledger, text)
+        paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
         for claim in ledger.get("claims", []):
             number = mapping.get(claim.get("claim_id"))
             block = paragraphs.get(number)
@@ -2491,7 +2579,9 @@ def _binding_findings(ws, state, ledger, *, fix=False):
             if not _excerpts_located(claim, prose):
                 claim["report_excerpts"] = [prose[:EXCERPT_CHARS]]
         ws.save_ledger(ledger)
-        _regenerate_sources(ws, ledger)
+        _regenerate_sources(
+            ws, _bound_ledger(state, ledger), state.get("lang", "en")
+        )
         text = ws.report_text()
         mapping, unbound = paragraph_mapping(ws, state, ledger, text)
     record_binding_hashes(state, text, mapping)
@@ -2617,6 +2707,11 @@ def _prose_floor_missing(note, kind):
     ]
 
 
+def _plain_excerpt(text):
+    """Inline markup and line wrapping removed, so a verbatim quote matches."""
+    return re.sub(r"\s+", " ", re.sub(r"[*_`\[\]]", "", str(text))).strip()
+
+
 def _note_completeness(ws, state, ledger, kind):
     """Offline completeness of one review note (spec §6.7f)."""
     path = ws.reviews / f"{kind}.json"
@@ -2625,8 +2720,6 @@ def _note_completeness(ws, state, ledger, kind):
     note = _read_json(path)
     missing = []
     # Item 4: every entry is the exact JSON path of the field to fill.
-    if note.get("status") != "completed":
-        missing.append('status (must be "completed")')
     if kind == "rewild":
         checks = note.get("fidelity_checks") or {}
         missing.extend(
@@ -2673,7 +2766,9 @@ def _note_completeness(ws, state, ledger, kind):
                 f"findings[{index}].disposition (a critical finding must be fixed)"
             )
         excerpt = item.get("report_disclosure_excerpt")
-        if excerpt and excerpt not in ws.report_text():
+        # The report emphasizes and wraps its prose, so the excerpt is compared
+        # without inline markup and with folded whitespace.
+        if excerpt and _plain_excerpt(excerpt) not in _plain_excerpt(ws.report_text()):
             missing.append(
                 f"findings[{index}].report_disclosure_excerpt (not in report.md)"
             )
@@ -2690,12 +2785,9 @@ def _note_completeness(ws, state, ledger, kind):
                 f"claim_support[{entry.get('claim_id') or '?'}].note "
                 f"(why the claim is {entry.get('disposition')})"
             )
-    if missing:
-        # The form above already names every unfilled key; repeating them as
-        # schema errors tripled the list the reviewer has to read.
-        return missing
     # The note must also satisfy the schema `content_gate` enforces, or
-    # `finish` would exit 0 on a note the gate then rejects.
+    # `finish` would exit 0 on a note the gate then rejects. Both lists are
+    # returned together, so `finish` names every missing field in one round.
     missing.extend(
         f"{error} (content-review schema)"
         for error in validate_ledger.validate_schema(
@@ -3088,7 +3180,6 @@ def cmd_check(args):
 #: `scripts/` or a schema to learn the note format. One row per JSON path:
 #: allowed values, then the one-line meaning.
 CONTENT_NOTE_GUIDE = (
-    ('status', '"completed"', "set it last, when every field below is filled"),
     (
         "scores.<key>.score",
         "integer 1-5; 4 or more passes",
@@ -3141,7 +3232,6 @@ CONTENT_NOTE_GUIDE = (
 
 def _rewild_note_guide():
     return (
-        ('status', '"completed"', "set it last"),
         (
             "fidelity_checks.<key>",
             "true | false; all must be true",
@@ -3263,8 +3353,18 @@ def cmd_review_finish(args):
     if not record.get("iteration"):
         print(f"Run `alx review start {kind}` first.", file=sys.stderr)
         return 1
+    # `status` and a section's `disposition` are `finish`'s own fields, not the
+    # reviewer's: they are written before the note is judged complete.
+    path = ws.reviews / f"{kind}.json"
+    if path.exists():
+        note = _read_json(path)
+        note["status"] = "completed"
+        for section in note.get("section_reviews") or []:
+            if isinstance(section, dict) and not section.get("disposition"):
+                section["disposition"] = "keep"
+        _write_json(path, note)
     missing = _note_completeness(ws, state, ledger, kind)
-    note = _read_json(ws.reviews / f"{kind}.json")
+    note = _read_json(path)
     if note.get("report_sha256") != record.get("report_sha256"):
         missing.append("report_sha256 no longer matches the reviewed copy")
     if missing:
@@ -3453,8 +3553,9 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
         # earlier pass wrote; that receipt is what the content gate reads.
         kept = "; the receipt from an earlier pass stands" if receipt_path.exists() else ""
         delivery_notes.append(
-            f"online source fidelity skipped: {remaining} min left, reserve is "
-            f"{RESERVE_MINUTES} min{kept}"
+            f"live source re-check skipped ({max(remaining, 0)} min left; every "
+            "extract was already verified offline against the cached pages by "
+            f"alx check){kept}"
         )
         return [], True
     # J1: only a receipt this pass wrote may be hashed into `issue.json`, and
@@ -3796,24 +3897,7 @@ def cmd_render(args):
         else ["executive", md_to_pdf.select_adaptive_companion(subject)]
     )
     lines = []
-    for index, template in enumerate(templates):
-        _elapsed, remaining = _minutes(state)
-        if index and remaining < RESERVE_MINUTES:
-            # J7: Executive first; the companion is dropped rather than risk the
-            # rasterizer running past the cap. Class A — the delivery stands.
-            lines.append(
-                render_grouped(
-                    [
-                        finding(
-                            "tooling/render",
-                            f"{template} companion not rendered: {remaining} min "
-                            f"left, reserve is {RESERVE_MINUTES} min.",
-                            fix=remedy("render"),
-                        )
-                    ]
-                )
-            )
-            break
+    for template in templates:
         output = ws.dir / f"report-{template}.pdf"
         kwargs = {
             "template": template,
@@ -3844,6 +3928,9 @@ def cmd_render(args):
             continue
         pages = ws.dir / f"pages-{template}"
         lines.append(f"{template}: {output}")
+        # `alx` owns the contact-sheet directory: a second `render` refills it
+        # instead of refusing because it is not empty.
+        shutil.rmtree(pages, ignore_errors=True)
         try:
             render_pdf_pages.render_pages(str(output), str(pages))
         except Exception as exc:  # D4b: every rasterizer backend failed

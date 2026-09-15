@@ -218,7 +218,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `binding/excerpt-missing` — W
 - **rule:** an `include_in_report` claim has an empty `report_excerpts`.
-- **fix:** `alx claim bind C<n> --paragraph N` — `--fix` writes the excerpt of a bound claim in the same run, so a surviving finding is unbound. With no candidate paragraph the claim is cited nowhere: add the source link to paragraph `<n>` of report.md (ruling R9).
+- **fix:** `alx claim bind C<n> --paragraph N` — `--fix` writes the excerpt of a bound claim in the same run, so a surviving finding is unbound. With no candidate paragraph the claim is cited nowhere: write `[C<n>]` at the end of the sentence in paragraph `<n>` of report.md, then `alx check --fix` (ruling R9).
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** C6 bound to paragraph 8, `report_excerpts: []`.
 
@@ -229,8 +229,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** C8 dropped; paragraph 19 still present.
 
 ### `binding/sources-section` — W
-- **rule:** Sources H2 is not last, or ≠ the cited-source list.
-- **fix:** `alx check --fix` (regenerates from the ledger).
+- **rule:** Sources H2 is not last, or ≠ the cited-source list (the cited list is the body links plus the sources of every bound claim).
+- **fix:** `alx check --fix` (regenerates from the ledger; writes the Sources H2 when the report has none).
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** S5 cited, absent from Sources.
 
@@ -353,7 +353,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx review start content --iter`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `status` is not `completed`.
-- **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → add the source link to paragraph `<n>` of report.md. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
+- **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → write `[C<n>]` at the end of the sentence in paragraph `<n>` of report.md, then `alx check --fix`. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
 
 ### `content/critical-finding` — W
 - **rule:** a critical review finding is not dispositioned `resolved`.

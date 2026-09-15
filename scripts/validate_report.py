@@ -60,6 +60,30 @@ SOURCE_HEADINGS = {
     "参考资料",
     "參考資料",
 }
+#: An H2 names the Sources section when its casefolded text, stripped of spaces
+#: and punctuation, contains one of these (`## 资料来源`, `## References and
+#: sources`, `## 参考文献` all count).
+SOURCE_HEADING_TOKENS = (
+    "sources",
+    "references",
+    "bibliography",
+    "workscited",
+    "来源",
+    "來源",
+    "参考",
+    "參考",
+    "文献",
+    "文獻",
+    "引用",
+)
+
+
+def is_sources_heading(heading):
+    """True when this H2 heading names the report's Sources section."""
+    folded = re.sub(r"[\W_]+", "", str(heading).casefold())
+    return any(token in folded for token in SOURCE_HEADING_TOKENS)
+
+
 LANG_CHOICES = ("en", "zh-CN", "zh-HK")
 FAMILIES = (
     "integrity/control-chars",
@@ -255,7 +279,7 @@ def _protected_script_hits(text, sections, traditional_only):
     source_starts = [
         start
         for heading, start in sections
-        if heading.casefold() in SOURCE_HEADINGS
+        if is_sources_heading(heading)
     ]
     if source_starts:
         text = text[: min(source_starts)]
@@ -340,7 +364,7 @@ def _report_prose(text, sections):
     source_starts = [
         start
         for heading, start in sections
-        if heading.casefold() in SOURCE_HEADINGS
+        if is_sources_heading(heading)
     ]
     if source_starts:
         text = text[: min(source_starts)]
@@ -435,7 +459,7 @@ def _body_and_sources(text):
     source_indexes = [
         index
         for index, (heading, _) in enumerate(sections)
-        if heading.casefold() in SOURCE_HEADINGS
+        if is_sources_heading(heading)
     ]
     if not source_indexes:
         return text, "", sections, None
@@ -503,6 +527,22 @@ def _immediate_blockquote_lines(text):
 
 def _quoted_spans(text):
     return _QUOTE_SPAN_RE.findall(text or "")
+
+
+def _bound_claim_source_urls(ledger, sources_by_id):
+    """A bound claim cites its own sources even without a link in the body."""
+    urls = set()
+    claims = ledger.get("claims")
+    for claim in claims if isinstance(claims, list) else []:
+        if not isinstance(claim, dict) or claim.get("include_in_report") is not True:
+            continue
+        if claim.get("report_paragraph") is None and not claim.get("report_excerpts"):
+            continue
+        for source_id in claim.get("source_ids") or []:
+            source = sources_by_id.get(source_id) or {}
+            if isinstance(source, dict) and source.get("url"):
+                urls.add(normalize_url(source["url"]))
+    return urls
 
 
 def binding_findings(text, ledger):
@@ -602,6 +642,7 @@ def binding_findings(text, ledger):
                 )
             )
         cited = {normalize_url(url) for url in extract_markdown_urls(body)}
+        cited |= _bound_claim_source_urls(ledger, sources_by_id)
         listed = {normalize_url(url) for url in extract_markdown_urls(source_text)}
         if cited != listed:
             findings.append(
@@ -772,7 +813,7 @@ def validate_markdown(
     source_indexes = [
         index
         for index, (heading, _) in enumerate(sections)
-        if heading.casefold() in SOURCE_HEADINGS
+        if is_sources_heading(heading)
     ]
     if not source_indexes:
         errors.append("Report needs a final H2 Sources section.")
@@ -848,7 +889,7 @@ def validate_report_against_ledger(text, ledger):
     source_starts = [
         start
         for heading, start in sections
-        if heading.casefold() in SOURCE_HEADINGS
+        if is_sources_heading(heading)
     ]
     if source_starts:
         body = body[: min(source_starts)]

@@ -145,10 +145,13 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^remove link \S+ from report\.md$"),
     re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
-    re.compile(r"^add the source link to paragraph \d+ of report\.md$"),
     re.compile(
-        r"^add the source link to the paragraph that states claim C\d+ "
-        r"in report\.md$"
+        r"^write \[C\d+\] at the end of the sentence in paragraph \d+ of "
+        r"report\.md, then alx check --fix$"
+    ),
+    re.compile(
+        r"^write \[C\d+\] at the end of the sentence that states claim C\d+ "
+        r"in report\.md, then alx check --fix$"
     ),
 )
 
@@ -2124,7 +2127,11 @@ class IntegrationHoleTests(AlxTestCase):
         )
         _code, out = self.run_in("check")
         line = self.line_with(out, "no nearby citation")
-        self.assertIn("Fix: add the source link to paragraph 1 of report.md", line)
+        self.assertIn(
+            "Fix: write [C1] at the end of the sentence in paragraph 1 of "
+            "report.md, then alx check --fix",
+            line,
+        )
         self.assertNotIn("alx review start content --iter", line)
 
     # item 4 --------------------------------------------------------------
@@ -2200,7 +2207,6 @@ class IntegrationHoleTests(AlxTestCase):
         self.assertEqual(1, code)
         self.assertIn("reviews/content.json", out)
         for path in (
-            "status",
             "scores.question_answered.score",
             "scores.question_answered.rationale",
             "checks.central_judgment_answers_question",
@@ -2274,7 +2280,9 @@ class IntegrationHoleTests(AlxTestCase):
         )
         _code, out = self.run_in("check")
         line = self.line_with(out, "C2 is included in the report with no")
-        self.assertIn("Fix: add the source link to paragraph", line)
+        self.assertIn(
+            "Fix: write [C2] at the end of the sentence in paragraph", line
+        )
         bound = self.line_with(out, "C1 is included in the report with no")
         self.assertIn("Fix: alx check --fix", bound)
 
@@ -2725,7 +2733,12 @@ class DeliveryRoundTests(AlxTestCase):
         self.assertEqual(1, code, out)
         self.assertNotEqual(before["at"], self.state()["last_check"]["at"])
 
-    def test_render_drops_the_companion_inside_the_reserve(self):
+    def test_render_keeps_the_companion_past_the_reserve(self):
+        """Restates test_render_drops_the_companion_inside_the_reserve (B5).
+
+        The J7 skip is gone: the rasterizer keeps its own 90 s cap, so both
+        templates are rendered however little of the budget is left.
+        """
         from contextlib import ExitStack
 
         from scripts import md_to_pdf, render_pdf_pages
@@ -2760,8 +2773,8 @@ class DeliveryRoundTests(AlxTestCase):
             self.set_remaining(5)
             code, out = self.run_in("render")
         self.assertEqual(0, code, out)
-        self.assertEqual(["executive"], rendered)
-        self.assertIn("tooling/render", out)
+        self.assertEqual(["executive", "atlas"], rendered)
+        self.assertNotIn("tooling/render", out)
 
     # J10 -----------------------------------------------------------------
     def test_a_recorded_online_failure_keeps_its_verification_note(self):
@@ -2978,13 +2991,18 @@ class ParkedReviewNoteTests(AlxTestCase):
         missing = alx._note_completeness(
             alx.Workspace(self.dir), self.state(), self.ledger(), "content"
         )
-        # status + score/rationale per score key + one per check key +
-        # section_reviews + completion_note: the form, whatever the claim count.
+        # score/rationale per score key + one per check key + section_reviews
+        # + completion_note: the form, whatever the claim count. `status` is
+        # no longer among them — `finish` writes it itself (B6).
+        own = [item for item in missing if "(content-review schema)" not in item]
         self.assertEqual(
-            3 + 2 * len(alx.CONTENT_SCORE_KEYS) + len(alx.CONTENT_CHECK_KEYS),
-            len(missing),
-            missing,
+            2 + 2 * len(alx.CONTENT_SCORE_KEYS) + len(alx.CONTENT_CHECK_KEYS),
+            len(own),
+            own,
         )
+        self.assertNotIn("status", out)
+        # B6: the schema errors come in the same round, never a second one.
+        self.assertTrue(len(missing) > len(own), missing)
 
     def test_review_start_prints_the_rewild_guide(self):
         self.bootstrap()
@@ -4295,3 +4313,348 @@ class LedgerSchemaCeremonyTests(AlxTestCase):
         self.assertEqual("1948-11-24", alx._normalized_published("1948年11月24日"))
         self.assertIsNone(alx._normalized_published("Spring 2010"))
         self.assertIsNone(alx._normalized_published(None))
+
+
+
+# --------------------------------------------------------------------------
+# 09-15-01 Part B: markers, cited sources, Sources heading, render, finish
+# --------------------------------------------------------------------------
+
+
+class ClaimMarkerTests(AlxTestCase):
+    """B1: `[C<n>]` in a paragraph binds that claim to that paragraph."""
+
+    def marked_report(self, first_marker="[C1]", second_marker="[C2]"):
+        ledger = self.ledger()
+        first = ledger["sources"][0]["url"]
+        second = ledger["sources"][1]["url"]
+        text = (self.dir / "report.md").read_text(encoding="utf-8")
+        text = text.replace(
+            f"[recorded in the study]({first})",
+            f"recorded in the study {first_marker}",
+        )
+        text = text.replace(
+            f"as the [registry note]({second}) records",
+            f"as the registry note records {second_marker}",
+        )
+        (self.dir / "report.md").write_text(text, encoding="utf-8")
+        return text
+
+    def mapping(self):
+        return alx.paragraph_mapping(
+            alx.Workspace(self.dir),
+            self.state(),
+            self.ledger(),
+            (self.dir / "report.md").read_text(encoding="utf-8"),
+        )
+
+    def test_a_marker_binds_the_claim_to_its_paragraph(self):
+        self.bootstrap()
+        self.marked_report()
+        mapping, unbound = self.mapping()
+        self.assertEqual({"C1": 1, "C2": 2}, mapping)
+        self.assertEqual({}, unbound)
+
+    def test_every_marker_form_binds_every_id_it_names(self):
+        text = (
+            "# Title\n\n"
+            "> Standfirst.\n> 1 January 2026\n\n"
+            "One 【C3、C4】.\n\n"
+            "Two [C5，C6] and [C7, C8].\n"
+        )
+        self.assertEqual(
+            {"C3": 1, "C4": 1, "C5": 2, "C6": 2, "C7": 2, "C8": 2},
+            alx._marker_bindings(text),
+        )
+
+    def test_a_multi_id_marker_binds_both_claims_to_one_paragraph(self):
+        self.bootstrap()
+        self.marked_report(first_marker="[C1, C2]", second_marker="")
+        mapping, _unbound = self.mapping()
+        self.assertEqual({"C1": 1, "C2": 1}, mapping)
+
+    def test_fix_turns_markers_into_source_links_and_leaves_no_hard(self):
+        self.bootstrap()
+        self.marked_report(first_marker="[C1, C2]", second_marker="[C9]")
+        _code, out = self.run_in("check", "--fix")
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        ledger = self.ledger()
+        first = ledger["sources"][0]["url"]
+        second = ledger["sources"][1]["url"]
+        self.assertIn(f"[S1]({first}) [S2]({second})", report)
+        self.assertNotIn("[C1, C2]", report)
+        # A marker whose claim is not in the ledger is left alone.
+        self.assertIn("[C9]", report)
+        excerpts = [
+            excerpt
+            for claim in ledger["claims"]
+            for excerpt in claim.get("report_excerpts") or []
+        ]
+        self.assertTrue(excerpts)
+        self.assertFalse([item for item in excerpts if "[C1" in item], excerpts)
+        code, out = self.run_in("check")
+        self.assertEqual(0, code, out)
+        self.assertIn("=== HARD 0", out)
+
+    def test_an_explicit_bind_beats_the_marker(self):
+        self.bootstrap()
+        self.marked_report()
+        code, out = self.run_in("claim", "bind", "C1:3")
+        self.assertEqual(0, code, out)
+        mapping, _unbound = self.mapping()
+        self.assertEqual(3, mapping["C1"])
+
+
+class CitedSourceTests(AlxTestCase):
+    """B2: a bound claim cites its sources without a link in the body."""
+
+    def test_a_bound_claim_without_a_body_link_is_still_listed(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        first = ledger["sources"][0]["url"]
+        second = ledger["sources"][1]["url"]
+        text = (self.dir / "report.md").read_text(encoding="utf-8")
+        text = text.replace(
+            f"[recorded in the study]({first})", "recorded in the study"
+        )
+        text = text.replace(f"[registry note]({second})", "registry note")
+        (self.dir / "report.md").write_text(text, encoding="utf-8")
+        code, out = self.run_in("claim", "bind", "C1:1", "C2:2")
+        self.assertEqual(0, code, out)
+        _code, out = self.run_in("check", "--fix")
+        self.assertNotIn("binding/sources-section", out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        listing = report[report.index("## Sources") :]
+        self.assertIn(f"]({first})", listing)
+        self.assertIn(f"]({second})", listing)
+
+
+class SourcesHeadingTests(AlxTestCase):
+    """B3: which H2 is the Sources section, and writing one when it is absent."""
+
+    def test_the_predicate_accepts_every_written_form(self):
+        for heading in (
+            "Sources",
+            "资料来源",
+            "資料來源",
+            "参考文献",
+            "References and sources",
+        ):
+            with self.subTest(heading=heading):
+                self.assertTrue(alx.validate_report.is_sources_heading(heading))
+        for heading in ("Findings", "方法"):
+            with self.subTest(heading=heading):
+                self.assertFalse(alx.validate_report.is_sources_heading(heading))
+        self.assertIsNotNone(
+            alx.sources_heading_offset("# T\n\n## 资料来源\n\n- [a](https://x.test/)\n")
+        )
+
+    def test_fix_appends_the_sources_section_when_the_report_has_none(self):
+        self.bootstrap()
+        text = (self.dir / "report.md").read_text(encoding="utf-8")
+        (self.dir / "report.md").write_text(
+            text[: text.index("## Sources")].rstrip("\n") + "\n", encoding="utf-8"
+        )
+        _code, _out = self.run_in("check", "--fix")
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        listing = report[report.index("## Sources") :]
+        self.assertIn(f"]({self.ledger()['sources'][0]['url']})", listing)
+
+
+class MarkerFixtureTests(AlxTestCase):
+    """Acceptance B: raw markers plus `## 资料来源` with bare URLs, end to end."""
+
+    def test_check_fix_binds_markers_and_rebuilds_the_listing(self):
+        self.bootstrap()
+        ledger = self.ledger()
+        first = ledger["sources"][0]["url"]
+        second = ledger["sources"][1]["url"]
+        date_line = alx.report_contract.localized_date("en", None)
+        (self.dir / "report.md").write_text(
+            "# Ledger Study\n\n"
+            "> Whether the archive release matches the registry tally.\n"
+            f"> {date_line}\n\n"
+            "## Findings\n\n"
+            "The archive released 1,204 documents in March 2026, a release the "
+            "registry confirmed [C1].\n\n"
+            "The registry logged 1,204 documents in March 2026 for the same "
+            "period [C2].\n\n"
+            "The reading room keeps 「原始日記」 under restricted access, so the "
+            "counts above are the only public record.\n\n"
+            "## 资料来源\n\n"
+            f"{first}\n{second}\n",
+            encoding="utf-8",
+        )
+        _code, out = self.run_in("check", "--fix")
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertIn(f"[S1]({first})", report)
+        self.assertIn(f"[S2]({second})", report)
+        self.assertNotIn("[C1]", report)
+        listing = report[report.index("## 资料来源") :]
+        self.assertIn(f"- [{ledger['sources'][0]['title']}]({first})", listing)
+        code, out = self.run_in("check")
+        self.assertEqual(0, code, out)
+        self.assertIn("=== HARD 0", out)
+        self.assertNotIn("binding/sources-section", out)
+
+
+class RenderRepeatTests(AlxTestCase):
+    """B4: `alx` owns `pages-<template>`; a second render refills it."""
+
+    def issued(self, stack):
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        helper.stub_gates(stack)
+        code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+
+    def test_render_twice_writes_both_contact_sheets(self):
+        from contextlib import ExitStack
+
+        from scripts import md_to_pdf, render_pdf_pages
+
+        def fake_render_pdf(input_path, output_path, **kwargs):
+            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            return Path(output_path)
+
+        def strict_render_pages(pdf_path, output_dir, **kwargs):
+            target = Path(output_dir)
+            if target.exists() and any(target.iterdir()):
+                raise RuntimeError(f"Output directory must be empty: {target}")
+            target.mkdir(parents=True, exist_ok=True)
+            page = target / "page-001.png"
+            page.write_bytes(b"\x89PNG")
+            return [page]
+
+        with ExitStack() as stack:
+            self.issued(stack)
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_pages", side_effect=strict_render_pages
+                )
+            )
+            for attempt in range(2):
+                code, out = self.run_in("render")
+                with self.subTest(attempt=attempt):
+                    self.assertEqual(0, code, out)
+                    self.assertIn("executive contact sheet:", out)
+                    self.assertNotIn("tooling/render", out)
+
+
+class ReviewFinishOneRoundTests(AlxTestCase):
+    """B6: `review finish` names everything once and owns its own fields."""
+
+    def reviewer(self):
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        for name in ("root", "dir", "run_alx", "run_in", "state", "ledger"):
+            setattr(reviews, name, getattr(self, name))
+        return reviews
+
+    def started(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        code, out = self.run_in("review", "start", "content")
+        self.assertEqual(0, code, out)
+        return self.dir / "reviews" / "content.json"
+
+    def note(self, path):
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def write_note(self, path, note):
+        path.write_text(json.dumps(note, ensure_ascii=False), encoding="utf-8")
+
+    def test_the_own_checks_and_the_schema_errors_come_in_one_round(self):
+        self.started()
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(1, code)
+        self.assertIn("scores.question_answered.score (integer 1-5)", out)
+        self.assertIn("(content-review schema)", out)
+
+    def test_finish_writes_status_itself(self):
+        path = self.started()
+        self.reviewer().fill_note("content")
+        note = self.note(path)
+        del note["status"]
+        self.write_note(path, note)
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(0, code, out)
+        self.assertEqual("completed", self.note(path)["status"])
+
+    def test_finish_fills_a_missing_section_disposition(self):
+        path = self.started()
+        self.reviewer().fill_note("content")
+        note = self.note(path)
+        del note["section_reviews"][0]["disposition"]
+        self.write_note(path, note)
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(0, code, out)
+        self.assertEqual("keep", self.note(path)["section_reviews"][0]["disposition"])
+
+    def test_a_disclosure_excerpt_survives_the_report_markup(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        text = (self.dir / "report.md").read_text(encoding="utf-8")
+        (self.dir / "report.md").write_text(
+            text.replace(
+                "1,204 documents in March 2026",
+                "**1,204 documents in March 2026**",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        code, out = self.run_in("review", "start", "content")
+        self.assertEqual(0, code, out)
+        path = self.dir / "reviews" / "content.json"
+        self.reviewer().fill_note("content")
+        note = self.note(path)
+        note["findings"] = [
+            {
+                "finding_id": "F1",
+                "severity": "minor",
+                "category": "evidence",
+                "location": "Findings, paragraph 1",
+                "finding": "The release count is stated without its caveat.",
+                "disposition": "accepted_limitation",
+                "rationale": "The registry tally is cited in the next sentence.",
+                "report_disclosure_excerpt": "1,204 documents in March 2026",
+            }
+        ]
+        self.write_note(path, note)
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(0, code, out)
+
+
+class LiveRecheckNoteTests(AlxTestCase):
+    """B7: the reserve skip says what was verified, and never prints minus."""
+
+    def test_the_skipped_note_names_the_offline_verification(self):
+        from contextlib import ExitStack
+
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state", "set_remaining",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        with ExitStack() as stack:
+            helper.stub_gates(stack)
+            self.set_remaining(-20)
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        issued = json.loads(
+            (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
+        )
+        self.assertIn(
+            "live source re-check skipped (0 min left; every extract was "
+            "already verified offline against the cached pages by alx check)",
+            issued["delivery_notes"],
+        )

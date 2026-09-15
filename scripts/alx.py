@@ -1531,9 +1531,44 @@ def _refresh_one(ws, state, ledger, args, source_id, lines):
     return True
 
 
+def _input_path(args, path):
+    """C3: an input path resolves against cwd first, then against `--dir`."""
+    candidate = Path(path)
+    if candidate.is_absolute() or candidate.exists():
+        return candidate
+    under_dir = Path(args.dir) / candidate
+    return under_dir if under_dir.exists() else candidate
+
+
+#: C4: the three classification flags are validated inside the command, so a
+#: bad value is one warning next to the default that stands, not a parser exit.
+_CLASSIFICATION_FLAGS = (
+    ("--provenance", "provenance", PROVENANCES, "unverified"),
+    ("--type", "type", EVIDENCE_TYPES, "news_report"),
+    ("--role", "role", SOURCE_ROLES, "independent_analysis"),
+)
+
+
+def _classification_warnings(args):
+    """Report every unknown classification value; keep the known ones."""
+    messages = []
+    for flag, dest, choices, default in _CLASSIFICATION_FLAGS:
+        value = getattr(args, dest, None)
+        values = value if isinstance(value, list) else [value]
+        bad = [item for item in values if item is not None and item not in choices]
+        for item in bad:
+            messages.append(
+                f"unknown {flag} {item!r}; stored as {default} "
+                f"(choices: {', '.join(choices)})"
+            )
+        if bad:
+            setattr(args, dest, [item for item in values if item in choices] or None)
+    return messages
+
+
 def cmd_fetch(args):
     ws, state, ledger = _open(args)
-    lines = []
+    lines = _classification_warnings(args)
     ok = True
     if args.id:
         if not args.refresh:
@@ -1569,6 +1604,7 @@ def cmd_source_set(args):
     if source is None:
         print(f"{args.source_id} is not in the ledger.", file=sys.stderr)
         return 1
+    lines = _classification_warnings(args)
     if args.provenance:
         source["provenance"] = args.provenance
     if args.type:
@@ -1580,24 +1616,25 @@ def cmd_source_set(args):
     if args.published:
         source["published"] = args.published
     if args.undated_reason:
-        source["undated_reason"] = Path(args.undated_reason).read_text(
+        source["undated_reason"] = _input_path(args, args.undated_reason).read_text(
             encoding="utf-8"
         ).strip()
     if args.family_justification:
-        source["family_justification"] = Path(args.family_justification).read_text(
+        source["family_justification"] = _input_path(args, args.family_justification).read_text(
             encoding="utf-8"
         ).strip()
     if args.accountability_note:
-        source["accountability_note"] = Path(args.accountability_note).read_text(
+        source["accountability_note"] = _input_path(args, args.accountability_note).read_text(
             encoding="utf-8"
         ).strip()
     ws.save_ledger(ledger)
+    lines.append(f"{args.source_id} classification updated.")
     _emit(
         ws,
         state,
         "source set",
         f"{args.source_id} classification",
-        [f"{args.source_id} classification updated."],
+        lines,
     )
     return 0
 
@@ -1816,7 +1853,7 @@ def cmd_claim_add(args):
     ws, state, ledger = _open(args)
     items = []
     sources = {}
-    for path in expand_file_globs(args.files):
+    for path in expand_file_globs([str(_input_path(args, item)) for item in args.files]):
         payload = _read_json(path)
         batch = payload if isinstance(payload, list) else [payload]
         for item in batch:
@@ -2147,7 +2184,7 @@ def _deep_merge(target, patch):
 def cmd_ledger_merge(args):
     ws, state, ledger = _open(args)
     try:
-        patch = _read_json(args.patch)
+        patch = _read_json(_input_path(args, args.patch))
     except json.JSONDecodeError as exc:
         print(
             f"{args.patch} is not valid JSON: {exc.msg} "
@@ -2226,18 +2263,9 @@ def cmd_snapshot(args):
         )
         return 0
     base = ws.dir / "report.pre-rewild.md"
-    if not base.exists():
-        target = base
-    elif args.iter:
-        iteration = len(ws.snapshots())
-        target = ws.dir / f"report.pre-rewild.iter{iteration}.md"
-    else:
-        print(
-            f"{base.name} exists (write-once). Use `alx snapshot --iter` for the "
-            "next humanization round.",
-            file=sys.stderr,
-        )
-        return 1
+    # C5: a second snapshot is the next humanization round, not a refusal.
+    iteration = f".iter{len(ws.snapshots())}" if base.exists() else ""
+    target = ws.dir / f"report.pre-rewild{iteration}.md"
     _bind_markers(ws, state, ledger, ws.report_text())
     shutil.copyfile(ws.report, target)
     state["humanization"] = "snapshot"
@@ -3217,13 +3245,22 @@ def _claim_order(claim_id):
     return (int(digits) if digits else 0, str(claim_id))
 
 
+def _next_step(hard):
+    """C6: the two ways forward after a check; neither of them is a refusal."""
+    if hard:
+        return (
+            f"fix HARD then `{remedy('check')}`, or `{remedy('issue')}` "
+            "(it drops what is still hard)"
+        )
+    return f"`{remedy('issue')}`"
+
+
 def _status_line(state, findings, remaining):
-    hard = len(hard_findings(findings))
     elapsed, _remaining = _minutes(state)
-    next_step = "`alx issue`" if not hard else "fix HARD then `alx check`"
+    next_step = _next_step(hard_findings(findings))
     tail = (
-        " At remaining <= 15 min apply every \"Remove:\" remedy and run "
-        "`alx issue --deliver`."
+        f" At remaining <= 15 min run `{remedy('issue')}` then "
+        f"`{remedy('render')}`."
     )
     return (
         f"=== STATUS: check #{state['counters']['check']}, elapsed {elapsed} min, "
@@ -3538,22 +3575,6 @@ def _insert_verification_note(ws, lang, notes):
     return note
 
 
-def _remove_verification_note(ws):
-    """J10: an aborted `issue` takes its own note paragraph back out.
-
-    Left behind, the machine-written note is prose the next run's rewild tiers
-    judge as text that is not in the pre-humanization source.
-    """
-    text = ws.report_text()
-    prefixes = tuple(VERIFICATION_NOTE_PREFIX.values())
-    updated = text
-    for _start, _end, block in _blocks(text):
-        if block.strip().startswith(prefixes):
-            updated = updated.replace(block + "\n\n", "").replace(block, "")
-    if updated != text:
-        ws.report.write_text(re.sub(r"\n{3,}", "\n\n", updated), encoding="utf-8")
-
-
 def _auto_remedies(ws, state, ledger, findings, lines):
     """Spec §6.9.1: `--deliver` drops scope, it never waives Class F."""
     restore = [
@@ -3587,26 +3608,42 @@ def _auto_remedies(ws, state, ledger, findings, lines):
         for url in urls:
             text = re.sub(r"\[([^\]]*)\]\(\s*" + re.escape(url) + r"\s*\)", r"\1", text)
         ws.report.write_text(text, encoding="utf-8")
-        lines.append(f"auto-remedy: link(s) removed from report.md: {', '.join(urls)}.")
-    claim_ids = []
+        lines.extend(f"link removed: {url}" for url in urls)
+    # C1: one line per removal, naming the family that asked for it.
+    families = {}
     for item in class_f_findings(findings):
         for value in item.ids:
-            if re.fullmatch(r"C\d+", str(value)) and value not in claim_ids:
-                claim_ids.append(value)
+            if re.fullmatch(r"C\d+", str(value)):
+                families.setdefault(str(value), item.family)
+    claims = {claim.get("claim_id"): claim for claim in ledger.get("claims", [])}
     dropped = []
-    for claim_id in claim_ids:
-        if claim_id not in {claim.get("claim_id") for claim in ledger.get("claims", [])}:
+    for claim_id, family in families.items():
+        if claim_id not in claims:
             continue
-        paragraph, _co_mapped, _dependents = _drop_plan(ws, state, ledger, claim_id)
+        text = str(claims[claim_id].get("claim", ""))[:100]
         apply_drop(ws, state, ledger, claim_id, "Class-F finding at issue.")
-        where = f"paragraph {paragraph}" if paragraph else "unmapped"
-        lines.append(f"auto-remedy: claim {claim_id} dropped ({where}).")
+        lines.append(f"dropped {claim_id} ({family}): {text}")
         dropped.append(claim_id)
     if dropped:
         stamp = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
         with ws.worklog.open("a", encoding="utf-8") as handle:
             handle.write(f"{stamp} issue auto-drop {', '.join(dropped)}\n")
     return ws.load_state(), ws.load_ledger()
+
+
+def _drop_hard(ws, state, ledger, findings, lines):
+    """C1: apply every Remove remedy until nothing hard is left to remove."""
+    dropped = False
+    while class_f_findings(findings):
+        before = len(ledger.get("claims", []))
+        state, ledger = _auto_remedies(
+            ws, state, ledger, class_f_findings(findings), lines
+        )
+        dropped = True
+        findings = run_check(ws, state, ledger, fix=False)
+        if len(ledger.get("claims", [])) == before:
+            break
+    return state, ledger, findings, dropped
 
 
 def _online_findings(result):
@@ -3847,70 +3884,42 @@ def cmd_issue(args):
         ws.save_state(state)
         disclosures.append("humanization: none (issue created the snapshot)")
     findings = run_check(ws, state, ledger, fix=False)
-    blocking = class_f_findings(findings)
-    dropped_for_delivery = False
-    if blocking and args.deliver:
-        state, ledger = _auto_remedies(ws, state, ledger, blocking, lines)
-        dropped_for_delivery = True
-        findings = run_check(ws, state, ledger, fix=False)
-        blocking = class_f_findings(findings)
+    state, ledger, findings, dropped_for_delivery = _drop_hard(
+        ws, state, ledger, findings, lines
+    )
     # J7: `alx status` must report what `issue` just saw, remedies included.
     _record_last_check(state, findings)
     ws.save_state(state)
-    if blocking:
-        lines.append(render_grouped(blocking))
-        lines.append("issue refused: hard findings block delivery.")
-        _remove_verification_note(ws)
-        _emit(ws, state, "issue", f"{len(blocking)} hard", lines)
-        return 1
     online_findings, _ok = _online_phase(
         ws, state, ledger, args, lines, delivery_notes, disclosures
     )
-    if online_findings and not args.deliver:
-        lines.append(render_grouped(online_findings))
-        lines.append("issue refused: live fidelity found hard findings.")
-        _remove_verification_note(ws)
-        _emit(ws, state, "issue", "online hard", lines)
-        return 1
     if online_findings:
         # Spec §6.9.1 + J5: the drops change the report and the ledger, so the
-        # whole offline check runs again and whatever survives still refuses.
+        # whole offline check runs again over what is actually delivered.
         state, ledger = _auto_remedies(ws, state, ledger, online_findings, lines)
         dropped_for_delivery = True
         findings = run_check(ws, state, ledger, fix=False)
-        blocking = class_f_findings(findings)
+        state, ledger, findings, _again = _drop_hard(
+            ws, state, ledger, findings, lines
+        )
         _record_last_check(state, findings)
         ws.save_state(state)
-        if blocking:
-            lines.append(render_grouped(blocking))
-            lines.append("issue refused: hard findings block delivery.")
-            _remove_verification_note(ws)
-            _emit(ws, state, "issue", f"{len(blocking)} hard", lines)
-            return 1
         # J1: the receipt is owed by the ledger that is actually delivered, so
         # the live pass runs once more over the ledger minus the dropped claims.
-        online_findings, _ok = _online_phase(
-            ws, state, ledger, args, lines, delivery_notes, disclosures
-        )
-        if online_findings:
-            lines.append(render_grouped(online_findings))
-            lines.append("issue refused: live fidelity found hard findings.")
-            _remove_verification_note(ws)
-            _emit(ws, state, "issue", "online hard", lines)
-            return 1
+        _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures)
+    still_hard = class_f_findings(findings)
+    if still_hard:
+        # C1: nothing refuses, so what could not be removed is still printed.
+        lines.append(render_grouped(still_hard))
     note_items = delivery_notes + disclosures
     if note_items:
         note = _insert_verification_note(ws, state.get("lang", "en"), note_items)
         lines.append(f"verification note: {note[:60]}")
     receipts, gate_blocking = _receipt_phase(ws, state, ledger, lines, delivery_notes)
     if gate_blocking:
-        # J5: a gate failure keeps its producer's class; Class F is never a
-        # receipt-tooling note, with or without `--deliver`.
+        # C1: a refused gate is printed and noted; it no longer withholds the
+        # receipts.
         lines.append(render_grouped(gate_blocking))
-        lines.append("issue refused: hard findings block delivery.")
-        _remove_verification_note(ws)
-        _emit(ws, state, "issue", f"{len(gate_blocking)} hard", lines)
-        return 1
     # R28: every warning is recorded and none of them withholds the delivery.
     warning_notes = [
         f"{item.family}: {item.message}"
@@ -3977,19 +3986,13 @@ def _record_render_note(ws, note):
 def cmd_render(args):
     ws, state, ledger = _open(args)
     receipt_path = ws.receipts / "issue.json"
-    refusal = f"run `{remedy('issue')}` (or `{remedy('issue-deliver')}`)"
-    if not receipt_path.exists():
-        print(f"receipts/issue.json is missing; {refusal}.", file=sys.stderr)
-        return 1
-    receipt = _read_json(receipt_path)
+    receipt = _read_json(receipt_path) if receipt_path.exists() else {}
     if receipt.get("report_sha256") != file_sha256(ws.report) or receipt.get(
         "ledger_sha256"
     ) != file_sha256(ws.ledger_path):
-        print(
-            f"receipts/issue.json does not match report.md and ledger.json; {refusal}.",
-            file=sys.stderr,
-        )
-        return 1
+        # C2: a missing or stale receipt is the issue step `render` runs itself.
+        cmd_issue(argparse.Namespace(dir=args.dir, deliver=False, sample_size=8))
+        ws, state, ledger = _open(args)
     from scripts import md_to_pdf, render_pdf_pages  # heavy import, render only
 
     subject = f"{ledger.get('subject', '')} {ledger.get('research_question', '')}"
@@ -4092,19 +4095,13 @@ def _next_command(ws, state, ledger):
         return "`alx fetch <url>`"
     if not ledger.get("claims"):
         return "`alx claim add claims/batch.json`"
-    if not state.get("last_check"):
+    last = state.get("last_check")
+    if not last:
         return f"`{remedy('check-fix')}`"
-    _elapsed, remaining = _minutes(state)
-    if remaining <= DEGRADE_MINUTES:
-        # Past the degrade line the snapshot and both reviews are optional
-        # (R28); the only command that still ends in a delivery is this one.
-        return f"`{remedy('issue-deliver')}`"
-    if ws.latest_snapshot() is None:
-        return "`alx snapshot`"
-    if not all(
-        state.get("reviews", {}).get(kind, {}).get("finished") for kind in REVIEW_KINDS
-    ):
-        return f"`{remedy('review-start', kind='rewild')}`"
+    if last.get("hard"):
+        # C6: the snapshot and both reviews are optional, so the only ways
+        # forward are a fix or the issue that drops what is still hard.
+        return _next_step(True)
     if not (ws.receipts / "issue.json").exists():
         return f"`{remedy('issue')}`"
     return f"`{remedy('render')}`"
@@ -4143,9 +4140,9 @@ def build_parser():
     fetch.add_argument("urls", nargs="*")
     fetch.add_argument("--id", dest="id", help="ledger source id to refresh")
     fetch.add_argument("--refresh", action="store_true")
-    fetch.add_argument("--provenance", choices=PROVENANCES)
-    fetch.add_argument("--type", choices=EVIDENCE_TYPES)
-    fetch.add_argument("--role", action="append", choices=SOURCE_ROLES)
+    fetch.add_argument("--provenance")
+    fetch.add_argument("--type")
+    fetch.add_argument("--role", action="append")
     fetch.add_argument("--accountability", choices=ACCOUNTABILITY_BASES)
     fetch.set_defaults(handler=cmd_fetch)
 
@@ -4153,9 +4150,9 @@ def build_parser():
     source_sub = source.add_subparsers(dest="source_command", required=True)
     source_set = source_sub.add_parser("set")
     source_set.add_argument("source_id")
-    source_set.add_argument("--provenance", choices=PROVENANCES)
-    source_set.add_argument("--type", choices=EVIDENCE_TYPES)
-    source_set.add_argument("--role", action="append", choices=SOURCE_ROLES)
+    source_set.add_argument("--provenance")
+    source_set.add_argument("--type")
+    source_set.add_argument("--role", action="append")
     source_set.add_argument("--accountability", choices=ACCOUNTABILITY_BASES)
     source_set.add_argument("--published")
     source_set.add_argument("--undated-reason", dest="undated_reason")
@@ -4260,12 +4257,12 @@ def missing_file_arguments(args):
         # K5: a FILE argument may arrive as an unexpanded glob (spec D14
         # prints one); it is a path when it names at least one file.
         for path in expand_file_globs(value if isinstance(value, list) else [value]):
-            if path and not Path(path).is_file():
-                # Name the path that was actually looked up: the model passing
-                # a relative path from the wrong directory cannot see it.
+            if path and not _input_path(args, path).is_file():
+                # C3: both locations tried, so the model can see which one to
+                # write the file to.
                 missing.append(
-                    f"{flag}: no file at {Path(path).resolve()} (cwd {cwd}); "
-                    "paths are relative to the current directory or use --dir"
+                    f"{flag}: no file at {Path(path).resolve()} nor at "
+                    f"{(Path(args.dir) / path).resolve()} (cwd {cwd})"
                 )
     return missing
 

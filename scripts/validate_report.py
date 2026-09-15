@@ -1148,8 +1148,6 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
             errors.append("Alexandria's bundled Rewild checker has changed.")
     if receipt.get("review_status") != "completed":
         errors.append("Rewild receipt does not record a completed blind review.")
-    if not isinstance(receipt.get("style_waivers"), list):
-        errors.append("Rewild receipt style_waivers must be an array.")
     for path_key, hash_key, label in (
         ("source_path", "source_sha256", "pre-Rewild source"),
         ("checker_path", "checker_sha256", "Rewild checker"),
@@ -1179,17 +1177,6 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             regenerated = work / "receipt.json"
-            waiver_path = None
-            style_waivers = receipt.get("style_waivers", [])
-            if style_waivers:
-                waiver_path = work / "style-waivers.json"
-                waiver_path.write_text(
-                    json.dumps(
-                        {"style_waivers": style_waivers},
-                        ensure_ascii=False,
-                    ),
-                    encoding="utf-8",
-                )
             rerun_errors = hard_errors(
                 run_gate(
                     report_path,
@@ -1197,7 +1184,6 @@ def validate_rewild_receipt(report_path, receipt, *, expected_lang=None):
                     report_lang=receipt_lang,
                     review_note_path=Path(receipt["review_note_path"]),
                     receipt_path=regenerated,
-                    waiver_path=waiver_path,
                 )
             )
             if not rerun_errors and regenerated.is_file():

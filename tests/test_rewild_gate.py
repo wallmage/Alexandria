@@ -604,44 +604,6 @@ class CitationStripperTests(unittest.TestCase):
         self.assertEqual(["T", "Body"], empty_prose.split())
 
 
-class LoaderDiagnosticsTests(unittest.TestCase):
-    """A rejected note or waiver must say which entry broke which rule."""
-
-    def _write(self, directory, payload):
-        import json
-
-        path = Path(directory) / "entries.json"
-        path.write_text(json.dumps(payload), encoding="utf-8")
-        return path
-
-    def test_waiver_diagnostics_name_the_entry_and_the_rule(self):
-        from scripts.rewild_gate import _load_style_waivers
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = self._write(
-                directory,
-                {
-                    "style_waivers": [
-                        {
-                            "section": "Rhythm (statistical)",
-                            "message": "",
-                            "reason": "A long enough reason.",
-                        },
-                        {
-                            "section": "Rhythm (statistical)",
-                            "message": "Sentence lengths cluster",
-                            "reason": "too short",
-                        },
-                    ]
-                },
-            )
-            waivers, errors = _load_style_waivers(path)
-            self.assertEqual({}, waivers)
-            joined = " ".join(errors)
-            self.assertIn("Style waiver 1 needs the checker's exact 'message'", joined)
-            self.assertIn("Style waiver 2 has a 'reason' of 9 characters", joined)
-
-
 class ConsoleEncodingTests(unittest.TestCase):
     class _LegacyStream:
         encoding = "cp1252"

@@ -3304,7 +3304,6 @@ class ClaimInputRoundTripTests(AlxTestCase):
     def test_response_role_round_trips_without_responds_to(self):
         item = self.fixture(
             "C12",
-            person_claim_role="response",
             responds_to_claim_ids=["C1"],
         )
         self.round_trip(item)
@@ -3313,7 +3312,6 @@ class ClaimInputRoundTripTests(AlxTestCase):
     def test_resolution_role_round_trips_without_resolves(self):
         item = self.fixture(
             "C13",
-            person_claim_role="resolution",
             resolves_claim_ids=["C1"],
         )
         self.round_trip(item)

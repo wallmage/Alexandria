@@ -348,7 +348,7 @@ The required checks and finding fields live in `content-review.schema.json`. Cri
 Cover image: use the bundled template image; pass `--cover-image` only if the user supplies a file.
 
 Lifecycle: `alx review start content` (copies report + ledger), fill
-`reviews/content.json` per this section, `alx review finish content`;
-`alx review restore content` reverts both files. `alx issue` then writes
+`reviews/content.json` per this section, `alx review finish content`.
+`alx issue` then writes
 `receipts/content.json` and the source-fidelity receipt. Do not invoke
 standalone `content_gate.py` / `source_fidelity.py` from the runbook.

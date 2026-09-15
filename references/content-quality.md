@@ -1,6 +1,6 @@
 # Content quality
 
-Use this reference while planning research, building the argument, and reviewing the exact final report. The aim is not to make every report look alike. It is to make every long report repay the reader’s time.
+Use this reference while planning research, building the argument, and editing the exact final report. The aim is not to make every report look alike. It is to make every long report repay the reader’s time.
 
 ## 1. Write the reader contract
 
@@ -15,7 +15,7 @@ Before searching, state:
 
 For biography, history, or explanatory work, “decision” may mean the judgment or understanding the reader should leave with. Do not force a business recommendation onto a subject that calls for interpretation.
 
-Record the contract in the version-4 evidence ledger. Revisit it when new evidence changes the assignment.
+Revisit the contract when new evidence changes the assignment.
 
 ## 2. Build a question architecture
 
@@ -31,9 +31,9 @@ Reveal mechanisms, causes, incentives, trade-offs, changes over time, and differ
 
 ### Decision-changing questions
 
-Test the claims most likely to alter the verdict, recommendation, or interpretation. Give these high priority in the coverage map.
+Test the claims most likely to alter the verdict, recommendation, or interpretation. Give these high priority.
 
-Each coverage item needs:
+Each research question needs:
 
 - a precise question;
 - its relevance to the reader;
@@ -59,58 +59,56 @@ Do not let ordinary search results define the argument. For each plausible concl
 Search in the original language when it improves recall. For current subjects, include the runtime date, version, jurisdiction, and relevant time window.
 
 Write down the strongest rival explanation before drafting. Record the
-hypothesis, test, evidence, outcome, and effect on the conclusion in
-`synthesis.adversarial_tests`. If no evidence could change the conclusion, the
+hypothesis, test, evidence, outcome, and effect on the conclusion. If no evidence could change the conclusion, the
 conclusion is not being tested.
 
-## 4. Build the right source portfolio
+## 4. Match evidence to the claim
 
 Source count is not quality. Match evidence to the claim.
 
-### Source roles
+### Source kinds
 
-Use the ledger’s source roles:
+Use the kinds of source the question actually needs:
 
-- `subject_official`: what the subject says, publishes, or is legally accountable for;
-- `counterparty_official`: the comparable or opposing party’s record;
-- `independent_analysis`: reporting or analysis independent of the subject;
-- `empirical_data`: a dataset, experiment, test, benchmark, measurement, or direct observation;
-- `affected_stakeholder`: documented user, worker, customer, community, or participant experience;
-- `expert_interpretation`: a qualified interpretation of difficult evidence;
-- `historical_record`: a contemporaneous or archival record.
+- what the subject says, publishes, or is legally accountable for;
+- the comparable or opposing party’s record;
+- reporting or analysis independent of the subject;
+- a dataset, experiment, test, benchmark, measurement, or direct observation;
+- documented user, worker, customer, community, or participant experience;
+- a qualified interpretation of difficult evidence;
+- a contemporaneous or archival record.
 
-Not every report needs every role. The portfolio must, however, represent the perspectives necessary to answer the governing question.
+Not every report needs every kind. The sources must, however, represent the perspectives necessary to answer the governing question.
 
-### Triangulation
+### Independent confirmation
 
-For each key judgment:
+For each central judgment:
 
 - **Met:** at least two genuinely independent source families converge.
 - **Limited:** the best available evidence comes from one family or one interested side. Reduce confidence and disclose the limitation.
-- **Not applicable:** a single accountable record directly establishes a narrow fact, such as a filed figure or published rule. This status is unavailable for key analysis.
+- **Not applicable:** a single accountable record directly establishes a narrow fact, such as a filed figure or published rule. This status is unavailable for central analysis.
 
 Do not inflate independence by counting syndicated stories, copied press releases, several pages from one organization, or studies that reuse the same dataset as separate families.
 
 ## 5. Maintain an evidence and reasoning graph
 
-The ledger distinguishes:
+Distinguish:
 
 - **Fact:** directly verifiable.
 - **Reported claim:** attributed to a person or organization.
 - **Estimate:** calculated or forecast with assumptions.
 - **Analysis:** a conclusion derived from other claims or sources.
 
-It also distinguishes:
+Also distinguish:
 
 - **Key:** changes the central judgment or reader action.
-- **Supporting:** explains or substantiates a key judgment.
+- **Supporting:** explains or substantiates a central judgment.
 - **Context:** orients the reader without carrying the verdict.
 
-A key judgment records the evidence or supported claims beneath it. The rest —
+A central judgment records the evidence or supported claims beneath it. The rest —
 the reasoning that connects them, why the judgment matters, what would weaken
-or reverse it, triangulation status, confidence, limitations, contradictions
-and their resolution — is optional in the ledger and no gate asks for it.
-Write it where it changes what the reader understands, in the report itself.
+or reverse it, confirmation status, confidence, limitations, contradictions
+and their resolution — belongs in the report when it changes what the reader understands.
 
 Do not hide inference inside factual prose. A transparent reasoning chain is more useful than an unexplained confident sentence.
 
@@ -131,7 +129,7 @@ When sources disagree:
 
 1. compare dates, definitions, samples, methods, incentives, and scope;
 2. decide whether the claims truly conflict;
-3. link the claims reciprocally in the ledger;
+3. link the claims reciprocally;
 4. state which account is stronger and why;
 5. preserve the disagreement when it cannot be resolved;
 6. show how the uncertainty affects the conclusion.
@@ -142,16 +140,16 @@ Never manufacture balance between evidence of radically different quality. Never
 
 Stop when all are true:
 
-- every high-priority coverage item is supported, disputed, or an explicit gap;
-- key judgments have an honest triangulation status;
+- every high-priority question is supported, disputed, or an explicit gap;
+- central judgments have an honest confirmation status;
 - the strongest counterargument has been tested;
 - another search pass is producing repetition rather than a decision-changing source;
 - current facts have been checked near the report date;
-- remaining uncertainty is identified and its impact is understood.
+- unresolved uncertainty is identified and its impact is understood.
 
 Record the stop reason. “The report is long enough” is never a valid reason.
 
-## 8. Synthesize before drafting
+## 8. Argue before drafting
 
 Build the argument in this order:
 
@@ -163,7 +161,7 @@ Build the argument in this order:
 
 Test the chain in reverse. If the action lacks a judgment, or the judgment lacks evidence, repair the reasoning before writing prose.
 
-The synthesis record identifies:
+Before drafting, identify:
 
 - central judgment claim IDs;
 - material counterevidence;
@@ -203,10 +201,6 @@ Every substantial section should:
 3. test a credible alternative, limit, or trade-off when material;
 4. state why the answer matters to the report’s governing question.
 
-The final content review records those four answers for every non-Sources H2
-section. The gate rejects missing, duplicate, extra, or unfinished section
-reviews; a section survives only when its final disposition is `keep`.
-
 #### The contract is satisfied across the section, never inside each paragraph
 
 This is a reasoning contract, not a paragraph template, and the distinction decides whether a report reads as written or as generated. Narrative passages may establish the evidence through a documented scene; technical passages may need a worked example; comparisons may need a table.
@@ -214,9 +208,9 @@ This is a reasoning contract, not a paragraph template, and the distinction deci
 - The four answers may appear **in any order**, and a section satisfies the contract when its whole span delivers them. The limit may be established before the mechanism. The consequence may already be clear from the executive opening and need only a clause.
 - One answer may be **carried by a neighbouring section**. If the previous section tested the trade-off honestly, this one does not repeat the exercise to fill a slot.
 - An answer may be **one sentence, a table cell, or a scene**. Weight follows the evidence, not the checklist.
-- The contract is **not a rhythm**. If a reader can predict the shape of every paragraph's final sentence, the contract has degraded into a template, and the report has manufactured exactly the uniformity the Rewild gate then has to strip out. Diagnose it directly: read only the last sentence of every paragraph in sequence. If they sound like a list of verdicts, the section is over-contracted, and the fix is to delete most of them rather than to reword them.
+- The contract is **not a rhythm**. If a reader can predict the shape of every paragraph's final sentence, the contract has degraded into a template. Diagnose it directly: read only the last sentence of every paragraph in sequence. If they sound like a list of verdicts, the section is over-contracted, and the fix is to delete most of them rather than to reword them.
 
-Nothing here relaxes coverage. A section that never answers a reader question, or never says why it matters, is still a failed section. The requirement is that the four answers be present, not that they be evenly distributed, separately visible, or delivered in the same order twice.
+A section that never answers a reader question, or never says why it matters, is still a failed section. The four answers must be present, not evenly distributed, separately visible, or delivered in the same order twice.
 
 #### Vary section shape deliberately
 
@@ -252,7 +246,7 @@ Carry at least one of the following, wherever the evidence supplies it:
 - a **dated incident**: what happened, on what date, to whom, with what outcome;
 - a **worked failure case**: a specific deployment, decision, study, or product that did not work, and the traceable reason.
 
-These must come from the evidence ledger. Do not invent a representative user, compose a plausible quotation, or turn an aggregate into an anecdote about a person. If the evidence genuinely contains no named human specifics, that is a finding about the source base: record it as a coverage gap with its effect on the conclusion rather than papering over it with more abstraction.
+These must come from the evidence. Do not invent a representative user, compose a plausible quotation, or turn an aggregate into an anecdote about a person. If the evidence genuinely contains no named human specifics, that is a finding about the source base: say so, and say what it does to the conclusion, rather than papering over it with more abstraction.
 
 ### Comparisons
 
@@ -295,7 +289,7 @@ Use probabilities only when a defensible method supports them. Otherwise rank sc
 
 ## 12. Run the value-density edit
 
-Review section by section.
+Edit section by section.
 
 Ask:
 
@@ -308,20 +302,4 @@ Ask:
 
 Keep necessary depth, evidence, and context. Remove duplicate explanation, throat-clearing, generic transitions, and background the intended reader already knows. Use the freed space to deepen mechanisms, counterevidence, cases, or implications. Maintain the hard length range through substance.
 
-## 13. Run the final content review
-
-After Rewild, review the exact final report and ledger with no access to drafting rationalizations. Use an independent reviewer when available; otherwise begin a context-isolated fresh-eyes pass.
-
-Self-check, eight dimensions: question answered, evidence strength, evidence coverage, reasoning integrity, counterevidence, explanatory depth, decision value, writing clarity.
-
-The required checks and finding fields live in `content-review.schema.json`. Critical findings must be fixed. A major evidence limitation may remain only when the report discloses it in clear language and the review records the exact disclosure excerpt.
-
 Cover image: use the bundled template image; pass `--cover-image` only if the user supplies a file.
-
-The content review is optional; run it only when more than 25 minutes remain.
-Lifecycle: `alx review start content` (copies report + ledger), fill
-`reviews/content.json` per this section, `alx review finish content`;
-`alx review restore content` reverts both files. `alx issue` then writes
-`receipts/content.json` and the source-fidelity receipt. A missing or stale
-content review is a warning and never blocks `alx issue`. Do not invoke
-standalone `content_gate.py` / `source_fidelity.py` from the runbook.

@@ -100,9 +100,7 @@ CRITICAL CONSTRAINT: every detail you add must already exist in the source text 
    - Dense slop (three or more tells): re-say it instead of editing it. Note the facts worth keeping, look away from the original, and write the paragraph fresh in the same register and genre as the original — business stays business, formal stays formal — the way a skilled human author of that genre would write it, not the way you would say it out loud. Re-saying changes the wording, not the order: keep the source's sequence of points and its paragraph boundaries. Reordering breaks the setups the source built — a lesson billed as "the most important" lands wrong once it has been moved to the end. Then reconcile everything against the source — situations and feelings count as facts too: anything the source does not support gets cut, not just names and numbers. Editing dense slop sentence by sentence preserves its skeleton; re-saying discards it.
    - Exception: press releases, announcements, policy text, and other written-form genres never get fully re-said, however dense the slop. Their written skeleton *is* the register, and re-saying slides into chat tone. Strip and tighten instead: delete the boilerplate sentences outright, compress what remains, keep the announcement's frame. Full re-saying is for essays, posts, and other pieces the voice carries.
 6. Run the quick-reference checklist.
-7. Second pass: get the rewrite reviewed with fresh eyes. Follow "Second Pass: Review With Fresh Eyes" below.
-8. Do not run the checker yourself: `alx check` runs it and prints the findings. Never invoke a host `python3`, and never write anything under `SKILL_ROOT`.
-9. Read it aloud in your head. Any sentence you would not say to a colleague in that register, rewrite plainly.
+7. Read it aloud in your head. Any sentence you would not say to a colleague in that register, rewrite plainly.
 
 ## Fidelity: The Four Leaks
 
@@ -112,14 +110,6 @@ Check these *after* drafting, not while writing. They are a verification pass, n
 - **Commitments.** The source describes; your rewrite promises. "We'll send another update," "we'll keep refining it" — if the source made no promise, you cannot make one on its author's behalf.
 - **Severity.** The source says "impacted"; your rewrite says "nothing worked." Absolutes — nothing, never, always, completely, nobody — are facts about scale. Do not raise them.
 - **Causal and diagnostic detail.** The source says a config error caused it; your rewrite adds "not the syntax, which was fine." Ruling things *out* is as invented as ruling them in.
-
-## Second Pass: Review With Fresh Eyes
-
-Never deliver the first draft of a rewrite. Someone with no memory of the original must look at it — you are the worst-placed reviewer of your own output, because you know what it used to say.
-
-Use a subagent to do that blind review. Send it only the rewritten text and the Quick-Reference Checklist above — not the original, not the user's request, not your drafting notes. It reports which checklist items the text trips; it does not rewrite.
-
-Apply the findings yourself, with the catalog open: fix real flags, skip nitpicks that would push the text into pattern 42 territory. Then check the final text against the original once more for invented details or drift.
 
 ## Genre Calibration
 

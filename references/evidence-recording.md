@@ -11,7 +11,7 @@
 Every other field is optional and the gate never asks for it: `kind` (fact,
 reported claim, estimate, analysis), importance, confidence, limitations,
 `decision_relevance`, `reasoning`, `what_would_change`, `assumptions`,
-triangulation status, and supporting or contradicting claim IDs.
+confirmation status, and supporting or contradicting claim IDs.
 Record them when they help the reader; never to satisfy a checker.
 
 A claim may not assert more than its per-source evidence carries. Figures,
@@ -22,11 +22,9 @@ computed. Record
 the fact was true. `supports` points downward only, to the evidence a claim rests
 on; cycles are rejected.
 
-For reports centered on people, inventory known people through `people` and
-`person_ids`, and name the person id on the claims about them. What holds a
-claim about a person is the same thing that holds every other claim — an
-extract that carries it, and the exact legal stage where a legal stage is
-asserted.
+What holds a claim about a person is the same thing that holds every other
+claim — an extract that carries it, and the exact legal stage where a legal
+stage is asserted.
 
 Mark changing claims such as price, availability, leadership, policy, and
 current product behavior as `time_sensitive`, and record a non-null `as_of`

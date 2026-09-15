@@ -33,7 +33,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("ordinary web searches", description)
         self.assertIn("normal chat answers", description)
 
-    def test_every_archetype_requires_explicit_coverage_mapping(self):
+    def test_every_archetype_keeps_writing_scaffold(self):
         for name in (
             "artifact.md",
             "concept.md",
@@ -43,8 +43,10 @@ class RepositoryContractTests(unittest.TestCase):
             "system.md",
         ):
             text = (ROOT / "references" / name).read_text(encoding="utf-8")
-            self.assertIn("## Coverage ledger mapping", text, name)
-            self.assertIn("status: gap", text, name)
+            self.assertIn("## When to Use", text, name)
+            self.assertIn("## Evidence scaffold", text, name)
+            self.assertIn("Best evidence", text, name)
+            self.assertNotIn("## Coverage ledger mapping", text, name)
 
     def test_skill_references_existing_local_files(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -95,7 +97,6 @@ class RepositoryContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         for script in (
-            "content_gate.py",
             "md_to_pdf.py",
             "validate_ledger.py",
             "validate_report.py",
@@ -263,7 +264,6 @@ class RepositoryContractTests(unittest.TestCase):
         protocol = (ROOT / "references" / "research-protocol.md").read_text(
             encoding="utf-8"
         )
-        rewild = (ROOT / "references" / "rewild-gate.md").read_text(encoding="utf-8")
         quality = (ROOT / "references" / "content-quality.md").read_text(
             encoding="utf-8"
         )
@@ -272,10 +272,10 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("CJK minimum 20", protocol)
         self.assertIn("weighted-source-evidence-v2", protocol)
         self.assertNotIn("--allow-unverified", protocol)
-        self.assertIn("alx snapshot", rewild)
-        self.assertIn("alx review start rewild", rewild)
-        self.assertIn("alx review start content", quality)
-        self.assertIn("alx issue", quality)
+        self.assertFalse((ROOT / "references" / "rewild-gate.md").is_file())
+        self.assertIn("Write the reader contract", quality)
+        self.assertNotIn("alx snapshot", quality)
+        self.assertNotIn("alx review start content", quality)
 
 
 if __name__ == "__main__":

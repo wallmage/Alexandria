@@ -1,6 +1,6 @@
 # Bundled Rewild profiles
 
-Alexandria carries three complete Rewild profiles so its human-voice gate does not depend on another installed skill or repository:
+Alexandria carries three complete Rewild profiles so style guidance does not depend on another installed skill or repository:
 
 - `rewild/` — English
 - `rewild-zh/` — Simplified Chinese
@@ -11,7 +11,7 @@ The files are vendored from [wallmage/rewild](https://github.com/wallmage/rewild
 Alexandria keeps two report-specific checker extensions on top of that version:
 English serial-enumeration detection and repeated short paragraph-closer detection.
 
-The upstream profiles normally activate only when a user explicitly requests de-AI editing. Inside Alexandria, the root `SKILL.md` deliberately overrides that trigger condition: the appropriate profile is a mandatory production gate for every report. All other profile rules remain unchanged.
+The upstream profiles activate when a user explicitly requests de-AI editing. Inside Alexandria, the matching profile is the writing-style reference for light de-AI editing. All other profile rules remain unchanged.
 
 Rewild is MIT licensed. See `LICENSE` in this directory.
 

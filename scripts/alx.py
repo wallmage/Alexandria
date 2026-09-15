@@ -119,7 +119,6 @@ ARCHETYPES = (
     "system",
     "hybrid",
 )
-LIVING_STATUSES = ("living", "recently_deceased", "deceased", "unknown")
 PROVENANCES = (
     "primary_independent",
     "primary_interested",
@@ -195,7 +194,7 @@ VERIFICATION_NOTE_PREFIX = getattr(
 #: Every printed remedy (spec D14, ruling R6). Commands parse; the rest are the
 #: closed imperative list of spec §6 plus the two length imperatives of R6.
 REMEDY_TEMPLATES = {
-    "fetch-refresh": "alx fetch --id {source_id} --refresh",
+    "fetch-refresh": "alx fetch --id {source_id}",
     "fetch-url": "alx fetch {url}",
     "claim-add": "alx claim add {file}",
     "claim-drop": "alx claim drop {claim_id} --apply",
@@ -209,18 +208,16 @@ REMEDY_TEMPLATES = {
     "snapshot-restore": "alx snapshot --restore",
     "review-start": "alx review start {kind}",
     "review-iter": "alx review start {kind} --iter",
-    "review-restore": "alx review restore {kind}",
     "check": "alx check",
     "check-fix": "alx check --fix",
     "issue": "alx issue",
-    "issue-deliver": "alx issue --deliver",
     "render": "alx render",
     "set-field": "set field {field} in {file}",
     # Addendum 6: a claim field re-enters the ledger only through `claim add`.
     "set-field-claim": "set field {field} in {file}, then alx claim add {file}",
     # J4: a refresh alone leaves the recorded probe contexts behind; only
     # `claim add` re-binds them, so the remedy is the two-step sequence.
-    "refresh-rebind": "alx fetch --id {source_id} --refresh, then alx claim add {file}",
+    "refresh-rebind": "alx fetch --id {source_id}, then alx claim add {file}",
     "extend-quote": "extend the quote in {file}",
     "paste-passage": (
         "paste the closest passage as extract_or_location in {file}, "
@@ -251,7 +248,7 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+ via alx ledger merge$"),
     # R23: a synthesis field names no claim file; the merge is the whole repair.
     re.compile(r"^set field \S+, then alx ledger merge \S+$"),
-    re.compile(r"^alx fetch --id S\d+ --refresh, then alx claim add \S+$"),
+    re.compile(r"^alx fetch --id S\d+, then alx claim add \S+$"),
     # A month-day extract cannot be found under the claim's full date: the
     # repair is a second extract stating the year, or the source's own wording.
     re.compile(
@@ -345,7 +342,7 @@ FAMILIES = tuple(
 
 #: Offline these are fabrication findings (Class F): a cache is present and the
 #: extract does not survive in it. Live, the same families mean the network was
-#: unusable beyond the policy quorum, which `--deliver` may waive (spec §6.10).
+#: unusable beyond the policy quorum.
 ONLINE_CLASS_A_FAMILIES = frozenset(
     {
         "fidelity/unreachable",
@@ -363,16 +360,11 @@ UNVERIFIED_QUORUM = 0.25
 #: runs no subprocess.
 FETCH_TIMEOUT_SECONDS = 20
 REWILD_CHECKER_TIMEOUT_SECONDS = 120
-DEGRADE_MINUTES = 15
 ONLINE_CAP_MINUTES = 4
 EXCERPT_CHARS = 60
 MIN_EXTRACT_CHARS = 20
 MAX_WINDOW_CHARS = 300
 MAX_FINDING_CHARS = 800
-
-DEGRADE_INSTRUCTION = (
-    "remaining <= 15 min: stop fixing; run `alx render` and deliver."
-)
 
 
 def remedy(key, **values):
@@ -654,8 +646,6 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
         url = match.group(0) if match else ""
         if not url:
             return "", ""
-        # The Remove remedy is what `issue --deliver` applies; without it one
-        # foreign link blocked `issue` and `issue --deliver` alike, forever.
         return remedy("fetch-url", url=url), remedy("remove-link", url=url)
     if family in {"binding/claim-paragraph", "binding/paragraph"}:
         candidate = re.search(r"candidates: (\d+)", item.message)
@@ -755,9 +745,7 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
     if family.startswith("content/") or family.startswith("review/content"):
-        return remedy("review-iter", kind="content"), remedy(
-            "review-restore", kind="content"
-        )
+        return remedy("review-iter", kind="content"), ""
     if family.startswith("review/rewild"):
         return remedy("review-iter", kind="rewild"), remedy(
             "review-start", kind="rewild"
@@ -951,7 +939,6 @@ def adopt(findings, *, online=False, paragraphs=0, claim_files=None):
         remove = _completed_remedy(getattr(item, "remove", ""), item)
         remove = remove if valid_remedy(remove) else ""
         if klass == "A":
-            # Addendum: nothing to drop; `alx issue --deliver` waives it.
             remove = ""
         # Ruling R10: a dishonest `Fix:` sends the whole line back to `_remedies`
         # rather than leaving the finding with a `Remove:` and no repair.
@@ -1074,27 +1061,6 @@ def _minutes(state):
     return elapsed, remaining
 
 
-#: Field test 4: at this many elapsed minutes with nothing accepted the run is
-#: past rescue by more research; the footer says so once per command.
-BEHIND_SCHEDULE_MINUTES = 12
-_BEHIND_SCHEDULE_PRINTED = False
-
-
-def _behind_schedule_line(state, elapsed):
-    """The escalation line, or None while the run is still on schedule."""
-    global _BEHIND_SCHEDULE_PRINTED
-    if _BEHIND_SCHEDULE_PRINTED or elapsed <= BEHIND_SCHEDULE_MINUTES:
-        return None
-    if state.get("counters", {}).get("claims"):
-        return None
-    _BEHIND_SCHEDULE_PRINTED = True
-    return (
-        f"BEHIND SCHEDULE: no claim accepted after {elapsed} min — add the "
-        "claims that validate now, drop the rest, and start drafting "
-        "report.md; remaining ≤ 15 min → alx render"
-    )
-
-
 def _emit(ws, state, command, summary, lines, *, worklog=True):
     """Print the command output, append the worklog line, print the footer."""
     for line in lines:
@@ -1104,18 +1070,12 @@ def _emit(ws, state, command, summary, lines, *, worklog=True):
     if worklog:
         with ws.worklog.open("a", encoding="utf-8") as handle:
             handle.write(f"{stamp} {command} {summary}\n")
-    escalation = _behind_schedule_line(state, elapsed)
-    if escalation:
-        print(escalation)
-    if remaining <= DEGRADE_MINUTES:
-        print(DEGRADE_INSTRUCTION)
     print(f"elapsed {max(elapsed, 0)} min, remaining {max(remaining, 0)} min")
 
 
 #: D7: a stalled rewild checker costs its 120 s once per command, not once per
-#: invocation. `issue --deliver` runs the checker up to four times (check,
-#: post-remedy check, gate, refused-gate findings); after the first timeout the
-#: rest of the command skips the subprocess and reuses that one Class A note.
+#: invocation. After the first timeout the rest of the command skips the
+#: subprocess and reuses that one Class A note.
 _CHECKER_TIMED_OUT = False
 
 
@@ -1132,9 +1092,8 @@ def _note_checker_timeout(messages):
 
 def _open(args):
     """Return (workspace, state, ledger) for an initialized directory."""
-    global _CHECKER_TIMED_OUT, _BEHIND_SCHEDULE_PRINTED
+    global _CHECKER_TIMED_OUT
     _CHECKER_TIMED_OUT = False
-    _BEHIND_SCHEDULE_PRINTED = False
     ws = Workspace(args.dir)
     if not ws.state_path.exists():
         raise SystemExit(
@@ -1272,11 +1231,6 @@ def sentence_window(text, start, length, context):
 # --------------------------------------------------------------------------
 # fetch and cache
 # --------------------------------------------------------------------------
-
-
-def _deadline_epoch(state):
-    """T1 compares `deadline` against `time.time()`, so hand it a POSIX stamp."""
-    return datetime.fromisoformat(state["deadline"]).timestamp()
 
 
 def cached(ws, source_id):
@@ -1447,7 +1401,6 @@ def _skeleton_ledger(args, subject, question, reader, report_day):
                 "person_id": "P1",
                 "name": subject,
                 "aliases": [],
-                "living_status": args.subject_status or "unknown",
                 "public_role": "public",
                 "relationship": "primary_subject",
             }
@@ -1608,7 +1561,6 @@ def _fetch_one(ws, state, ledger, args, url, lines):
         cache_dir=ws.sources,
         refresh=False,
         timeout=FETCH_TIMEOUT_SECONDS,
-        deadline=_deadline_epoch(state),
     )
     source_id = _next_id(ledger["sources"], "S", "source_id")
     if result.status == "unreachable":
@@ -1653,7 +1605,6 @@ def _refresh_one(ws, state, ledger, args, source_id, lines):
         cache_dir=ws.sources,
         refresh=True,
         timeout=FETCH_TIMEOUT_SECONDS,
-        deadline=_deadline_epoch(state),
     )
     if result.status != "ok":
         lines.append(
@@ -1722,21 +1673,19 @@ def _classification_warnings(args):
 def cmd_fetch(args):
     ws, state, ledger = _open(args)
     lines = _classification_warnings(args)
-    ok = True
     if args.id:
-        args.refresh = True
-        ok = _refresh_one(ws, state, ledger, args, args.id, lines)
+        _refresh_one(ws, state, ledger, args, args.id, lines)
     else:
         if not args.urls:
             print("`alx fetch` needs one or more URLs.", file=sys.stderr)
             return 1
         for url in args.urls:
-            ok = _fetch_one(ws, state, ledger, args, url, lines) and ok
+            _fetch_one(ws, state, ledger, args, url, lines)
     ws.save_ledger(ledger)
     state["counters"]["fetch"] = state["counters"].get("fetch", 0) + 1
     ws.save_state(state)
     _emit(ws, state, "fetch", f"{len(ledger['sources'])} sources", lines)
-    return 0 if ok else 1
+    return 0
 
 
 def cmd_source_set(args):
@@ -1879,22 +1828,6 @@ def cmd_find(args):
         if not hits:
             lines.append(f"no source contains {keyword}")
     _emit(ws, state, "find", f"{args.sources} {' '.join(args.keywords)}", lines)
-    return 0
-
-
-def cmd_show(args):
-    ws, state, _ledger = _open(args)
-    entry = cached(ws, args.source_id)
-    if entry is None:
-        print(f"{args.source_id} has no cache; run `alx fetch`.", file=sys.stderr)
-        return 1
-    text = entry[0]
-    end = args.end if args.end is not None else min(len(text), args.start + 1000)
-    lines = [
-        f"{args.source_id} chars {args.start}-{min(end, len(text))} of {len(text)}",
-        text[args.start : end],
-    ]
-    _emit(ws, state, "show", f"{args.source_id} window", lines)
     return 0
 
 
@@ -2129,7 +2062,6 @@ def cmd_claim_add(args):
             if isinstance(item, dict) and item.get("claim_id"):
                 sources[_canon_prefixed_id("C", item["claim_id"])] = path
         items.extend(batch)
-    dry_run = getattr(args, "dry_run", False)
     lines = []
     accepted = 0
     failures = []
@@ -2223,8 +2155,7 @@ def cmd_claim_add(args):
             record_binding_hashes(
                 state, ws.report_text(), {claim["claim_id"]: item["report_paragraph"]}
             )
-        if not dry_run:
-            record_probe_contexts(ws, claim)
+        record_probe_contexts(ws, claim)
         # K5: the remedy for this claim has to name the file it came from.
         if claim["claim_id"] in sources:
             state.setdefault("claim_files", {})[claim["claim_id"]] = sources[
@@ -2233,8 +2164,6 @@ def cmd_claim_add(args):
         seen.add(claim["claim_id"])
         accepted += 1
         verb = "replaced" if replaced else "added"
-        if dry_run:
-            verb = f"would be {verb}"
         if assigned:
             lines.append(f"{claim['claim_id']} {verb} (assigned id)")
         else:
@@ -2242,35 +2171,24 @@ def cmd_claim_add(args):
                 f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
             )
         lines.extend(_warn_lines(claim_id, warns))
-    if not dry_run:
-        ws.save_ledger(ledger)
-        state["counters"]["claims"] = len(ledger["claims"])
-        ws.save_state(state)
+    ws.save_ledger(ledger)
+    state["counters"]["claims"] = len(ledger["claims"])
+    ws.save_state(state)
     tail = f"{len(failures)} failed"
     if failures:
         tail += ": " + " ".join(failures)
-    if dry_run:
-        # Field test 4: a rehearsal must not read as a committed run.
-        lines.insert(
-            0,
-            f"DRY RUN, nothing written: {len(items)} submitted, "
-            f"{accepted} would be accepted, {tail}",
-        )
-        lines.append(f"next: alx claim add {args.files[0]}")
-    else:
-        lines.insert(0, f"{len(items)} submitted, {accepted} accepted, {tail}")
-        # Field test 3: the whole diagnosis survives a `| tail -15` of the output.
-        transcript = ws.alx / "last-claim-add.txt"
-        transcript.parent.mkdir(parents=True, exist_ok=True)
-        transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        lines.append("full output: .alx/last-claim-add.txt")
+    lines.insert(0, f"{len(items)} submitted, {accepted} accepted, {tail}")
+    # Field test 3: the whole diagnosis survives a `| tail -15` of the output.
+    transcript = ws.alx / "last-claim-add.txt"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines.append("full output: .alx/last-claim-add.txt")
     _emit(
         ws,
         state,
         "claim add",
         f"{accepted} accepted",
         lines,
-        worklog=not dry_run,
     )
     return 1 if failures else 0
 
@@ -2470,7 +2388,7 @@ def cmd_claim_drop(args):
         state,
         ledger,
         claim_id,
-        args.reason or "Class-F finding; scope dropped.",
+        args.reason or "hard finding; scope dropped.",
     )
     _emit(ws, state, "claim drop", f"{claim_id} excluded", lines)
     return 0
@@ -2564,7 +2482,7 @@ def cmd_ledger_merge(args):
             "run alx claim add first",
         )
     _emit(ws, state, "ledger merge", ", ".join(patch), lines)
-    return 1 if hard_findings(findings) else 0
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -3592,7 +3510,6 @@ def _record_last_check(state, findings):
     state["last_check"] = {
         "at": _now().isoformat(),
         "hard": len(hard_findings(findings)),
-        "class_f": len(class_f_findings(findings)),
         "families": sorted({item.family for item in findings}),
     }
 
@@ -3662,7 +3579,7 @@ def cmd_check(args):
         f"{len(hard_findings(findings))} hard",
         lines,
     )
-    return 1 if hard_findings(findings) else 0
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -3879,27 +3796,6 @@ def cmd_review_finish(args):
     return 0
 
 
-def cmd_review_restore(args):
-    ws, state, _ledger = _open(args)
-    kind = args.kind
-    record = state["reviews"].get(kind, {})
-    if not record.get("finished"):
-        print(f"No finished {kind} review to restore.", file=sys.stderr)
-        return 0
-    reviewed = ws.review_dir(kind, record["iteration"])
-    shutil.copyfile(reviewed / "report.md", ws.report)
-    if kind == "content":
-        shutil.copyfile(reviewed / "ledger.json", ws.ledger_path)
-    _emit(
-        ws,
-        state,
-        f"review restore {kind}",
-        f"iteration {record['iteration']}",
-        [f"report.md restored from the {kind} review copy."],
-    )
-    return 0
-
-
 # --------------------------------------------------------------------------
 # issue
 # --------------------------------------------------------------------------
@@ -3921,7 +3817,6 @@ def _strip_verification_note(ws):
 
 
 def _auto_remedies(ws, state, ledger, findings, lines):
-    """Spec §6.9.1: `--deliver` drops scope, it never waives Class F."""
     restore = [
         item
         for item in class_f_findings(findings)
@@ -4089,7 +3984,6 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes):
             online=True,
             timeout=timeout,
             cache_dir=ws.sources,
-            deadline=_deadline_epoch(state),
         )
     except Exception as exc:  # availability failures are Class A
         delivery_notes.append(f"online source fidelity failed: {exc}")
@@ -4121,7 +4015,6 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes):
                 sample_size=args.sample_size,
                 timeout=timeout,
                 cache_dir=ws.sources,
-                deadline=_deadline_epoch(state),
                 force=True,
                 result=result,
             )
@@ -4260,7 +4153,7 @@ def cmd_issue(args):
     lines = []
     delivery_notes = []
     findings = run_check(ws, state, ledger, fix=False)
-    state, ledger, findings, dropped_for_delivery = _drop_hard(
+    state, ledger, findings, _dropped = _drop_hard(
         ws, state, ledger, findings, lines
     )
     # J7: `alx status` must report what `issue` just saw, remedies included.
@@ -4286,7 +4179,6 @@ def cmd_issue(args):
         # Spec §6.9.1 + J5: the drops change the report and the ledger, so the
         # whole offline check runs again over what is actually delivered.
         state, ledger = _auto_remedies(ws, state, ledger, online_findings, lines)
-        dropped_for_delivery = True
         findings = run_check(ws, state, ledger, fix=False)
         state, ledger, findings, _again = _drop_hard(
             ws, state, ledger, findings, lines
@@ -4348,10 +4240,6 @@ def cmd_issue(args):
     _write_json(ws.receipts / "issue.json", receipt)
     state["counters"]["issue"] = state["counters"].get("issue", 0) + 1
     ws.save_state(state)
-    if args.deliver and not dropped_for_delivery:
-        # R28: with no hard finding to remove, `--deliver` is an alias of
-        # `issue`; the warnings it used to waive are notes now.
-        lines.append("warnings recorded in delivery notes")
     lines.append(f"receipts/issue.json written; next: `{remedy('render')}`.")
     _emit(ws, state, "issue", "issued", lines)
     return 0
@@ -4568,7 +4456,6 @@ def cmd_status(args):
         "last check "
         + (
             f"#{state['counters'].get('check', 0)} with {last.get('hard', 0)} hard "
-            f"({last.get('class_f', 0)} Class F)"
             if last
             else "not run"
         ),
@@ -4636,11 +4523,6 @@ def build_parser():
         default=None,
         help="optional; stored, never required",
     )
-    init.add_argument(
-        "--subject-status",
-        choices=LIVING_STATUSES,
-        help="optional; stored, never required",
-    )
     init.add_argument("--reader", help="file holding the intended reader")
     init.add_argument("--budget-minutes", type=int, default=60)
     init.add_argument("--force", action="store_true")
@@ -4652,7 +4534,6 @@ def build_parser():
     fetch = subparsers.add_parser("fetch", help="fetch sources into the cache")
     fetch.add_argument("urls", nargs="*")
     fetch.add_argument("--id", dest="id", help="ledger source id to refresh")
-    fetch.add_argument("--refresh", action="store_true")
     fetch.add_argument(
         "--provenance", help="optional; stored, not used for the report"
     )
@@ -4695,18 +4576,9 @@ def build_parser():
     find.add_argument("--max", type=int, default=3)
     find.set_defaults(handler=cmd_find)
 
-    show = subparsers.add_parser("show", help="a cache window")
-    show.add_argument("source_id")
-    show.add_argument("--start", type=int, default=0)
-    show.add_argument("--end", type=int)
-    show.set_defaults(handler=cmd_show)
-
     claim = subparsers.add_parser("claim", help="claim lifecycle")
     claim_sub = claim.add_subparsers(dest="claim_command", required=True)
     claim_add = claim_sub.add_parser("add")
-    claim_add.add_argument(
-        "--dry-run", dest="dry_run", action="store_true", help="optional"
-    )
     claim_add.add_argument("files", nargs="+")
     claim_add.set_defaults(handler=cmd_claim_add, file_args=(("FILE", "files"),))
     claim_drop = claim_sub.add_parser("drop")
@@ -4726,7 +4598,6 @@ def build_parser():
     ledger_merge.set_defaults(handler=cmd_ledger_merge, file_args=(("PATCH", "patch"),))
 
     snapshot = subparsers.add_parser("snapshot", help="pre-humanization snapshot")
-    snapshot.add_argument("--iter", action="store_true")
     snapshot.add_argument("--restore", action="store_true")
     snapshot.set_defaults(handler=cmd_snapshot)
 
@@ -4748,12 +4619,8 @@ def build_parser():
     review_finish = review_sub.add_parser("finish")
     review_finish.add_argument("kind", choices=REVIEW_KINDS)
     review_finish.set_defaults(handler=cmd_review_finish)
-    review_restore = review_sub.add_parser("restore")
-    review_restore.add_argument("kind", choices=REVIEW_KINDS)
-    review_restore.set_defaults(handler=cmd_review_restore)
 
     issue = subparsers.add_parser("issue", help="receipts, once, at the end")
-    issue.add_argument("--deliver", action="store_true", help="optional")
     issue.add_argument(
         "--offline",
         action="store_true",

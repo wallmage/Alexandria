@@ -157,7 +157,7 @@ EMPTY_PDF_BYTES = b"%PDF-1.7\n"
 CLOSED_IMPERATIVES = (
     re.compile(r"^set field \S+ in \S+$"),
     re.compile(r"^set field \S+ in \S+, then alx claim add \S+$"),
-    re.compile(r"^alx fetch --id S\d+ --refresh, then alx claim add \S+$"),
+    re.compile(r"^alx fetch --id S\d+, then alx claim add \S+$"),
     re.compile(r"^extend the quote in \S+$"),
     re.compile(
         r"^paste the closest passage as extract_or_location in \S+, "
@@ -379,26 +379,10 @@ class InitTests(AlxTestCase):
         )
         self.assertEqual(0, code, out)
         person = self.ledger()["people"][0]
-        self.assertEqual("unknown", person["living_status"])
+        self.assertNotIn("living_status", person)
         self.assertEqual("primary_subject", person["relationship"])
         self.assertIn("archetype: person (given)", out)
         self.assertIn("language:", out)
-        code, out = self.run_alx(
-            "init",
-            self.dir,
-            "--lang",
-            "en",
-            "--subject",
-            subject,
-            "--archetype",
-            "person",
-            "--subject-status",
-            "living",
-            "--force",
-        )
-        self.assertEqual(0, code, out)
-        person = self.ledger()["people"][0]
-        self.assertEqual("living", person["living_status"])
 
 
 class FetchTests(AlxTestCase):
@@ -445,7 +429,7 @@ class FetchTests(AlxTestCase):
         self.init()
         with mock_production_transport(responses()):
             code, out = self.run_in("fetch", "http://dead.example.org/study")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("(dns:", out)
         self.assertNotIn("plaintext-http", out)
         self.assertIn("https was tried in place of http://dead.example.org/study", out)
@@ -453,7 +437,7 @@ class FetchTests(AlxTestCase):
     def test_non_http_scheme_is_rejected(self):
         self.init()
         code, out = self.run_in("fetch", "ftp://example.org/study")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("not added", out)
         self.assertEqual([], self.ledger()["sources"])
 
@@ -472,7 +456,7 @@ class FetchTests(AlxTestCase):
         self.run_in("claim", "add", batch)
         changed = PAGE.replace("1,204 documents", "1,205 documents")
         with mock_production_transport(responses(changed)):
-            code, out = self.run_in("fetch", "--id", "S1", "--refresh")
+            code, out = self.run_in("fetch", "--id", "S1")
         self.assertEqual(0, code, out)
         self.assertIn("S1 text changed; claims C1 need re-probe", out)
 
@@ -502,16 +486,15 @@ class FetchTests(AlxTestCase):
         ), mock_production_transport(responses()):
             code, out = self.run_in("fetch", "https://example.org/study")
             self.assertEqual(0, code, out)
-            code, out = self.run_in("fetch", "--id", "S1", "--refresh")
+            code, out = self.run_in("fetch", "--id", "S1")
             self.assertEqual(0, code, out)
         workspace = alx.Workspace(self.dir)
-        deadline = datetime.fromisoformat(self.state()["deadline"]).timestamp()
         self.assertEqual([False, True], [call["refresh"] for call in seen])
         for call in seen:
             self.assertEqual(workspace.sources, call["cache_dir"])
             self.assertEqual(20, alx.FETCH_TIMEOUT_SECONDS)
             self.assertEqual(alx.FETCH_TIMEOUT_SECONDS, call["timeout"])
-            self.assertAlmostEqual(deadline, call["deadline"], places=3)
+            self.assertNotIn("deadline", call)
 
     def test_fetch_batch_stops_near_the_deadline(self):
         self.init()
@@ -603,14 +586,6 @@ class FindShowTests(AlxTestCase):
         self.assertIn("1,204", window)
         # The whole hit is one line; `find` prints nothing else about it.
         self.assertEqual(1, len([1 for line in out.splitlines() if "#1 " in line]))
-
-    def test_show_prints_cache_window(self):
-        self.init()
-        self.fetch("https://example.org/study")
-        code, out = self.run_in("show", "S1", "--start", "0", "--end", "60")
-        self.assertEqual(0, code, out)
-        # T1 stores the case-folded visible text, so the window is folded too.
-        self.assertIn("ledger study", out)
 
 
 class ClaimTests(AlxTestCase):
@@ -706,8 +681,6 @@ class ClaimTests(AlxTestCase):
             subject,
             "--archetype",
             "person",
-            "--subject-status",
-            "unknown",
         )
         self.fetch("https://example.org/study")
         claim = dict(CLAIM_ONE)
@@ -776,7 +749,7 @@ class ClaimTests(AlxTestCase):
         }
         self.assertIn("C2", surviving)
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("C1", out)
         self.assertIn("excluded", out)
 
@@ -1004,15 +977,15 @@ class CheckTests(AlxTestCase):
         self.bootstrap()
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("cache-detached", out)
-        self.assertIn("alx fetch --id S1 --refresh", out)
+        self.assertIn("alx fetch --id S1", out)
 
     def test_cache_missing_is_hard(self):
         self.bootstrap()
         (self.dir / "sources" / "S1.meta.json").unlink()
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("cache", out)
 
     def test_link_outside_the_ledger_is_hard(self):
@@ -1023,7 +996,7 @@ class CheckTests(AlxTestCase):
         )
         (self.dir / "report.md").write_text(report, encoding="utf-8")
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("elsewhere.example", out)
 
     def test_a_figure_invented_after_the_snapshot_is_restored_at_issue(self):
@@ -1039,7 +1012,7 @@ class CheckTests(AlxTestCase):
             report.replace("1,204", "1,304"), encoding="utf-8"
         )
         code, out = self.run_in("check")
-        self.assertEqual(1, code, out)
+        self.assertEqual(0, code, out)
         self.assertIn("fidelity/rewild", out)
         code, out = self.run_in("issue", "--offline")
         self.assertEqual(0, code, out)
@@ -1055,7 +1028,7 @@ class CheckTests(AlxTestCase):
         damaged = report.replace("「原始日記」", "\x01")
         (self.dir / "report.md").write_text(damaged, encoding="utf-8")
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("quotation-lost", out)
         self.assertIn("control-chars", out)
         self.assertIn("alx snapshot --restore", out)
@@ -1082,7 +1055,7 @@ class CheckTests(AlxTestCase):
         """Ruling R3: the schema clause is gone; §6.7(c) reports the gap."""
         self.bootstrap()
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertIn("binding/excerpt-missing", out)
         self.assertNotIn("[ledger/schema]", out)
         _code, out = self.run_in("check", "--fix")
@@ -1096,7 +1069,7 @@ class CheckTests(AlxTestCase):
         self.bootstrap()
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         code, out = self.run_in("check")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code)
         self.assertRegex(out, r"=== HARD \d+ \(fix, or alx issue drops them\) ===")
         self.assertRegex(out, r"=== STATUS: check #1, elapsed \d+ min, remaining \d+ min")
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
@@ -1128,7 +1101,8 @@ class CheckTests(AlxTestCase):
         self.bootstrap()
         self.set_remaining(10)
         _code, out = self.run_in("status")
-        self.assertIn("alx render", out)
+        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
+        self.assertNotIn("stop fixing", out)
         self.assertNotIn("--deliver", out)
 
 
@@ -1279,20 +1253,6 @@ class ReviewTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn("re-review required", out)
         self.assertNotIn("re-review required", out.split("=== WARN")[0])
-
-    def test_restore_reverts_report_and_ledger(self):
-        self.bootstrap()
-        self.run_in("check", "--fix")
-        self.finish_reviews()
-        reviewed = (self.dir / "report.md").read_text(encoding="utf-8")
-        (self.dir / "report.md").write_text(
-            reviewed + "\nAn unreviewed paragraph.\n", encoding="utf-8"
-        )
-        code, out = self.run_in("review", "restore", "content")
-        self.assertEqual(0, code, out)
-        self.assertEqual(
-            reviewed, (self.dir / "report.md").read_text(encoding="utf-8")
-        )
 
 
 class IssueTests(AlxTestCase):
@@ -1457,7 +1417,8 @@ class IssueTests(AlxTestCase):
         self.prepared()
         _code, out = self.run_in("check")
         self.assertIn("[rewild/length]", out)
-        self.assertEqual(0, self.state()["last_check"]["class_f"])
+        self.assertEqual(0, self.state()["last_check"]["hard"])
+        self.assertNotIn("class_f", self.state()["last_check"])
         with ExitStack() as stack:
             self.stub_gates(stack, rewild=False)
             code, out = self.run_in("issue")
@@ -1467,18 +1428,6 @@ class IssueTests(AlxTestCase):
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
         )
         self.assertTrue(any("minimum is" in note for note in notes["notes"]), notes)
-
-    def test_deliver_is_a_no_op_alias_when_nothing_is_hard(self):
-        """R28: with zero HARD, `--deliver` only says where the warnings went."""
-        from contextlib import ExitStack
-
-        self.prepared()
-        with ExitStack() as stack:
-            self.stub_gates(stack, rewild=False)
-            code, out = self.run_in("issue", "--deliver")
-        self.assertEqual(0, code, out)
-        self.assertIn("warnings recorded in delivery notes", out)
-        self.assertNotIn("auto-remedy", out)
 
     def test_every_downgraded_family_is_warn_and_never_blocks(self):
         """R28 severity table: the families `alx` itself emits as warnings."""
@@ -1570,7 +1519,7 @@ class IssueTests(AlxTestCase):
         )
         with ExitStack() as stack:
             self.stub_gates(stack)
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         final = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertIn("「原始日記」", final)
         self.assertNotIn("as the [registry note]", final)
@@ -1599,7 +1548,7 @@ class IssueTests(AlxTestCase):
                     side_effect=failing_online,
                 )
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         notes = json.loads(
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
@@ -2197,7 +2146,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         notes = json.loads(
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
@@ -2707,7 +2656,7 @@ class FixRoundTests(AlxTestCase):
         self.bootstrap()
         self.run_in("check", "--fix")
         with mock_production_transport(responses(CHANGED_PAGE)):
-            code, out = self.run_in("fetch", "--id", "S1", "--refresh")
+            code, out = self.run_in("fetch", "--id", "S1")
         self.assertEqual(0, code, out)
 
     def test_context_changed_is_reported_with_the_two_step_remedy(self):
@@ -2717,7 +2666,7 @@ class FixRoundTests(AlxTestCase):
         line = self.line_with(out, "context changed")
         # K5: the remedy names the file C1 came from, not an unexpanded glob.
         self.assertIn(
-            "Fix: alx fetch --id S1 --refresh, then alx claim add "
+            "Fix: alx fetch --id S1, then alx claim add "
             f"{self.state()['claim_files']['C1']}",
             line,
         )
@@ -2728,7 +2677,7 @@ class FixRoundTests(AlxTestCase):
     def test_the_two_step_remedy_clears_the_context_finding(self):
         self.stale_context()
         with mock_production_transport(responses(CHANGED_PAGE)):
-            self.run_in("fetch", "--id", "S1", "--refresh")
+            self.run_in("fetch", "--id", "S1")
         batch = self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO])
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(0, code, out)
@@ -2874,7 +2823,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertNotIn("as the [registry note]", report)
@@ -2900,7 +2849,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         drops = [line for line in out.splitlines() if line.startswith("dropped ")]
         self.assertEqual(1, len(drops), out)
@@ -2945,7 +2894,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C2 (", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -3595,7 +3544,7 @@ class RefreshedSourceReprobeTests(AlxTestCase):
 
         self.prepared()
         with ExitStack() as stack:
-            code, out = self.issue(stack, "--deliver")
+            code, out = self.issue(stack)
         self.assertEqual(0, code, out)
         surviving = {claim["claim_id"] for claim in self.ledger()["claims"]}
         self.assertNotIn("C9", surviving)
@@ -3639,7 +3588,7 @@ class VerificationNotePdfTests(AlxTestCase):
                     "disclosure_required": ["C1"],
                 },
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
             self.assertEqual(0, code, out)
             code, out = self.run_in("render")
         self.assertEqual(0, code, out)
@@ -3990,11 +3939,11 @@ class ReserveReceiptTests(AlxTestCase):
         receipt = self.dir / "receipts" / "source-fidelity.json"
         with ExitStack() as stack:
             helper.stub_gates(stack)
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
             self.assertEqual(0, code, out)
             self.assertTrue(receipt.exists(), out)
             self.set_remaining(2)
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertTrue(receipt.exists())
         issued = json.loads(
@@ -4028,7 +3977,7 @@ class ReserveReceiptTests(AlxTestCase):
                 )
             )
             self.set_remaining(2)
-            code, out = self.run_in("issue", "--deliver", "--offline")
+            code, out = self.run_in("issue", "--offline")
         self.assertEqual(0, code, out)
         self.assertEqual([[]], errors)
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
@@ -4304,7 +4253,7 @@ class CheckerBudgetTests(AlxTestCase):
                     alx.rewild_gate.subprocess, "run", side_effect=stalled
                 )
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertEqual([alx.REWILD_CHECKER_TIMEOUT_SECONDS], calls)
         notes = json.loads(
@@ -4324,46 +4273,6 @@ class ClaimAddDryRunTests(AlxTestCase):
         self.init()
         self.fetch("https://example.org/study", "https://registry.example.net/note")
         return self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO, CLAIM_BROKEN])
-
-    def test_dry_run_prints_the_verdicts_and_writes_nothing(self):
-        batch = self.prepared()
-        ledger_bytes = (self.dir / "ledger.json").read_bytes()
-        state_before = self.state()
-        worklog = (self.dir / "worklog.md").read_text(encoding="utf-8")
-        code, out = self.run_in("claim", "add", "--dry-run", batch)
-        self.assertEqual(1, code, out)
-        self.assertIn("C1 would be added", out)
-        self.assertIn("C3 FAIL", out)
-        self.assertTrue(
-            out.splitlines()[0].startswith("DRY RUN, nothing written:"),
-            out.splitlines()[0],
-        )
-        self.assertFalse((self.dir / ".alx" / "last-claim-add.txt").exists())
-        self.assertIn("next: alx claim add", out)
-        self.assertEqual(ledger_bytes, (self.dir / "ledger.json").read_bytes())
-        self.assertEqual(state_before, self.state())
-        self.assertEqual(0, self.state()["counters"]["claims"])
-        self.assertEqual(
-            worklog, (self.dir / "worklog.md").read_text(encoding="utf-8")
-        )
-        self.assertEqual([], self.ledger()["claims"])
-
-    def test_dry_run_and_real_run_agree_and_the_real_run_writes(self):
-        batch = self.prepared()
-        _code, dry = self.run_in("claim", "add", "--dry-run", batch)
-        code, live = self.run_in("claim", "add", batch)
-        self.assertEqual(1, code, live)
-        self.assertEqual(
-            [
-                line.replace("would be added", "added").replace(
-                    "would be replaced", "replaced"
-                )
-                for line in dry.splitlines()
-                if line.startswith("C")
-            ],
-            [line for line in live.splitlines() if line.startswith("C")],
-        )
-        self.assertEqual({"C1", "C2"}, {c["claim_id"] for c in self.ledger()["claims"]})
 
     def test_summary_line_leads_the_output_and_the_transcript_is_written(self):
         batch = self.prepared()
@@ -4396,41 +4305,6 @@ class ClaimAddDryRunTests(AlxTestCase):
         self.assertEqual(
             {"C1": str(batch), "C2": str(batch)}, self.state()["claim_files"]
         )
-
-
-class BehindScheduleTests(AlxTestCase):
-    LINE = "BEHIND SCHEDULE: no claim accepted after"
-
-    def set_elapsed(self, minutes):
-        state = self.state()
-        state["start_time"] = (
-            datetime.now(timezone.utc) - timedelta(minutes=minutes)
-        ).isoformat()
-        (self.dir / ".alx" / "state.json").write_text(
-            json.dumps(state), encoding="utf-8"
-        )
-
-    def test_the_footer_escalates_at_13_minutes_with_nothing_accepted(self):
-        self.init()
-        self.set_elapsed(13)
-        code, out = self.run_in("status")
-        self.assertEqual(0, code, out)
-        self.assertIn(f"{self.LINE} 13 min", out)
-        self.assertNotIn("--dry-run", out)
-        self.assertNotIn("--deliver", out)
-        self.assertEqual(1, out.count(self.LINE))
-
-    def test_the_footer_is_quiet_early_and_once_a_claim_is_accepted(self):
-        self.init()
-        self.set_elapsed(5)
-        _code, out = self.run_in("status")
-        self.assertNotIn(self.LINE, out)
-        self.fetch("https://example.org/study", "https://registry.example.net/note")
-        batch = self.write_json("claims.json", [CLAIM_ONE])
-        self.run_in("claim", "add", batch)
-        self.set_elapsed(13)
-        _code, out = self.run_in("status")
-        self.assertNotIn(self.LINE, out)
 
 
 class InitEchoTests(AlxTestCase):
@@ -4468,8 +4342,6 @@ class InitEchoTests(AlxTestCase):
             subject,
             "--archetype",
             "person",
-            "--subject-status",
-            "unknown",
         )
         self.assertEqual(0, code, out)
         self.assertIn(
@@ -5089,7 +4961,7 @@ class LiveRecheckNoteTests(AlxTestCase):
         with ExitStack() as stack:
             helper.stub_gates(stack)
             self.set_remaining(-20)
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         issued = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
@@ -5098,23 +4970,6 @@ class LiveRecheckNoteTests(AlxTestCase):
             any("re-check skipped" in note for note in issued["delivery_notes"]),
             issued["delivery_notes"],
         )
-
-
-class ClaimAddDryRunTranscriptTests(AlxTestCase):
-    """Field test 4: the rehearsal writes no transcript, the live run does."""
-
-    def test_a_live_run_after_a_dry_run_writes_the_transcript(self):
-        self.init()
-        self.fetch("https://example.org/study", "https://registry.example.net/note")
-        batch = self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO])
-        self.run_in("claim", "add", "--dry-run", batch)
-        code, out = self.run_in("claim", "add", batch)
-        self.assertEqual(0, code, out)
-        self.assertIn("full output: .alx/last-claim-add.txt", out)
-        transcript = (self.dir / ".alx" / "last-claim-add.txt").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("C1 added", transcript)
 
 
 class LedgerMergeMissingClaimTests(AlxTestCase):
@@ -5442,12 +5297,6 @@ class PartBFlowTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn("No snapshot to restore", out)
 
-    def test_review_restore_without_finished_review_exits_zero(self):
-        self.init()
-        code, out = self.run_in("review", "restore", "content")
-        self.assertEqual(0, code, out)
-        self.assertIn("No finished content review to restore", out)
-
     def test_merge_skips_sources_and_claims_and_applies_the_rest(self):
         self.bootstrap()
         patch = self.write_json(
@@ -5716,12 +5565,9 @@ class PartBFlowTests(AlxTestCase):
             "optional; stored, never required",
             init._option_string_actions["--archetype"].help,
         )
-        self.assertIn(
-            "optional; stored, never required",
-            init._option_string_actions["--subject-status"].help,
-        )
-        self.assertIn("optional", issue._option_string_actions["--deliver"].help)
-        self.assertIn("optional", claim_add._option_string_actions["--dry-run"].help)
+        self.assertNotIn("--subject-status", init._option_string_actions)
+        self.assertNotIn("--deliver", issue._option_string_actions)
+        self.assertNotIn("--dry-run", claim_add._option_string_actions)
         self.assertIn(
             "skip live source re-check; optional",
             issue._option_string_actions["--offline"].help,

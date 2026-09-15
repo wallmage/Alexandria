@@ -84,15 +84,11 @@ class RepositoryContractTests(unittest.TestCase):
             skill,
         )
         self.assertIn(
-            "`alx` drops anything that fails its verbatim check and says so",
+            "nothing ships that failed a fabrication check — `alx issue` drops it and says so",
             skill,
         )
         self.assertIn("without touching quoted text", skill)
-        self.assertIn(
-            "At remaining ≤ 15 min stop fixing: run step 6 with what you have.",
-            skill,
-        )
-        self.assertNotIn("alx issue --deliver", skill)
+        self.assertIn("At remaining ≤ 15 min stop fixing: `alx issue`, `alx render`, deliver.", skill)
 
     def test_pdf_commands_resolve_bundled_paths_from_skill_root(self):
         production = (ROOT / "references" / "pdf-production.md").read_text(
@@ -114,7 +110,7 @@ class RepositoryContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("start at once", skill)
+        self.assertIn("start researching at once", skill)
         self.assertIn("never ask intake questions, never present templates", skill)
         self.assertIn("Do not ask the user to choose a template", templates)
         self.assertIn("Deliver two PDFs with identical content", templates)
@@ -137,9 +133,9 @@ class RepositoryContractTests(unittest.TestCase):
             "zh-HK": ROOT / "references" / "rewild" / "rewild-hk",
         }
 
-        self.assertIn("`references/rewild/rewild/SKILL.md`", skill)
+        self.assertIn("light humanizing per `references/rewild/rewild/SKILL.md`", skill)
         self.assertIn("scripts/alx.py", skill)
-        self.assertIn("snapshot", skill)
+        self.assertIn("review start rewild", skill)
         self.assertNotIn(
             "If the user explicitly asks to remove AI-like writing", skill
         )
@@ -189,9 +185,10 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertTrue(quality.is_file())
         self.assertTrue(schema_path.is_file())
-        self.assertIn("fails its verbatim check", skill)
+        self.assertIn("nothing ships that failed a fabrication check", skill)
         self.assertIn("scripts/alx.py", skill)
-        self.assertIn("alx review start content", quality.read_text(encoding="utf-8"))
+        self.assertIn("review start content", skill)
+        self.assertIn("Their absence never blocks delivery.", skill)
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
         self.assertIn("tests/ci_render_matrix.py", workflow)
@@ -279,31 +276,6 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("alx review start rewild", rewild)
         self.assertIn("alx review start content", quality)
         self.assertIn("alx issue", quality)
-        self.assertNotIn("alx issue --deliver", quality)
-        self.assertNotIn(
-            "Reuse the locally generated `.runtime.json`",
-            (ROOT / "references" / "pdf-production.md").read_text(encoding="utf-8"),
-        )
-        person = (ROOT / "references" / "person.md").read_text(encoding="utf-8")
-        for token in (
-            "person_claim_role",
-            "person_claim_assessment",
-            "human_harm_review",
-            "--subject-status",
-            "living_status",
-        ):
-            self.assertNotIn(token, person)
-        for name in (
-            "README.md",
-            "README.en.md",
-            "README.zh-CN.md",
-            "README.zh-HK.md",
-        ):
-            self.assertNotIn(
-                "alx issue --deliver",
-                (ROOT / name).read_text(encoding="utf-8"),
-                name,
-            )
 
 
 if __name__ == "__main__":

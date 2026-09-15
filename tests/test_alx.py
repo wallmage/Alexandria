@@ -338,8 +338,8 @@ class InitTests(AlxTestCase):
         person = self.ledger()["people"][0]
         self.assertEqual("unknown", person["living_status"])
         self.assertEqual("primary_subject", person["relationship"])
-        self.assertNotIn("archetype:", out)
-        self.assertNotIn("language:", out)
+        self.assertIn("archetype: person (given)", out)
+        self.assertIn("language:", out)
         code, out = self.run_alx(
             "init",
             self.dir,
@@ -466,6 +466,7 @@ class FetchTests(AlxTestCase):
         self.assertEqual([False, True], [call["refresh"] for call in seen])
         for call in seen:
             self.assertEqual(workspace.sources, call["cache_dir"])
+            self.assertEqual(20, alx.FETCH_TIMEOUT_SECONDS)
             self.assertEqual(alx.FETCH_TIMEOUT_SECONDS, call["timeout"])
             self.assertAlmostEqual(deadline, call["deadline"], places=3)
 
@@ -829,6 +830,43 @@ class ClaimTests(AlxTestCase):
         hard = out.split("=== WARN")[0]
         self.assertNotIn("ledger/quantity", hard)
         self.assertIn("ledger/quantity", out)
+
+    def test_omitted_kind_and_importance_warn_and_still_land(self):
+        """A3: missing kind/importance is advice — defaults recorded, claim lands."""
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.write_json(
+            "defaults.json",
+            [
+                {
+                    "claim_id": "C3",
+                    "claim": "The archive released 1,204 documents in March 2026.",
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": (
+                                "The archive released 1,204 documents in March 2026, "
+                                "and the registry confirmed the count."
+                            ),
+                        }
+                    ],
+                }
+            ],
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertIn("C3 added", out)
+        self.assertNotIn("FAIL", out)
+        self.assertIn("C3 WARN", out)
+        self.assertIn("[ledger/claim-input]", out)
+        self.assertIn(
+            "C3: kind not given (recorded as fact); "
+            "importance not given (recorded as supporting)",
+            out,
+        )
+        claim = self.ledger()["claims"][0]
+        self.assertEqual("fact", claim["kind"])
+        self.assertEqual("supporting", claim["importance"])
 
     def test_drop_cascade_drops_both_claims_mapped_to_one_paragraph(self):
         self.bootstrap()
@@ -1345,6 +1383,29 @@ class IssueTests(AlxTestCase):
         for prefix in alx.VERIFICATION_NOTE_PREFIX.values():
             self.assertNotIn(prefix, report)
 
+    def test_issue_records_min_sections_fail_and_still_writes_receipts(self):
+        from contextlib import ExitStack
+
+        self.prepared()
+        with ExitStack() as stack:
+            self.stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
+        self.assertTrue((self.dir / "receipts" / "rewild.json").exists())
+        self.assertTrue((self.dir / "receipts" / "content.json").exists())
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )["notes"]
+        self.assertTrue(
+            any(
+                "Report has 2 H2 sections; minimum is 3." in note
+                and "validate_report --fast --final-once failed:" in note
+                for note in notes
+            ),
+            notes,
+        )
+
     def test_length_floor_is_warn_and_issue_delivers_without_deliver(self):
         """R28: `rewild/length` is a warning; plain `issue` still delivers."""
         from contextlib import ExitStack
@@ -1651,7 +1712,7 @@ class StatusTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn("sources 2", out)
         self.assertIn("claims 2", out)
-        self.assertNotIn("snapshot", out)
+        self.assertIn("snapshot", out)
         self.assertIn("Next:", out)
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
 
@@ -2059,6 +2120,9 @@ class LiveFidelityTests(AlxTestCase):
         self.assertTrue(adopted)
         self.assertEqual({"A"}, {item.klass for item in adopted})
         self.assertEqual({"warn"}, {item.severity for item in adopted})
+        self.assertTrue(
+            any("past the 25% quorum" in item.message for item in adopted), adopted
+        )
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             stack.enter_context(
@@ -2092,6 +2156,56 @@ class LiveFidelityTests(AlxTestCase):
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
         )
         self.assertTrue(any("unreachable" in note for note in notes["notes"]), notes)
+
+    def test_a_live_unreachable_within_quorum_is_still_a_warning(self):
+        """A8: every unverified sampled check is a finding; quorum is the sentence."""
+        result = {
+            "findings": [],
+            "checks": [
+                {
+                    "status": "unreachable",
+                    "claim_id": "C1",
+                    "source_id": "S1",
+                    "detail": "timeout",
+                },
+                {"status": "verified", "claim_id": "C2", "source_id": "S2"},
+                {"status": "verified", "claim_id": "C3", "source_id": "S3"},
+                {"status": "verified", "claim_id": "C4", "source_id": "S4"},
+            ],
+        }
+        findings = alx._online_findings(result)
+        adopted = alx.adopt(findings, online=True)
+        unverified = [
+            item
+            for item in adopted
+            if item.family == "fidelity/unreachable"
+        ]
+        self.assertEqual(1, len(unverified), adopted)
+        self.assertEqual("warn", unverified[0].severity)
+        self.assertEqual("A", unverified[0].klass)
+        self.assertEqual("timeout", unverified[0].message)
+        self.assertNotIn("past the 25% quorum", unverified[0].message)
+        beyond = {
+            "findings": [],
+            "checks": [
+                {
+                    "status": "unreachable",
+                    "claim_id": "C1",
+                    "source_id": "S1",
+                    "detail": "timeout",
+                },
+                {"status": "verified", "claim_id": "C2", "source_id": "S2"},
+                {"status": "verified", "claim_id": "C3", "source_id": "S3"},
+            ],
+        }
+        past = [
+            item
+            for item in alx._online_findings(beyond)
+            if item.family == "fidelity/unreachable"
+        ]
+        self.assertEqual(1, len(past))
+        self.assertIn("timeout", past[0].message)
+        self.assertIn("past the 25% quorum", past[0].message)
 
 
 class IntegrationHoleTests(AlxTestCase):
@@ -3937,6 +4051,76 @@ class RenderDegradeTests(AlxTestCase):
         )
 
 
+class RenderPdfCheckTests(AlxTestCase):
+    """A2 / content-07: baseline --min-text-chars 5000; print-only."""
+
+    def issued(self, stack):
+        helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(helper, name, getattr(self, name))
+        helper.prepared()
+        helper.stub_gates(stack)
+        code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+
+    def test_render_pdf_check_uses_5000_chars_for_every_language(self):
+        from contextlib import ExitStack
+
+        from scripts import md_to_pdf, render_pdf_pages
+
+        captured = []
+
+        def fake_validate(path, **kwargs):
+            captured.append(kwargs)
+            return ["PDF has 12 extracted text characters; minimum is 5000."]
+
+        def fake_render_pdf(input_path, output_path, **kwargs):
+            Path(output_path).write_bytes(b"%PDF-1.7\n")
+            return Path(output_path)
+
+        def fake_render_pages(pdf_path, output_dir, **kwargs):
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            page = Path(output_dir) / "page-001.png"
+            page.write_bytes(b"\x89PNG")
+            return [page]
+
+        with ExitStack() as stack:
+            self.issued(stack)
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_pages", side_effect=fake_render_pages
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    alx.validate_report, "validate_pdf", side_effect=fake_validate
+                )
+            )
+            for lang in ("en", "zh-CN"):
+                state = self.state()
+                state["lang"] = lang
+                (self.dir / ".alx" / "state.json").write_text(
+                    json.dumps(state), encoding="utf-8"
+                )
+                captured.clear()
+                code, out = self.run_in("render", "--template", "executive")
+                with self.subTest(lang=lang):
+                    self.assertEqual(0, code, out)
+                    self.assertEqual(1, len(captured), captured)
+                    self.assertEqual(5000, captured[0]["min_text_chars"])
+                    self.assertIn(
+                        "executive PDF check: PDF has 12 extracted text "
+                        "characters; minimum is 5000.",
+                        out,
+                    )
+
+
 class CheckerBudgetTests(AlxTestCase):
     """K7 (D7): a stalled rewild checker costs its timeout once per command."""
 
@@ -4108,8 +4292,12 @@ class InitEchoTests(AlxTestCase):
             "init", self.dir, "--lang", "en", "--subject", subject
         )
         self.assertEqual(0, code, out)
-        self.assertNotIn("archetype:", out)
-        self.assertNotIn("language:", out)
+        self.assertIn(
+            "archetype: hybrid (inferred) — change with "
+            "`alx init … --archetype <name>`",
+            out,
+        )
+        self.assertIn("language: en — change with", out)
         self.assertIn("Workspace ready", out)
         self.assertIn("target length", out)
         self.assertIn("Next:", out)
@@ -4118,7 +4306,7 @@ class InitEchoTests(AlxTestCase):
     def test_init_echoes_a_given_archetype_and_the_person_status_flag(self):
         code, out = self.init()
         self.assertEqual(0, code, out)
-        self.assertNotIn("archetype:", out)
+        self.assertIn("archetype: artifact (given)", out)
         self.assertNotIn("--subject-status", out)
         subject = self.root / "person.txt"
         subject.write_text("Someone Notable\n", encoding="utf-8")
@@ -4135,7 +4323,12 @@ class InitEchoTests(AlxTestCase):
             "unknown",
         )
         self.assertEqual(0, code, out)
-        self.assertNotIn("archetype:", out)
+        self.assertIn(
+            "archetype: person (given) — change with `alx init … "
+            "--archetype <name>`",
+            out,
+        )
+        self.assertNotIn("--subject-status", out)
         self.assertIn("Workspace ready", out)
 
 
@@ -4996,22 +5189,24 @@ class PortfolioVocabularyTests(AlxTestCase):
 class DeletedNoiseFamiliesTests(AlxTestCase):
     """R29/A4: review noise the gates no longer raise."""
 
-    def test_a_missing_review_is_not_a_finding(self):
+    def test_a_missing_review_is_a_finding(self):
         self.bootstrap()
-        _code, out = self.run_in("check")
-        self.assertNotIn("review/content-missing", out)
-        self.assertNotIn("review is missing", out)
-        self.assertNotIn("review/rewild", out)
+        self.run_in("check", "--fix")
+        code, out = self.run_in("check")
+        self.assertEqual(0, code, out)
+        self.assertIn("review/content-missing", out)
+        self.assertIn("review is missing", out)
+        self.assertIn("review/rewild", out)
 
     def test_the_deleted_families_are_not_registered(self):
         for family in (
-            "review/content-missing",
             "rewild/humanization",
             "content/claim-support",
             "content/claim-binding",
         ):
             with self.subTest(family=family):
                 self.assertNotIn(family, alx.FAMILIES)
+        self.assertIn("review/content-missing", alx.FAMILIES)
 
 
 class FlowResilienceTests(AlxTestCase):
@@ -5214,9 +5409,12 @@ class PartBFlowTests(AlxTestCase):
             "note.json",
             [
                 {
-                    "claim_id": "C1",
+                    "claim_id": "C3",
                     "claim": "The archive released 1,204 documents in March 2026.",
-                    "note": "extra",
+                    "kind": "fact",
+                    "importance": "supporting",
+                    "importnace": "key",
+                    "caveats": "extra",
                     "source_evidence": [
                         {
                             "source_id": "S1",
@@ -5229,8 +5427,15 @@ class PartBFlowTests(AlxTestCase):
         )
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(0, code, out)
+        self.assertIn("C3 added", out)
+        self.assertIn("C3 WARN", out)
+        self.assertIn("[ledger/claim-input]", out)
+        self.assertIn("C3: unknown fields ignored: importnace, caveats", out)
+        self.assertNotIn("FAIL", out)
         claim = self.ledger()["claims"][0]
-        self.assertNotIn("note", claim)
+        self.assertEqual("C3", claim["claim_id"])
+        self.assertNotIn("importnace", claim)
+        self.assertNotIn("caveats", claim)
         self.assertNotIn("note", claim["source_evidence"][0])
 
     def test_claim_add_unwraps_claims_array_wrapper(self):

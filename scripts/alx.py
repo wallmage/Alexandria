@@ -321,6 +321,7 @@ OWN_FAMILIES = (
     "fidelity/undecodable",
     "fidelity/unreachable",
     "integrity/encoding",
+    "review/content-missing",
     "review/content-stale",
     "review/rewild",
     "tooling/receipt",
@@ -359,7 +360,7 @@ UNVERIFIED_QUORUM = 0.25
 #: Spec §6.11 subprocess budgets. The rasterizer keeps its own 90 s
 #: (`render_pdf_pages.SUBPROCESS_TIMEOUT_S`, used by `render_pages`); md_to_pdf
 #: runs no subprocess.
-FETCH_TIMEOUT_SECONDS = 10
+FETCH_TIMEOUT_SECONDS = 20
 REWILD_CHECKER_TIMEOUT_SECONDS = 120
 DEGRADE_MINUTES = 15
 ONLINE_CAP_MINUTES = 4
@@ -417,6 +418,7 @@ WARN_FAMILIES = frozenset(
         "tooling/receipt",
         "tooling/render",
         "review/rewild",
+        "review/content-missing",
         "review/content-stale",
         "fidelity/unreachable",
         "fidelity/undecodable",
@@ -1321,6 +1323,8 @@ def _skeleton_ledger(args, subject, question, reader, report_day):
 
 def cmd_init(args):
     ws = Workspace(args.directory)
+    # Field test 6: the archetype default is a silent inference; say so.
+    origin = "given" if getattr(args, "archetype", None) else "inferred"
     args.archetype = getattr(args, "archetype", None) or "hybrid"
     if ws.ledger_path.exists() and not args.force:
         try:
@@ -1378,6 +1382,10 @@ def cmd_init(args):
         f"{args.lang} {args.archetype} workspace",
         [
             f"Workspace ready: {ws.dir}",
+            f"archetype: {args.archetype} ({origin}) — change with "
+            "`alx init … --archetype <name>`",
+            f"language: {args.lang} — change with "
+            f"`alx init … --lang <{'|'.join(LANGUAGES)}>`",
             f"target length: {length_floor}–{length_ceiling} {length_unit} "
             "(alx check prints the count)",
             "Next: `alx fetch <url> ...` for 8-15 reachable sources.",
@@ -1939,11 +1947,13 @@ def _normalize_evidence_record(record):
 def _normalize_claim_input(item, ledger, seen, batch_ids):
     assigned = False
     item = dict(item)
+    consumed = []
     if "source_evidence" not in item:
         for alias in _SOURCE_EVIDENCE_ALIASES:
             if alias in item:
                 value = item[alias]
                 item["source_evidence"] = [value] if isinstance(value, dict) else value
+                consumed.append(alias)
                 break
     evidence = item.get("source_evidence")
     if isinstance(evidence, dict):
@@ -1951,6 +1961,7 @@ def _normalize_claim_input(item, ledger, seen, batch_ids):
     elif isinstance(evidence, list):
         item["source_evidence"] = [_normalize_evidence_record(row) for row in evidence]
     known = set(_claim_input_schema()["properties"])
+    unknown = [key for key in item if key not in known and key not in consumed]
     item = {key: value for key, value in item.items() if key in known}
     raw_id = item.get("claim_id")
     if raw_id in (None, ""):
@@ -1958,7 +1969,7 @@ def _normalize_claim_input(item, ledger, seen, batch_ids):
         assigned = True
     else:
         item["claim_id"] = _canon_prefixed_id("C", raw_id)
-    return item, assigned
+    return item, assigned, unknown
 
 
 def _unwrap_claim_items(payload):
@@ -1998,14 +2009,44 @@ def cmd_claim_add(args):
         if not isinstance(raw, dict):
             lines.append(f"item {index} is not an object; skipped")
             continue
-        item, assigned = _normalize_claim_input(
+        item, assigned, unknown = _normalize_claim_input(
             raw, ledger, seen, batch_ids
         )
         if assigned:
             batch_ids.append(item["claim_id"])
         claim_id = item.get("claim_id") or "<no claim_id>"
+        extras = []
+        if unknown:
+            extras.append(
+                finding(
+                    "ledger/claim-input",
+                    f"{claim_id}: unknown fields ignored: {', '.join(unknown)}",
+                    severity="warn",
+                    ids=[claim_id],
+                )
+            )
+        omitted = []
+        if "kind" not in item:
+            omitted.append(
+                f"kind not given (recorded as {validate_ledger.CLAIM_DEFAULTS['kind']})"
+            )
+        if "importance" not in item:
+            omitted.append(
+                f"importance not given (recorded as "
+                f"{validate_ledger.CLAIM_DEFAULTS['importance']})"
+            )
+        if omitted:
+            extras.append(
+                finding(
+                    "ledger/claim-input",
+                    f"{claim_id}: {'; '.join(omitted)}",
+                    severity="warn",
+                    ids=[claim_id],
+                )
+            )
         findings = adopt(
-            _batch_findings(ws, ledger, item, seen)
+            extras
+            + _batch_findings(ws, ledger, item, seen)
             + [
                 item_finding
                 for item_finding in validate_ledger.claim_findings(
@@ -3175,9 +3216,13 @@ def freshness_findings(ws, state, ledger, kind):
     """Spec §6.8: current inputs must equal the reviewed copy up to mechanics."""
     record = state.get("reviews", {}).get(kind, {})
     if not record.get("finished"):
-        # R29: reviews are optional, so their absence is silent. A note that
-        # exists but no longer matches the report is still reported below.
-        return []
+        return [
+            finding(
+                _review_family(kind, "missing"),
+                f"the {kind} review is missing.",
+                fix=f"alx review start {kind}",
+            )
+        ]
     reviewed = ws.review_dir(kind, record["iteration"])
     current = _paragraph_set(ws.report_text(), state)
     previous = _paragraph_set(
@@ -3807,8 +3852,9 @@ def _online_findings(result):
 
     `check_source_fidelity` records unreachable/undecodable/mismatch on the
     check, not as a finding, so `alx` derives them here: a live MISMATCH is
-    Class F, and unverified sources are the Class-A availability finding once
-    they pass the policy quorum.
+    Class F, and every unverified sampled check is a Class-A availability
+    finding. The quorum sentence is appended only when the sample is past
+    the policy quorum.
     """
     result = result or {}
     findings = as_findings(result.get("findings"))
@@ -3827,15 +3873,14 @@ def _online_findings(result):
         detail = str(check.get("detail") or status)
         if status == "mismatch":
             findings.append(finding("fidelity/mismatch", detail, ids=ids))
-        elif status in UNVERIFIED_STATUSES and beyond_quorum:
-            findings.append(
-                finding(
-                    f"fidelity/{status}",
+        elif status in UNVERIFIED_STATUSES:
+            message = detail
+            if beyond_quorum:
+                message = (
                     f"{detail} Unverified sources are past the "
-                    f"{int(UNVERIFIED_QUORUM * 100)}% quorum.",
-                    ids=ids,
+                    f"{int(UNVERIFIED_QUORUM * 100)}% quorum."
                 )
-            )
+            findings.append(finding(f"fidelity/{status}", message, ids=ids))
     return findings
 
 
@@ -3926,6 +3971,8 @@ def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
         str(ws.receipts / "source-fidelity.json"),
         "--expected-lang",
         state.get("lang", "en"),
+        "--min-sections",
+        "3",
         "--fast",
     ]
     result_path = ws.alx / "fidelity-result.json"
@@ -4189,7 +4236,7 @@ def cmd_render(args):
             pdf_errors = validate_report.validate_pdf(
                 output,
                 min_pages=10,
-                min_text_chars=5000 if state.get("lang", "en") != "en" else 1,
+                min_text_chars=5000,
                 min_links=1,
                 expected_lang=state.get("lang", "en"),
             )
@@ -4231,9 +4278,16 @@ def cmd_status(args):
     print(f"runtime: {sys.executable} ({managed})")
     ws, state, ledger = _open(args)
     last = state.get("last_check") or {}
+    reviews = state.get("reviews", {})
     lines = [
         f"sources {len(ledger.get('sources', []))}",
         f"claims {len(ledger.get('claims', []))}",
+        f"snapshot {'yes' if ws.latest_snapshot() else 'no'}",
+        "reviews "
+        + ", ".join(
+            f"{kind}={'finished' if reviews.get(kind, {}).get('finished') else 'pending'}"
+            for kind in REVIEW_KINDS
+        ),
         f"receipts {'issued' if (ws.receipts / 'issue.json').exists() else 'none'}",
         f"PDFs {len(list(ws.dir.glob('report-*.pdf')))}",
         "last check "

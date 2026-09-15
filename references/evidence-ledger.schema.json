@@ -395,67 +395,8 @@
             "minLength": 1
           },
           "uniqueItems": true
-        },
-        "living_status": {
-          "enum": ["living", "recently_deceased", "deceased", "unknown", null]
-        },
-        "public_role": {
-          "enum": ["public", "limited_public", "private", null]
-        },
-        "relationship": {
-          "enum": ["primary_subject", "adjacent", null]
         }
       }
-    },
-    "namedSubject": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "subject_type", "person_id"],
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "subject_type": {
-          "description": "Semantic subject type. Organization is not a self-attested safety bypass: validation rejects names that independently resolve as people.",
-          "enum": ["person", "organization"]
-        },
-        "person_id": {
-          "type": ["string", "null"],
-          "pattern": "^P[0-9]+$"
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "subject_type": {"const": "person"}
-            },
-            "required": ["subject_type"]
-          },
-          "then": {
-            "properties": {
-              "person_id": {
-                "type": "string",
-                "pattern": "^P[0-9]+$"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "subject_type": {"const": "organization"}
-            },
-            "required": ["subject_type"]
-          },
-          "then": {
-            "properties": {
-              "person_id": {"type": "null"}
-            }
-          }
-        }
-      ]
     },
     "searchRecord": {
       "type": "object",
@@ -654,13 +595,6 @@
             "pattern": "^P[0-9]+$"
           },
           "uniqueItems": true
-        },
-        "named_subjects": {
-          "description": "Explicit inventory of every named person or organization in harmful or sensitive claim/report text. Organization typing is independently checked and cannot override a name that resolves as a person. Registered person claims may omit entries when person_ids and the people registry already resolve the name.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/namedSubject"
-          }
         },
         "reasoning": {
           "type": ["string", "null"]

@@ -28,10 +28,7 @@
     {
       "person_id": "P1",
       "name": "沈亦文",
-      "aliases": [],
-      "living_status": "living",
-      "public_role": "public",
-      "relationship": "adjacent"
+      "aliases": []
     }
   ],
   "report_date": "2026-07-28",
@@ -232,7 +229,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "产销差的量级构成换表投资的需求论证。",
       "what_would_change": "序列被回溯修订，或者2026年半年报的产销差率回落到二成以下。",
@@ -268,7 +264,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "成因比例决定表位以内的投资能触及多少水量。",
       "what_would_change": "一份按管段拆开的漏损量，或者用户端流量分布记录推翻夜间用水接近零的假定。",
@@ -304,7 +299,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "回收率是换表投资要缓解的运行症状。",
       "what_would_change": "一份独立的回收率序列，把损失均匀分布在整个片区。",
@@ -342,7 +336,6 @@
         "C5"
       ],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "改造带来的年增成本是这笔投资最大的单项成本输入。",
       "what_would_change": "一份公开的口径对账，把两个成本基础对起来。",
@@ -380,7 +373,6 @@
         "C4"
       ],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "较低的数字会改变委员会能接受的回收期。",
       "what_would_change": "一份公开的表批次对账，或者修订后的最终评审结论。",
@@ -412,7 +404,6 @@
       ],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": "主管部门的流量拆分把绝大部分水量放在管网上，供水企业的回收率序列把损失指向同一段管网，独立抽检只能证明表具在固定流量点上少计，因此表位以内的投资无法触及主要的丢水环节。",
       "decision_relevance": "如果成因在管网上，表位以内的资本买到的是计费准确，不是产销差改善。",
       "what_would_change": "一份用户端流量分布记录显示低流量份额很高，或者按管段拆开的漏损量把损失放回表具一侧。",
@@ -450,12 +441,6 @@
       "person_ids": [
         "P1"
       ],
-      "person_claim_role": "neutral",
-      "person_claim_assessment": {
-        "classification": "neutral",
-        "rationale": "这条记录只写一项公开的任职和它所管的申报时间表，没有指责、没有私人信息，也没有对任职者本人作任何评价性描述。"
-      },
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "申报截止日期决定委员会自己的表决时点。",
       "what_would_change": "主任委员换人，或者同一年里增开第二个申报窗口。",
@@ -491,7 +476,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "表具确实少计水量，会削弱只把钱投向管网的论证。",
       "what_would_change": "一次覆盖用户实际流量分布的抽检，或者证明这批表在常用流量段合格。",
@@ -539,7 +523,6 @@
       ],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": "在抽检自己的只数上做换算，因为评估只给了超差只数，没有给比例，所以记为测算而不是事实。",
       "decision_relevance": "委员会拿来和成因拆分对比的是比例，不是只数。",
       "what_would_change": "一次把流量点扩展到用户常用流量段的抽检。",
@@ -577,7 +560,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "现行水价是所有回收期计算的起点。",
       "what_would_change": "一次价格听证之后重置公布价格。",

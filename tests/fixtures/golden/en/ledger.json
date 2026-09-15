@@ -28,10 +28,7 @@
     {
       "person_id": "P1",
       "name": "Priya Raghunathan",
-      "aliases": [],
-      "living_status": "living",
-      "public_role": "public",
-      "relationship": "adjacent"
+      "aliases": []
     }
   ],
   "report_date": "2026-07-28",
@@ -232,7 +229,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The tonnage trend sets the demand case for terminal capital.",
       "what_would_change": "A restated series, or a 2026 half-year figure that falls back toward the 2021 level.",
@@ -268,7 +264,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The path limit caps the throughput any terminal on the corridor can deliver.",
       "what_would_change": "A redoubling scheme entering the authority's committed programme.",
@@ -304,7 +299,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "Deteriorating punctuality is the operating symptom the investment is meant to relieve.",
       "what_would_change": "An independent punctuality series that shows the loss spread evenly across the corridor.",
@@ -342,7 +336,6 @@
         "C5"
       ],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The charge increase is the largest single cost input to the corridor case.",
       "what_would_change": "A published reconciliation of the two cost bases.",
@@ -380,7 +373,6 @@
         "C4"
       ],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The lower figure changes the payback period a committee would accept.",
       "what_would_change": "A published traffic-mix reconciliation, or a revised final determination.",
@@ -412,7 +404,6 @@
       ],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": "Path allocation is saturated at four trains an hour and the punctuality loss is concentrated on the single-track section, so added terminal capacity would queue behind the same constraint.",
       "decision_relevance": "If the constraint sits on the track, terminal capital buys resilience rather than throughput.",
       "what_would_change": "Evidence that paths go unsold, or a punctuality breakdown that places the delay at the terminals.",
@@ -450,12 +441,6 @@
       "person_ids": [
         "P1"
       ],
-      "person_claim_role": "neutral",
-      "person_claim_assessment": {
-        "classification": "neutral",
-        "rationale": "The claim records a published appointment and the committee timetable it governs, with no allegation, no private detail, and no evaluative language about the appointee."
-      },
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The submission deadline sets the committee's own decision date.",
       "what_would_change": "A change of chair, or a second funding window in the same year.",
@@ -491,7 +476,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "Spare night paths would let the flow grow without new track, and would weaken the case for capital.",
       "what_would_change": "A later timetable in which every night path is sold, or evidence that the unused paths are unusable by loaded trains.",
@@ -539,7 +523,6 @@
       ],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": "Arithmetic on the assessment's own count, kept as an estimate because the source states the unused paths rather than the used share.",
       "decision_relevance": "The share, not the count, is what a committee compares against the daytime window.",
       "what_would_change": "A count that separates paths reserved for engineering access from paths available to traffic.",
@@ -577,7 +560,6 @@
       "supports": [],
       "contradicts": [],
       "person_ids": [],
-      "human_harm_review": null,
       "reasoning": null,
       "decision_relevance": "The current charge is the base against which any increase is measured.",
       "what_would_change": "A final determination that resets the published charge.",

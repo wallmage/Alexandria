@@ -1334,3 +1334,41 @@ class RewildReceiptLedgerBindingTests(unittest.TestCase):
             )
             errors = validate_report._receipt_hash_errors(args, report)
             self.assertEqual([], errors)
+
+
+class AsciiQuotePairingTests(unittest.TestCase):
+    """Short ASCII-quoted terms must not desynchronize the span scanner."""
+
+    SNAPSHOT = (
+        '每日以"雪耻"开头。他写道："倭寇侮辱,非可以愤激制之"，此后转向强硬。'
+    )
+
+    def quotation_findings(self, body):
+        return [
+            finding
+            for finding in validate_report.integrity_findings(
+                "# Title\n\n> 14 September 2026\n\n" + body,
+                DATED_LEDGER,
+                snapshot_text=self.SNAPSHOT,
+                lang="zh-CN",
+            )
+            if finding.family == "integrity/quotation-lost"
+        ]
+
+    def test_editing_prose_between_quotes_is_not_a_lost_quotation(self):
+        findings = self.quotation_findings(
+            '每日以"雪耻"为题。他记道："倭寇侮辱,非可以愤激制之"，从此转向强硬。\n'
+        )
+        self.assertEqual([], findings)
+
+    def test_altering_the_quoted_text_is_hard(self):
+        findings = self.quotation_findings(
+            '每日以"雪耻"开头。他写道："倭寇侮辱,非可以愤激胜之"，此后转向强硬。\n'
+        )
+        self.assertEqual(["hard"], [finding.severity for finding in findings])
+
+    def test_quoted_spans_drops_short_ascii_terms(self):
+        self.assertEqual(
+            ['"long enough"'],
+            validate_report._quoted_spans('a "xy" b "long enough" c'),
+        )

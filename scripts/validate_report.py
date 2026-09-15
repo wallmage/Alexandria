@@ -100,7 +100,7 @@ FAMILIES = (
     "binding/sources-section",
 )
 _QUOTE_SPAN_RE = re.compile(
-    r"「[^」]{4,}」|『[^』]{4,}』|[“][^”]{4,}[”]|[‘][^’]{4,}[’]|\"[^\"]{4,}\""
+    r"「[^」]{4,}」|『[^』]{4,}』|[“][^”]{4,}[”]|[‘][^’]{4,}[’]|\"[^\"\n]*\""
 )
 ROOT = Path(__file__).resolve().parents[1]
 S2T_CHARACTER_MAP = (
@@ -529,7 +529,14 @@ def _immediate_blockquote_lines(text):
 
 
 def _quoted_spans(text):
-    return _QUOTE_SPAN_RE.findall(text or "")
+    # ASCII quotes pair sequentially (open == close), so length is filtered
+    # after the match instead of inside the branch: a short term would
+    # otherwise desynchronize the scanner onto its closing quote.
+    return [
+        span
+        for span in _QUOTE_SPAN_RE.findall(text or "")
+        if not span.startswith('"') or len(span) - 2 >= 4
+    ]
 
 
 def _bound_claim_source_urls(ledger, sources_by_id):

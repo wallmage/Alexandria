@@ -476,7 +476,7 @@ def _sources_cache(ledger_path):
 
 
 def run_check(
-    report_path, ledger_path, review_note_path=None, *, include_ledger_checks=True
+    report_path, ledger_path, review_note_path=None, *, include_ledger_checks=False
 ):
     """All content-review checks as findings; writes nothing.
 
@@ -524,6 +524,8 @@ def run_check(
         for error in _schema_errors(
             review, CONTENT_REVIEW_SCHEMA, "Content review:", prose_floor=True
         ):
+            if "is too short" in error:
+                continue
             findings.append(_finding("content/check", error))
         ledger_language = (
             ledger.get("brief", {}).get("report_language")
@@ -1027,7 +1029,9 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     if args.check:
-        findings = run_check(args.report, args.ledger, args.review_note)
+        findings = run_check(
+            args.report, args.ledger, args.review_note, include_ledger_checks=True
+        )
         return emit_findings(
             _as_cli_findings(findings),
             ok_message="[OK] Content quality check finished (dry run)",

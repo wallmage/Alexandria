@@ -2958,8 +2958,7 @@ def render_pdf(
             ) from exc
     finally:
         temp_path.unlink(missing_ok=True)
-    size_kb = output_path.stat().st_size / 1024
-    print(f"[OK] PDF generated: {output_path} ({size_kb:.1f} KB)")
+    print(f"[OK] PDF generated: {output_path}")
     return output_path
 
 

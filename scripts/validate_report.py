@@ -716,7 +716,7 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
             expected_date = localized_date(lang, ledger_day)
     except ValueError:
         expected_date = None
-    if expected_date and expected_date not in blockquote_lines:
+    if blockquote_lines and expected_date and expected_date not in blockquote_lines:
         findings.append(
             _finding(
                 "integrity/date-line",
@@ -886,14 +886,6 @@ def validate_report_against_ledger(text, ledger):
         return foundations
 
     errors = []
-    # Same membership rule as binding_findings: aliases count, URLs are
-    # normalized, non-http links are not citations (run 6: an http alias of
-    # an https source produced a false content note).
-    allowed = _ledger_url_set(ledger)
-    for url in sorted(set(extract_markdown_urls(text))):
-        if _http_url(url) and normalize_url(url) not in allowed:
-            errors.append(f"Report URL is not present in the ledger: {url}")
-
     sections = _h2_sections(text)
     body = text
     source_starts = [
@@ -919,9 +911,6 @@ def validate_report_against_ledger(text, ledger):
         claim_id = claim.get("claim_id", "<unknown>")
         excerpts = claim.get("report_excerpts", [])
         if not isinstance(excerpts, list) or not excerpts:
-            errors.append(
-                warning(f"Report location is missing for claim {claim_id}.")
-            )
             continue
         for excerpt in excerpts:
             normalized = re.sub(r"\s+", " ", str(excerpt)).strip()

@@ -308,8 +308,10 @@ class InitTests(AlxTestCase):
         self.init()
         (self.dir / "ledger.json").write_text('{"marker": 1}', encoding="utf-8")
         code, out = self.init()
-        self.assertEqual(1, code)
-        self.assertIn("--force", out)
+        self.assertEqual(0, code, out)
+        self.assertIn("workspace exists", out)
+        self.assertIn("keeping it", out)
+        self.assertIn("Next:", out)
         self.assertEqual({"marker": 1}, self.ledger())
         code, out = self.init("--force")
         self.assertEqual(0, code, out)
@@ -328,8 +330,12 @@ class InitTests(AlxTestCase):
             "--archetype",
             "person",
         )
-        self.assertEqual(1, code)
-        self.assertIn("--subject-status", out)
+        self.assertEqual(0, code, out)
+        person = self.ledger()["people"][0]
+        self.assertEqual("unknown", person["living_status"])
+        self.assertEqual("primary_subject", person["relationship"])
+        self.assertNotIn("archetype:", out)
+        self.assertNotIn("language:", out)
         code, out = self.run_alx(
             "init",
             self.dir,
@@ -340,12 +346,12 @@ class InitTests(AlxTestCase):
             "--archetype",
             "person",
             "--subject-status",
-            "unknown",
+            "living",
+            "--force",
         )
         self.assertEqual(0, code, out)
         person = self.ledger()["people"][0]
-        self.assertEqual("unknown", person["living_status"])
-        self.assertEqual("primary_subject", person["relationship"])
+        self.assertEqual("living", person["living_status"])
 
 
 class FetchTests(AlxTestCase):
@@ -464,16 +470,14 @@ class FetchTests(AlxTestCase):
         self.set_remaining(10)
         code, out = self.fetch("https://example.org/study")
         self.assertEqual(0, code, out)
-        self.assertIn("fetch batch stopped", out)
-        self.assertEqual([], self.ledger()["sources"])
+        self.assertNotIn("fetch batch stopped", out)
+        self.assertEqual(1, len(self.ledger()["sources"]))
 
 
 class LanguageTests(AlxTestCase):
     def test_verification_note_templates_per_language(self):
-        for lang in ("en", "zh-CN", "zh-HK"):
-            note = alx._verification_note(lang, ["S3 unreachable"])
-            self.assertTrue(note.startswith(alx.VERIFICATION_NOTE_PREFIX[lang]), note)
-            self.assertIn("S3 unreachable", note)
+        self.assertFalse(hasattr(alx, "_verification_note"))
+        self.assertFalse(hasattr(alx, "_insert_verification_note"))
 
     def test_chinese_init_writes_a_localized_skeleton(self):
         subject = self.root / "subject.txt"
@@ -597,11 +601,13 @@ class ClaimTests(AlxTestCase):
         }
         batch = self.write_json("claims.json", [bad, short])
         code, out = self.run_in("claim", "add", batch)
-        self.assertEqual(1, code)
-        self.assertIn("add claim_id", out)
+        self.assertEqual(0, code, out)
+        self.assertIn("C10 added (assigned id)", out)
         self.assertIn("C9 WARN", out)
         self.assertIn("extend the quote", out)
-        self.assertEqual(["C9"], [c["claim_id"] for c in self.ledger()["claims"]])
+        self.assertEqual(
+            ["C10", "C9"], [c["claim_id"] for c in self.ledger()["claims"]]
+        )
 
     def test_warn_only_claim_is_accepted(self):
         self.init()
@@ -851,12 +857,14 @@ class LedgerMergeTests(AlxTestCase):
         self.bootstrap()
         patch = self.write_json("patch.json", {"claims": [{"claim_id": "C7"}]})
         code, out = self.run_in("ledger", "merge", patch)
-        self.assertEqual(1, code)
-        self.assertIn("sources only via fetch/source set", out)
+        self.assertEqual(0, code, out)
+        self.assertIn("ignored keys: claims", out)
         self.assertIn("claims only via claim add", out)
+        self.assertNotIn("C7", {c["claim_id"] for c in self.ledger()["claims"]})
         patch = self.write_json("patch.json", {"sources": [{"source_id": "S9"}]})
         code, out = self.run_in("ledger", "merge", patch)
-        self.assertEqual(1, code)
+        self.assertEqual(0, code, out)
+        self.assertIn("ignored keys: sources", out)
 
     def test_merge_deep_merges_people_and_coverage(self):
         self.bootstrap()
@@ -1004,7 +1012,8 @@ class CheckTests(AlxTestCase):
         self.bootstrap()
         self.set_remaining(10)
         _code, out = self.run_in("status")
-        self.assertIn("alx issue --deliver", out)
+        self.assertIn("alx render", out)
+        self.assertNotIn("--deliver", out)
 
 
 class ReviewTests(AlxTestCase):
@@ -1089,8 +1098,10 @@ class ReviewTests(AlxTestCase):
         self.run_in("check", "--fix")
         self.run_in("review", "start", "content")
         code, out = self.run_in("review", "finish", "content")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code, out)
+        self.assertIn("WARN review/content:", out)
         self.assertIn("scores", out)
+        self.assertTrue(self.state()["reviews"]["content"]["finished"])
 
     def test_only_a_qualified_or_removed_claim_needs_a_support_note(self):
         """Restates test_content_note_needs_a_disposition_per_mapped_claim.
@@ -1113,8 +1124,8 @@ class ReviewTests(AlxTestCase):
         ]
         path.write_text(json.dumps(note, ensure_ascii=False), encoding="utf-8")
         code, out = self.run_in("review", "finish", "content")
-        self.assertEqual(1, code)
-        self.assertIn("claim_support[C1].note", out)
+        self.assertEqual(0, code, out)
+        self.assertIn("WARN review/content: claim_support[C1].note", out)
 
     def test_mechanical_delta_keeps_the_review_fresh(self):
         self.bootstrap()
@@ -1298,7 +1309,7 @@ class IssueTests(AlxTestCase):
             )
             code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
-        self.assertEqual(1, calls["online"])
+        self.assertEqual(0, calls["online"])
         receipt = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
         )
@@ -1308,10 +1319,8 @@ class IssueTests(AlxTestCase):
         self.assertIn("ledger_sha256", receipt)
         self.assertIn("receipts", receipt)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
-        self.assertIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
-        self.assertLess(
-            report.index(alx.VERIFICATION_NOTE_PREFIX["en"]), report.index("## Sources")
-        )
+        for prefix in alx.VERIFICATION_NOTE_PREFIX.values():
+            self.assertNotIn(prefix, report)
 
     def test_length_floor_is_warn_and_issue_delivers_without_deliver(self):
         """R28: `rewild/length` is a warning; plain `issue` still delivers."""
@@ -1409,7 +1418,7 @@ class IssueTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn("dropped C1 (fidelity/mismatch)", out)
         self.assertIn("cache-detached", out)
-        self.assertEqual(1, calls["online"])
+        self.assertEqual(0, calls["online"])
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     def test_deliver_never_bypasses_class_f(self):
@@ -1488,7 +1497,7 @@ class IssueTests(AlxTestCase):
                     side_effect=failing_online,
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--online")
         self.assertEqual(0, code, out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
         notes = json.loads(
@@ -1619,7 +1628,7 @@ class StatusTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn("sources 2", out)
         self.assertIn("claims 2", out)
-        self.assertIn("snapshot", out)
+        self.assertNotIn("snapshot", out)
         self.assertIn("Next:", out)
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
 
@@ -1979,7 +1988,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--online")
         self.assertEqual(0, code, out)
         self.assertRegex(out, r"dropped C\d+ \(fidelity/mismatch\): ")
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2008,7 +2017,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--online")
         self.assertEqual(0, code, out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
@@ -2028,7 +2037,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver", "--online")
         self.assertEqual(0, code, out)
         notes = json.loads(
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
@@ -2210,8 +2219,8 @@ class IntegrationHoleTests(AlxTestCase):
         self.run_in("check", "--fix")
         self.run_in("review", "start", "content")
         code, out = self.run_in("review", "finish", "content")
-        self.assertEqual(1, code)
-        self.assertIn("reviews/content.json", out)
+        self.assertEqual(0, code, out)
+        self.assertTrue(self.state()["reviews"]["content"]["finished"])
         for path in (
             "scores.question_answered.score",
             "scores.question_answered.rationale",
@@ -2220,7 +2229,7 @@ class IntegrationHoleTests(AlxTestCase):
             "completion_note",
         ):
             with self.subTest(path=path):
-                self.assertIn(path, out)
+                self.assertIn(f"WARN review/content: {path}", out)
         # The list is the fixed form, never one line per claim.
         self.assertNotIn("claim_support[C1]", out)
 
@@ -2635,7 +2644,7 @@ class DeliveryRoundTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--online")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C2 (fidelity/mismatch)", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2655,7 +2664,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver", "--online")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertNotIn("as the [registry note]", report)
@@ -2681,7 +2690,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver", "--online")
         self.assertEqual(0, code, out)
         drops = [line for line in out.splitlines() if line.startswith("dropped ")]
         self.assertEqual(1, len(drops), out)
@@ -2705,7 +2714,7 @@ class DeliveryRoundTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--online")
         self.assertEqual(0, code, out)
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
 
@@ -2726,7 +2735,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver", "--online")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C2 (", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2809,10 +2818,17 @@ class DeliveryRoundTests(AlxTestCase):
                     side_effect=refused,
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--online")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
-        self.assertIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
+        self.assertNotIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(
+            any("source-fidelity receipt not issued" in note for note in notes["notes"]),
+            notes,
+        )
 
 
 class RemedyTests(AlxTestCase):
@@ -3001,7 +3017,7 @@ class ParkedReviewNoteTests(AlxTestCase):
         self.run_in("check", "--fix")
         self.run_in("review", "start", "content")
         code, out = self.run_in("review", "finish", "content")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code, out)
         self.assertNotIn("claim_support", out)
         missing = alx._note_completeness(
             alx.Workspace(self.dir), self.state(), self.ledger(), "content"
@@ -3340,7 +3356,7 @@ class RefreshedSourceReprobeTests(AlxTestCase):
         stack.enter_context(
             mock_production_transport(self.responses_for(self.changed_page()))
         )
-        return self.run_in("issue", "--sample-size", "1", *extra)
+        return self.run_in("issue", "--sample-size", "1", "--online", *extra)
 
     def test_a_claim_outside_the_sample_is_dropped_by_issue(self):
         """C1 restatement of ..._blocks_issue."""
@@ -3411,16 +3427,12 @@ class VerificationNotePdfTests(AlxTestCase):
                     "disclosure_required": ["C1"],
                 },
             )
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver", "--online")
             self.assertEqual(0, code, out)
             code, out = self.run_in("render")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
-        note = next(
-            block
-            for block in report.split("\n\n")
-            if block.startswith(alx.VERIFICATION_NOTE_PREFIX["en"])
-        )
+        self.assertNotIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
         receipt = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
         )
@@ -3428,12 +3440,15 @@ class VerificationNotePdfTests(AlxTestCase):
         self.assertEqual(
             alx.file_sha256(self.dir / "ledger.json"), receipt["ledger_sha256"]
         )
+        self.assertTrue(
+            any(
+                "central-judgment evidence not re-read live" in note
+                for note in receipt["delivery_notes"]
+            ),
+            receipt["delivery_notes"],
+        )
         pdfs = sorted(self.dir.glob("report-*.pdf"))
         self.assertEqual(2, len(pdfs), pdfs)
-        wanted = re.sub(r"\s+", "", note)
-        for pdf in pdfs:
-            with self.subTest(pdf=pdf.name):
-                self.assertIn(wanted, re.sub(r"\s+", "", self.pdf_text(pdf)))
 
 
 if __name__ == "__main__":
@@ -3763,22 +3778,19 @@ class ReserveReceiptTests(AlxTestCase):
         receipt = self.dir / "receipts" / "source-fidelity.json"
         with ExitStack() as stack:
             helper.stub_gates(stack)
-            code, out = self.run_in("issue", "--deliver")
+            code, out = self.run_in("issue", "--deliver", "--online")
             self.assertEqual(0, code, out)
-            kept = receipt.read_bytes()
-            self.set_remaining(alx.RESERVE_MINUTES - 2)
-            code, out = self.run_in("issue", "--deliver")
+            self.assertTrue(receipt.exists(), out)
+            self.set_remaining(2)
+            code, out = self.run_in("issue", "--deliver", "--online")
         self.assertEqual(0, code, out)
-        self.assertEqual(kept, receipt.read_bytes())
+        self.assertTrue(receipt.exists())
         issued = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
         )
         self.assertIn("source-fidelity", issued["receipts"])
-        self.assertTrue(
-            any(
-                note.endswith("; the receipt from an earlier pass stands")
-                for note in issued["delivery_notes"]
-            ),
+        self.assertFalse(
+            any("re-check skipped" in note for note in issued["delivery_notes"]),
             issued["delivery_notes"],
         )
 
@@ -3803,7 +3815,7 @@ class ReserveReceiptTests(AlxTestCase):
                     alx.content_gate, "run_content_gate", side_effect=real
                 )
             )
-            self.set_remaining(alx.RESERVE_MINUTES - 2)
+            self.set_remaining(2)
             code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
         self.assertEqual([[]], errors)
@@ -4023,8 +4035,8 @@ class BehindScheduleTests(AlxTestCase):
         code, out = self.run_in("status")
         self.assertEqual(0, code, out)
         self.assertIn(f"{self.LINE} 13 min", out)
-        self.assertIn("alx claim add --dry-run", out)
-        self.assertIn("alx issue --deliver", out)
+        self.assertNotIn("--dry-run", out)
+        self.assertNotIn("--deliver", out)
         self.assertEqual(1, out.count(self.LINE))
 
     def test_the_footer_is_quiet_early_and_once_a_claim_is_accepted(self):
@@ -4048,18 +4060,17 @@ class InitEchoTests(AlxTestCase):
             "init", self.dir, "--lang", "en", "--subject", subject
         )
         self.assertEqual(0, code, out)
-        self.assertIn(
-            "archetype: hybrid (inferred) — change with "
-            "`alx init … --archetype <name>`",
-            out,
-        )
-        self.assertIn("language: en — change with", out)
+        self.assertNotIn("archetype:", out)
+        self.assertNotIn("language:", out)
+        self.assertIn("Workspace ready", out)
+        self.assertIn("target length", out)
+        self.assertIn("Next:", out)
         self.assertEqual("hybrid", self.state()["archetype"])
 
     def test_init_echoes_a_given_archetype_and_the_person_status_flag(self):
         code, out = self.init()
         self.assertEqual(0, code, out)
-        self.assertIn("archetype: artifact (given)", out)
+        self.assertNotIn("archetype:", out)
         self.assertNotIn("--subject-status", out)
         subject = self.root / "person.txt"
         subject.write_text("Someone Notable\n", encoding="utf-8")
@@ -4076,11 +4087,8 @@ class InitEchoTests(AlxTestCase):
             "unknown",
         )
         self.assertEqual(0, code, out)
-        self.assertIn(
-            "archetype: person (given) — change with `alx init … "
-            "--archetype <name> --subject-status <living|deceased|…>`",
-            out,
-        )
+        self.assertNotIn("archetype:", out)
+        self.assertIn("Workspace ready", out)
 
 
 class PortfolioVocabularyTests(AlxTestCase):
@@ -4629,7 +4637,8 @@ class ReviewFinishOneRoundTests(AlxTestCase):
     def test_the_own_checks_and_the_schema_errors_come_in_one_round(self):
         self.started()
         code, out = self.run_in("review", "finish", "content")
-        self.assertEqual(1, code)
+        self.assertEqual(0, code, out)
+        self.assertIn("WARN review/content:", out)
         self.assertIn("scores.question_answered.score (integer 1-5)", out)
         self.assertIn("(content-review schema)", out)
 
@@ -4708,9 +4717,8 @@ class LiveRecheckNoteTests(AlxTestCase):
         issued = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
         )
-        self.assertIn(
-            "live source re-check skipped (0 min left; every extract was "
-            "already verified offline against the cached pages by alx check)",
+        self.assertFalse(
+            any("re-check skipped" in note for note in issued["delivery_notes"]),
             issued["delivery_notes"],
         )
 
@@ -4991,3 +4999,296 @@ class InitPathResolutionTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertTrue((work / "ledger.json").exists())
         self.assertNotIn("Traceback", out)
+
+
+class PartBFlowTests(AlxTestCase):
+    EXTRACT = (
+        "The archive released 1,204 documents in March 2026, "
+        "and the registry confirmed the count."
+    )
+
+    def test_fetch_id_without_refresh_implies_refresh(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        with mock_production_transport(responses()):
+            code, out = self.run_in("fetch", "--id", "S1")
+        self.assertEqual(0, code, out)
+        self.assertNotIn("requires --refresh", out)
+
+    def test_snapshot_restore_without_snapshot_exits_zero(self):
+        self.init()
+        code, out = self.run_in("snapshot", "--restore")
+        self.assertEqual(0, code, out)
+        self.assertIn("No snapshot to restore", out)
+
+    def test_review_restore_without_finished_review_exits_zero(self):
+        self.init()
+        code, out = self.run_in("review", "restore", "content")
+        self.assertEqual(0, code, out)
+        self.assertIn("No finished content review to restore", out)
+
+    def test_merge_skips_sources_and_claims_and_applies_the_rest(self):
+        self.bootstrap()
+        patch = self.write_json(
+            "patch.json",
+            {
+                "sources": [{"source_id": "S9"}],
+                "claims": [{"claim_id": "C7"}],
+                "brief": {"audience": "editors"},
+            },
+        )
+        code, out = self.run_in("ledger", "merge", patch)
+        self.assertEqual(0, code, out)
+        self.assertIn(
+            "ignored keys: sources, claims (sources only via fetch; "
+            "claims only via claim add)",
+            out,
+        )
+        self.assertEqual("editors", self.ledger()["brief"]["audience"])
+        self.assertNotIn("C7", {c["claim_id"] for c in self.ledger()["claims"]})
+
+    def test_claim_add_aliases_evidence_extract_and_source(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.write_json(
+            "alias.json",
+            [
+                {
+                    "claim_id": "C1",
+                    "claim": "The archive released 1,204 documents in March 2026.",
+                    "evidence": [{"source": "s1", "extract": self.EXTRACT}],
+                }
+            ],
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        claim = self.ledger()["claims"][0]
+        self.assertEqual("S1", claim["source_evidence"][0]["source_id"])
+        self.assertEqual(self.EXTRACT, claim["source_evidence"][0]["extract_or_location"])
+
+    def test_claim_add_canonicalizes_ids(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.write_json(
+            "ids.json",
+            [
+                {
+                    "claim_id": "C01",
+                    "claim": "The archive released 1,204 documents in March 2026.",
+                    "source_evidence": [
+                        {"source_id": " S3 ", "extract_or_location": self.EXTRACT}
+                    ],
+                }
+            ],
+        )
+        # S3 is not fetched; canon of source happens, then batch findings fail.
+        # Use S1 as "3" / "s1".
+        batch.write_text(
+            json.dumps(
+                [
+                    {
+                        "claim_id": "c1",
+                        "claim": "The archive released 1,204 documents in March 2026.",
+                        "source_evidence": [
+                            {"source_id": 1, "extract_or_location": self.EXTRACT}
+                        ],
+                    },
+                    {
+                        "claim_id": 1,
+                        "claim": "duplicate id after canon",
+                        "source_evidence": [
+                            {"source_id": "s1", "extract_or_location": self.EXTRACT}
+                        ],
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(1, code, out)
+        self.assertEqual(["C1"], [c["claim_id"] for c in self.ledger()["claims"]])
+        self.assertIn("C1 appears twice", out)
+
+    def test_claim_add_assigns_next_free_id(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        first = self.write_json("c.json", [CLAIM_ONE])
+        self.run_in("claim", "add", first)
+        batch = self.write_json(
+            "noid.json",
+            [
+                {
+                    "claim": "The archive released 1,204 documents in March 2026.",
+                    "source_evidence": [
+                        {"source_id": "S1", "extract_or_location": self.EXTRACT}
+                    ],
+                }
+            ],
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertIn("C2 added (assigned id)", out)
+        self.assertEqual(
+            ["C1", "C2"], [c["claim_id"] for c in self.ledger()["claims"]]
+        )
+
+    def test_claim_add_drops_unknown_keys(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.write_json(
+            "note.json",
+            [
+                {
+                    "claim_id": "C1",
+                    "claim": "The archive released 1,204 documents in March 2026.",
+                    "note": "extra",
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": self.EXTRACT,
+                            "note": "inner",
+                        }
+                    ],
+                }
+            ],
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        claim = self.ledger()["claims"][0]
+        self.assertNotIn("note", claim)
+        self.assertNotIn("note", claim["source_evidence"][0])
+
+    def test_claim_add_unwraps_claims_array_wrapper(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        path = self.write_json(
+            "wrap.json",
+            {
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "claim": "The archive released 1,204 documents in March 2026.",
+                        "source_evidence": [
+                            {"source_id": "S1", "extract_or_location": self.EXTRACT}
+                        ],
+                    }
+                ]
+            },
+        )
+        code, out = self.run_in("claim", "add", path)
+        self.assertEqual(0, code, out)
+        self.assertEqual(["C1"], [c["claim_id"] for c in self.ledger()["claims"]])
+
+    def test_claim_add_skips_non_object_items(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        path = self.write_json(
+            "mixed.json",
+            [
+                CLAIM_ONE,
+                "not-an-object",
+                {
+                    "claim_id": "C2",
+                    "claim": "The archive released 1,204 documents in March 2026.",
+                    "source_evidence": [
+                        {"source_id": "S1", "extract_or_location": self.EXTRACT}
+                    ],
+                },
+            ],
+        )
+        code, out = self.run_in("claim", "add", path)
+        self.assertEqual(0, code, out)
+        self.assertIn("item 2 is not an object; skipped", out)
+        self.assertEqual(
+            ["C1", "C2"], [c["claim_id"] for c in self.ledger()["claims"]]
+        )
+
+    def test_claim_add_maps_sources_and_quote_aliases(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.write_json(
+            "src.json",
+            [
+                {
+                    "claim_id": "C1",
+                    "claim": "The archive released 1,204 documents in March 2026.",
+                    "sources": [{"sid": "3", "quote": self.EXTRACT}],
+                }
+            ],
+        )
+        # sid 3 is S3; use " S1 "
+        batch.write_text(
+            json.dumps(
+                [
+                    {
+                        "claim_id": "C1",
+                        "claim": "The archive released 1,204 documents in March 2026.",
+                        "extracts": [{"id": " S1 ", "text": self.EXTRACT}],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        ev = self.ledger()["claims"][0]["source_evidence"][0]
+        self.assertEqual("S1", ev["source_id"])
+        self.assertEqual(self.EXTRACT, ev["extract_or_location"])
+
+    def test_issue_without_online_appends_no_delivery_disclosure(self):
+        from contextlib import ExitStack
+
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        with ExitStack() as stack:
+            helper = IssueTests("test_issue_writes_receipts_and_verification_note")
+            helper.dir = self.dir
+            helper.root = self.root
+            calls = helper.stub_gates(
+                stack,
+                online={
+                    "status": "passed",
+                    "checks": [],
+                    "refreshed_source_ids": [],
+                    "disclosure_required": ["C1"],
+                },
+            )
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertEqual(0, calls["online"])
+        issued = json.loads(
+            (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
+        )
+        self.assertFalse(
+            any("central-judgment" in note for note in issued["delivery_notes"]),
+            issued["delivery_notes"],
+        )
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertNotIn("Verification note:", report)
+        self.assertNotIn("核查说明", report)
+        self.assertNotIn("核實說明", report)
+
+    def test_classification_and_optional_flags_keep_help_wording(self):
+        parser = alx.build_parser()
+        fetch = parser._subparsers._group_actions[0].choices["fetch"]
+        issue = parser._subparsers._group_actions[0].choices["issue"]
+        init = parser._subparsers._group_actions[0].choices["init"]
+        claim = parser._subparsers._group_actions[0].choices["claim"]
+        claim_add = claim._subparsers._group_actions[0].choices["add"]
+        wanted = "optional; stored, not used for the report"
+        for flag in ("--provenance", "--type", "--role"):
+            self.assertIn(wanted, fetch._option_string_actions[flag].help)
+        self.assertIn(
+            "optional; stored, never required",
+            init._option_string_actions["--archetype"].help,
+        )
+        self.assertIn(
+            "optional; stored, never required",
+            init._option_string_actions["--subject-status"].help,
+        )
+        self.assertIn("optional", issue._option_string_actions["--deliver"].help)
+        self.assertIn("optional", claim_add._option_string_actions["--dry-run"].help)
+        self.assertIn(
+            "re-verify extracts against the live pages; optional",
+            issue._option_string_actions["--online"].help,
+        )

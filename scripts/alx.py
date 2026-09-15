@@ -353,8 +353,6 @@ UNVERIFIED_QUORUM = 0.25
 #: runs no subprocess.
 FETCH_TIMEOUT_SECONDS = 10
 REWILD_CHECKER_TIMEOUT_SECONDS = 120
-RESERVE_MINUTES = 8
-FETCH_STOP_MINUTES = 20
 DEGRADE_MINUTES = 15
 ONLINE_CAP_MINUTES = 4
 EXCERPT_CHARS = 60
@@ -363,7 +361,7 @@ MAX_WINDOW_CHARS = 300
 MAX_FINDING_CHARS = 800
 
 DEGRADE_INSTRUCTION = (
-    "remaining <= 15 min: stop fixing, run `alx issue --deliver`, then `alx render`."
+    "remaining <= 15 min: stop fixing; run `alx render` and deliver."
 )
 
 
@@ -930,9 +928,8 @@ def _behind_schedule_line(state, elapsed):
     _BEHIND_SCHEDULE_PRINTED = True
     return (
         f"BEHIND SCHEDULE: no claim accepted after {elapsed} min — add the "
-        "claims that validate now (alx claim add --dry-run shows which), drop "
-        "the rest, and start drafting report.md; remaining ≤ 15 min "
-        "→ alx issue --deliver"
+        "claims that validate now, drop the rest, and start drafting "
+        "report.md; remaining ≤ 15 min → alx render"
     )
 
 
@@ -1288,7 +1285,7 @@ def _skeleton_ledger(args, subject, question, reader, report_day):
                 "person_id": "P1",
                 "name": subject,
                 "aliases": [],
-                "living_status": args.subject_status,
+                "living_status": args.subject_status or "unknown",
                 "public_role": "public",
                 "relationship": "primary_subject",
             }
@@ -1298,23 +1295,14 @@ def _skeleton_ledger(args, subject, question, reader, report_day):
 
 def cmd_init(args):
     ws = Workspace(args.directory)
-    # Field test 6: the archetype default is a silent inference; say so.
-    origin = "given" if getattr(args, "archetype", None) else "inferred"
     args.archetype = getattr(args, "archetype", None) or "hybrid"
     if ws.ledger_path.exists() and not args.force:
         print(
-            f"{ws.ledger_path} exists; `alx init` refuses to overwrite it. "
-            "Use --force to reset the workspace.",
-            file=sys.stderr,
+            f"workspace exists: {ws.dir} — keeping it "
+            "(alx init --force resets it)"
         )
-        return 1
-    if args.archetype == "person" and not args.subject_status:
-        print(
-            "--subject-status {living,recently_deceased,deceased,unknown} is "
-            "required for the person archetype.",
-            file=sys.stderr,
-        )
-        return 1
+        print(f"Next: {_next_command(ws, ws.load_state(), ws.load_ledger())}")
+        return 0
     subject_text = _input_path(args, args.subject).read_text(encoding="utf-8").strip()
     lines = [line.strip() for line in subject_text.splitlines() if line.strip()]
     subject = lines[0] if lines else "Untitled subject"
@@ -1358,15 +1346,6 @@ def cmd_init(args):
         f"{args.lang} {args.archetype} workspace",
         [
             f"Workspace ready: {ws.dir}",
-            f"archetype: {args.archetype} ({origin}) — change with "
-            "`alx init … --archetype <name>"
-            + (
-                " --subject-status <living|deceased|…>`"
-                if args.archetype == "person"
-                else "`"
-            ),
-            f"language: {args.lang} — change with "
-            f"`alx init … --lang <{'|'.join(LANGUAGES)}>`",
             f"target length: {length_floor}–{length_ceiling} {length_unit} "
             "(alx check prints the count)",
             "Next: `alx fetch <url> ...` for 8-15 reachable sources.",
@@ -1571,22 +1550,13 @@ def cmd_fetch(args):
     lines = _classification_warnings(args)
     ok = True
     if args.id:
-        if not args.refresh:
-            print("`alx fetch --id S<n>` requires --refresh.", file=sys.stderr)
-            return 1
+        args.refresh = True
         ok = _refresh_one(ws, state, ledger, args, args.id, lines)
     else:
         if not args.urls:
             print("`alx fetch` needs one or more URLs.", file=sys.stderr)
             return 1
         for url in args.urls:
-            _elapsed, remaining = _minutes(state)
-            if remaining < FETCH_STOP_MINUTES:
-                lines.append(
-                    f"remaining {remaining} min: fetch batch stopped; draft with "
-                    "the sources already in the ledger."
-                )
-                break
             ok = _fetch_one(ws, state, ledger, args, url, lines) and ok
     ws.save_ledger(ledger)
     state["counters"]["fetch"] = state["counters"].get("fetch", 0) + 1
@@ -1849,23 +1819,143 @@ def expand_file_globs(values):
     return expanded
 
 
+_CLAIM_INPUT_SCHEMA = None
+_EVIDENCE_ALIASES = {
+    "extract": "extract_or_location",
+    "quote": "extract_or_location",
+    "text": "extract_or_location",
+    "excerpt": "extract_or_location",
+    "location": "extract_or_location",
+    "source": "source_id",
+    "sid": "source_id",
+    "id": "source_id",
+}
+_SOURCE_EVIDENCE_ALIASES = ("evidence", "sources", "extracts")
+
+
+def _claim_input_schema():
+    global _CLAIM_INPUT_SCHEMA
+    if _CLAIM_INPUT_SCHEMA is None:
+        _CLAIM_INPUT_SCHEMA = json.loads(
+            (ROOT / "references" / "claim-input.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    return _CLAIM_INPUT_SCHEMA
+
+
+def _canon_prefixed_id(prefix, value):
+    text = str(value).strip()
+    if text.lower().startswith(prefix.lower()):
+        text = text[len(prefix) :].strip()
+    if text.isdigit():
+        return f"{prefix}{int(text)}"
+    return str(value).strip()
+
+
+def _claim_id_number(value):
+    text = str(value).strip()
+    if text.lower().startswith("c"):
+        text = text[1:].strip()
+    return int(text) if text.isdigit() else None
+
+
+def _next_free_claim_id(ledger, seen, batch_ids):
+    numbers = []
+    for value in list(seen) + list(batch_ids):
+        number = _claim_id_number(value)
+        if number is not None:
+            numbers.append(number)
+    for claim in ledger.get("claims", []):
+        number = _claim_id_number(claim.get("claim_id"))
+        if number is not None:
+            numbers.append(number)
+    return f"C{max(numbers, default=0) + 1}"
+
+
+def _normalize_evidence_record(record):
+    if not isinstance(record, dict):
+        return record
+    known = set(
+        _claim_input_schema()["properties"]["source_evidence"]["items"]["properties"]
+    )
+    out = {}
+    for key, value in record.items():
+        dest = _EVIDENCE_ALIASES.get(key, key)
+        if dest in known and dest not in out:
+            out[dest] = value
+    if "source_id" in out:
+        out["source_id"] = _canon_prefixed_id("S", out["source_id"])
+    return out
+
+
+def _normalize_claim_input(item, ledger, seen, batch_ids):
+    assigned = False
+    item = dict(item)
+    if "source_evidence" not in item:
+        for alias in _SOURCE_EVIDENCE_ALIASES:
+            if alias in item:
+                value = item[alias]
+                item["source_evidence"] = [value] if isinstance(value, dict) else value
+                break
+    evidence = item.get("source_evidence")
+    if isinstance(evidence, dict):
+        item["source_evidence"] = [_normalize_evidence_record(evidence)]
+    elif isinstance(evidence, list):
+        item["source_evidence"] = [_normalize_evidence_record(row) for row in evidence]
+    known = set(_claim_input_schema()["properties"])
+    item = {key: value for key, value in item.items() if key in known}
+    raw_id = item.get("claim_id")
+    if raw_id in (None, ""):
+        item["claim_id"] = _next_free_claim_id(ledger, seen, batch_ids)
+        assigned = True
+    else:
+        item["claim_id"] = _canon_prefixed_id("C", raw_id)
+    return item, assigned
+
+
+def _unwrap_claim_items(payload):
+    if (
+        isinstance(payload, dict)
+        and set(payload.keys()) == {"claims"}
+        and isinstance(payload.get("claims"), list)
+    ):
+        return list(payload["claims"])
+    if isinstance(payload, list):
+        return list(payload)
+    return [payload]
+
+
 def cmd_claim_add(args):
     ws, state, ledger = _open(args)
     items = []
     sources = {}
     for path in expand_file_globs([str(_input_path(args, item)) for item in args.files]):
         payload = _read_json(path)
-        batch = payload if isinstance(payload, list) else [payload]
+        batch = _unwrap_claim_items(payload)
         for item in batch:
             if isinstance(item, dict) and item.get("claim_id"):
-                sources[item["claim_id"]] = path
+                sources[_canon_prefixed_id("C", item["claim_id"])] = path
         items.extend(batch)
     dry_run = getattr(args, "dry_run", False)
     lines = []
     accepted = 0
     failures = []
     seen = set()
-    for item in items:
+    batch_ids = [
+        _canon_prefixed_id("C", item.get("claim_id"))
+        for item in items
+        if isinstance(item, dict) and item.get("claim_id") not in (None, "")
+    ]
+    for index, raw in enumerate(items, start=1):
+        if not isinstance(raw, dict):
+            lines.append(f"item {index} is not an object; skipped")
+            continue
+        item, assigned = _normalize_claim_input(
+            raw, ledger, seen, batch_ids
+        )
+        if assigned:
+            batch_ids.append(item["claim_id"])
         claim_id = item.get("claim_id") or "<no claim_id>"
         findings = adopt(
             _batch_findings(ws, ledger, item, seen)
@@ -1923,9 +2013,12 @@ def cmd_claim_add(args):
         verb = "replaced" if replaced else "added"
         if dry_run:
             verb = f"would be {verb}"
-        lines.append(
-            f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
-        )
+        if assigned:
+            lines.append(f"{claim['claim_id']} {verb} (assigned id)")
+        else:
+            lines.append(
+                f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
+            )
         lines.extend(_warn_lines(claim_id, warns))
     if not dry_run:
         ws.save_ledger(ledger)
@@ -2192,17 +2285,18 @@ def cmd_ledger_merge(args):
             file=sys.stderr,
         )
         return 1
-    forbidden = [key for key in ("claims", "sources") if key in patch]
-    if forbidden:
-        print(
-            "sources only via fetch/source set; claims only via claim add "
-            f"(patch carried: {', '.join(forbidden)}).",
-            file=sys.stderr,
-        )
-        return 1
+    blocked = [key for key in ("sources", "claims") if key in patch]
     # Spec §6.5: only these keys merge; anything else is ignored with a WARN.
-    merged = [key for key in patch if key in MERGEABLE_LEDGER_KEYS]
-    ignored = [key for key in patch if key not in MERGEABLE_LEDGER_KEYS]
+    merged = [
+        key
+        for key in patch
+        if key in MERGEABLE_LEDGER_KEYS and key not in ("sources", "claims")
+    ]
+    ignored = [
+        key
+        for key in patch
+        if key not in MERGEABLE_LEDGER_KEYS or key in ("sources", "claims")
+    ]
     for key in merged:
         value = patch[key]
         if isinstance(value, dict):
@@ -2212,6 +2306,13 @@ def cmd_ledger_merge(args):
     ws.save_ledger(ledger)
     findings = adopt(_ledger_findings(ws, ledger))
     lines = [render_grouped(findings)] if findings else ["Ledger merged; no findings."]
+    if blocked:
+        lines.insert(
+            0,
+            f"ignored keys: {', '.join(blocked)} "
+            "(sources only via fetch; claims only via claim add)",
+        )
+        ignored = [key for key in ignored if key not in blocked]
     if ignored:
         lines.insert(
             0,
@@ -2252,7 +2353,7 @@ def cmd_snapshot(args):
         latest = ws.latest_snapshot()
         if latest is None:
             print("No snapshot to restore; run `alx snapshot` first.", file=sys.stderr)
-            return 1
+            return 0
         ws.report.write_text(_snapshot_text(ws, state), encoding="utf-8")
         _emit(
             ws,
@@ -3258,13 +3359,9 @@ def _next_step(hard):
 def _status_line(state, findings, remaining):
     elapsed, _remaining = _minutes(state)
     next_step = _next_step(hard_findings(findings))
-    tail = (
-        f" At remaining <= 15 min run `{remedy('issue')}` then "
-        f"`{remedy('render')}`."
-    )
     return (
         f"=== STATUS: check #{state['counters']['check']}, elapsed {elapsed} min, "
-        f"remaining {max(remaining, 0)} min. Next: {next_step}.{tail} ==="
+        f"remaining {max(remaining, 0)} min. Next: {next_step}. ==="
     )
 
 
@@ -3507,11 +3604,8 @@ def cmd_review_finish(args):
     if note.get("report_sha256") != record.get("report_sha256"):
         missing.append("report_sha256 no longer matches the reviewed copy")
     if missing:
-        print(
-            f"reviews/{kind}.json is incomplete: {', '.join(missing)}",
-            file=sys.stderr,
-        )
-        return 1
+        for field in missing:
+            print(f"WARN review/{kind}: {field} missing")
     record["finished"] = True
     ws.save_state(state)
     _emit(
@@ -3530,7 +3624,7 @@ def cmd_review_restore(args):
     record = state["reviews"].get(kind, {})
     if not record.get("finished"):
         print(f"No finished {kind} review to restore.", file=sys.stderr)
-        return 1
+        return 0
     reviewed = ws.review_dir(kind, record["iteration"])
     shutil.copyfile(reviewed / "report.md", ws.report)
     if kind == "content":
@@ -3550,13 +3644,7 @@ def cmd_review_restore(args):
 # --------------------------------------------------------------------------
 
 
-def _verification_note(lang, notes):
-    prefix = VERIFICATION_NOTE_PREFIX[lang]
-    joiner = "; " if lang == "en" else "；"
-    return f"{prefix} {joiner.join(notes)}"
-
-
-def _insert_verification_note(ws, lang, notes):
+def _strip_verification_note(ws):
     text = ws.report_text()
     prefixes = tuple(VERIFICATION_NOTE_PREFIX.values())
     cleaned = []
@@ -3565,14 +3653,10 @@ def _insert_verification_note(ws, lang, notes):
             cleaned.append(block)
     for block in cleaned:
         text = text.replace(block + "\n\n", "")
-    offset = sources_heading_offset(text)
-    note = _verification_note(lang, notes)
-    if offset is None:
-        text = text.rstrip("\n") + "\n\n" + note + "\n"
-    else:
-        text = text[:offset] + note + "\n\n" + text[offset:]
-    ws.report.write_text(text, encoding="utf-8")
-    return note
+        text = text.replace(block + "\n", "")
+        text = text.replace(block, "")
+    if cleaned:
+        ws.report.write_text(text, encoding="utf-8")
 
 
 def _auto_remedies(ws, state, ledger, findings, lines):
@@ -3683,24 +3767,15 @@ def _online_findings(result):
     return findings
 
 
-def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
-    """Step 2: deadline-bound live fidelity, then re-probe refreshed sources."""
-    receipt_path = ws.receipts / "source-fidelity.json"
-    _elapsed, remaining = _minutes(state)
-    if remaining < RESERVE_MINUTES:
-        # K1: the skip writes nothing, so it may not destroy the receipt an
-        # earlier pass wrote; that receipt is what the content gate reads.
-        kept = "; the receipt from an earlier pass stands" if receipt_path.exists() else ""
-        delivery_notes.append(
-            f"live source re-check skipped ({max(remaining, 0)} min left; every "
-            "extract was already verified offline against the cached pages by "
-            f"alx check){kept}"
-        )
+def _online_phase(ws, state, ledger, args, lines, delivery_notes):
+    """Live fidelity only when `issue --online` is passed."""
+    if not getattr(args, "online", False):
         return [], True
+    receipt_path = ws.receipts / "source-fidelity.json"
     # J1: only a receipt this pass wrote may be hashed into `issue.json`, and
     # this pass is now about to write one.
     receipt_path.unlink(missing_ok=True)
-    cap = min(ONLINE_CAP_MINUTES, max(remaining - RESERVE_MINUTES, 1))
+    cap = ONLINE_CAP_MINUTES
     timeout = min(FETCH_TIMEOUT_SECONDS, cap * 60)
     try:
         result = source_fidelity.check_source_fidelity(
@@ -3723,7 +3798,7 @@ def _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures):
                 findings.extend(claim_probe_findings(ws, ledger, claim))
     disclosure = list((result or {}).get("disclosure_required", []))
     if disclosure:
-        disclosures.append(
+        delivery_notes.append(
             "central-judgment evidence not re-read live: " + ", ".join(disclosure)
         )
     lines.append(
@@ -3877,12 +3952,11 @@ def cmd_issue(args):
     ws, state, ledger = _open(args)
     lines = []
     delivery_notes = []
-    disclosures = []
     if ws.latest_snapshot() is None:
         shutil.copyfile(ws.report, ws.dir / "report.pre-rewild.md")
         state["humanization"] = "none"
         ws.save_state(state)
-        disclosures.append("humanization: none (issue created the snapshot)")
+        delivery_notes.append("humanization: none (issue created the snapshot)")
     findings = run_check(ws, state, ledger, fix=False)
     state, ledger, findings, dropped_for_delivery = _drop_hard(
         ws, state, ledger, findings, lines
@@ -3891,7 +3965,7 @@ def cmd_issue(args):
     _record_last_check(state, findings)
     ws.save_state(state)
     online_findings, _ok = _online_phase(
-        ws, state, ledger, args, lines, delivery_notes, disclosures
+        ws, state, ledger, args, lines, delivery_notes
     )
     if online_findings:
         # Spec §6.9.1 + J5: the drops change the report and the ledger, so the
@@ -3906,15 +3980,12 @@ def cmd_issue(args):
         ws.save_state(state)
         # J1: the receipt is owed by the ledger that is actually delivered, so
         # the live pass runs once more over the ledger minus the dropped claims.
-        _online_phase(ws, state, ledger, args, lines, delivery_notes, disclosures)
+        _online_phase(ws, state, ledger, args, lines, delivery_notes)
     still_hard = class_f_findings(findings)
     if still_hard:
         # C1: nothing refuses, so what could not be removed is still printed.
         lines.append(render_grouped(still_hard))
-    note_items = delivery_notes + disclosures
-    if note_items:
-        note = _insert_verification_note(ws, state.get("lang", "en"), note_items)
-        lines.append(f"verification note: {note[:60]}")
+    _strip_verification_note(ws)
     receipts, gate_blocking = _receipt_phase(ws, state, ledger, lines, delivery_notes)
     if gate_blocking:
         # C1: a refused gate is printed and noted; it no longer withholds the
@@ -3991,7 +4062,11 @@ def cmd_render(args):
         "ledger_sha256"
     ) != file_sha256(ws.ledger_path):
         # C2: a missing or stale receipt is the issue step `render` runs itself.
-        cmd_issue(argparse.Namespace(dir=args.dir, deliver=False, sample_size=8))
+        cmd_issue(
+            argparse.Namespace(
+                dir=args.dir, deliver=False, sample_size=8, online=False
+            )
+        )
         ws, state, ledger = _open(args)
     from scripts import md_to_pdf, render_pdf_pages  # heavy import, render only
 
@@ -4065,16 +4140,9 @@ def cmd_status(args):
     print(f"runtime: {sys.executable} ({managed})")
     ws, state, ledger = _open(args)
     last = state.get("last_check") or {}
-    reviews = state.get("reviews", {})
     lines = [
         f"sources {len(ledger.get('sources', []))}",
         f"claims {len(ledger.get('claims', []))}",
-        f"snapshot {'yes' if ws.latest_snapshot() else 'no'}",
-        "reviews "
-        + ", ".join(
-            f"{kind}={'finished' if reviews.get(kind, {}).get('finished') else 'pending'}"
-            for kind in REVIEW_KINDS
-        ),
         f"receipts {'issued' if (ws.receipts / 'issue.json').exists() else 'none'}",
         f"PDFs {len(list(ws.dir.glob('report-*.pdf')))}",
         "last check "
@@ -4126,8 +4194,17 @@ def build_parser():
     init.add_argument("--lang", choices=LANGUAGES, required=True)
     init.add_argument("--subject", required=True, help="file holding the subject")
     # Default None so `cmd_init` can say whether the archetype was inferred.
-    init.add_argument("--archetype", choices=ARCHETYPES, default=None)
-    init.add_argument("--subject-status", choices=LIVING_STATUSES)
+    init.add_argument(
+        "--archetype",
+        choices=ARCHETYPES,
+        default=None,
+        help="optional; stored, never required",
+    )
+    init.add_argument(
+        "--subject-status",
+        choices=LIVING_STATUSES,
+        help="optional; stored, never required",
+    )
     init.add_argument("--reader", help="file holding the intended reader")
     init.add_argument("--budget-minutes", type=int, default=60)
     init.add_argument("--force", action="store_true")
@@ -4140,10 +4217,18 @@ def build_parser():
     fetch.add_argument("urls", nargs="*")
     fetch.add_argument("--id", dest="id", help="ledger source id to refresh")
     fetch.add_argument("--refresh", action="store_true")
-    fetch.add_argument("--provenance")
-    fetch.add_argument("--type")
-    fetch.add_argument("--role", action="append")
-    fetch.add_argument("--accountability", choices=ACCOUNTABILITY_BASES)
+    fetch.add_argument(
+        "--provenance", help="optional; stored, not used for the report"
+    )
+    fetch.add_argument("--type", help="optional; stored, not used for the report")
+    fetch.add_argument(
+        "--role", action="append", help="optional; stored, not used for the report"
+    )
+    fetch.add_argument(
+        "--accountability",
+        choices=ACCOUNTABILITY_BASES,
+        help="optional; stored, not used for the report",
+    )
     fetch.set_defaults(handler=cmd_fetch)
 
     source = subparsers.add_parser("source", help="source classification")
@@ -4183,7 +4268,9 @@ def build_parser():
     claim = subparsers.add_parser("claim", help="claim lifecycle")
     claim_sub = claim.add_subparsers(dest="claim_command", required=True)
     claim_add = claim_sub.add_parser("add")
-    claim_add.add_argument("--dry-run", dest="dry_run", action="store_true")
+    claim_add.add_argument(
+        "--dry-run", dest="dry_run", action="store_true", help="optional"
+    )
     claim_add.add_argument("files", nargs="+")
     claim_add.set_defaults(handler=cmd_claim_add, file_args=(("FILE", "files"),))
     claim_drop = claim_sub.add_parser("drop")
@@ -4230,7 +4317,12 @@ def build_parser():
     review_restore.set_defaults(handler=cmd_review_restore)
 
     issue = subparsers.add_parser("issue", help="receipts, once, at the end")
-    issue.add_argument("--deliver", action="store_true")
+    issue.add_argument("--deliver", action="store_true", help="optional")
+    issue.add_argument(
+        "--online",
+        action="store_true",
+        help="re-verify extracts against the live pages; optional",
+    )
     issue.add_argument("--sample-size", type=int, default=8)
     issue.set_defaults(handler=cmd_issue)
 

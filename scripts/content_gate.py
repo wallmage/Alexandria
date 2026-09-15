@@ -331,7 +331,7 @@ def _approved_visual_assets(
                 )
             elif (
                 not value.startswith("#")
-                and value not in allowed_link_urls
+                and normalize_url(value) not in allowed_link_urls
             ):
                 errors.append(
                     "Rendered report link is not present in the evidence "
@@ -810,10 +810,13 @@ def run_content_gate(
         report_path,
         report_text,
         review,
+        # Aliases count and URLs are normalized, as in the binding check.
         allowed_link_urls={
-            source.get("url")
+            normalize_url(raw)
             for source in ledger.get("sources", [])
-            if isinstance(source, dict) and source.get("url")
+            if isinstance(source, dict)
+            for raw in [source.get("url"), *(source.get("aliases") or [])]
+            if raw
         },
     )
     errors.extend(visual_asset_errors)

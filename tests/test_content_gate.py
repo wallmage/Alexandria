@@ -12,6 +12,7 @@ from scripts.content_gate import (
     validate_content_receipt,
 )
 from scripts.content_gate import main as content_gate_main
+from scripts.gate_severity import hard_errors
 from scripts.source_fidelity import issue_source_fidelity_receipt
 from scripts.validate_ledger import prose_floor_errors, validate_schema
 from tests.source_fidelity_transport import mock_production_transport
@@ -659,7 +660,8 @@ class ContentGateTests(unittest.TestCase):
                 )
                 self.assertFalse(receipt.exists())
 
-    def test_low_score_and_false_required_check_block_the_gate(self):
+    def test_low_score_and_false_required_check_only_warn(self):
+        """R28 restatement: content judgments warn; they no longer block."""
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
@@ -673,7 +675,64 @@ class ContentGateTests(unittest.TestCase):
             joined = " ".join(errors)
             self.assertIn("evidence_strength", joined)
             self.assertIn("counterevidence_tested", joined)
-            self.assertFalse(receipt.exists())
+            self.assertEqual([], hard_errors(errors))
+            self.assertTrue(receipt.exists())
+
+    def test_every_content_family_is_warn_and_the_gate_still_issues(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
+            note = json.loads(review.read_text(encoding="utf-8"))
+            note["report_lang"] = "zh-CN"
+            note["scores"]["writing_clarity"]["score"] = 2
+            note["checks"]["counterevidence_tested"] = False
+            note["findings"] = [
+                {
+                    "finding_id": "F1",
+                    "severity": "critical",
+                    "category": "evidence",
+                    "location": "Outlook",
+                    "finding": "A critical gap remains unaddressed in the outlook.",
+                    "disposition": "rejected",
+                    "rationale": "The reviewer left this critical finding open.",
+                    "report_disclosure_excerpt": "",
+                },
+                {
+                    "finding_id": "F2",
+                    "severity": "major",
+                    "category": "evidence",
+                    "location": "Outlook",
+                    "finding": "A limitation needs an in-report disclosure excerpt.",
+                    "disposition": "accepted_limitation",
+                    "rationale": "The limitation is accepted but must be disclosed.",
+                    "report_disclosure_excerpt": "too short",
+                },
+            ]
+            review.write_text(json.dumps(note), encoding="utf-8")
+
+            findings = run_check(report, ledger, review)
+            content = [
+                item for item in findings if item.family.startswith("content/")
+            ]
+            self.assertEqual(
+                {
+                    "content/check",
+                    "content/language",
+                    "content/score",
+                    "content/critical-finding",
+                    "content/disclosure",
+                    "content/claim-support",
+                    "content/claim-binding",
+                },
+                {item.family for item in content},
+            )
+            self.assertEqual({"warn"}, {item.severity for item in content})
+
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertEqual([], hard_errors(errors))
+            self.assertTrue(receipt.exists())
 
     def test_stale_report_or_ledger_hash_blocks_the_gate(self):
         with tempfile.TemporaryDirectory() as directory:

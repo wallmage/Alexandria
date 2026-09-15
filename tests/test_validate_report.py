@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from scripts.gate_severity import hard_errors
+
 MODULE_PATH = Path(__file__).parents[1] / "scripts" / "validate_report.py"
 SPEC = importlib.util.spec_from_file_location("validate_report", MODULE_PATH)
 validate_report = importlib.util.module_from_spec(SPEC)
@@ -1147,19 +1149,28 @@ Second prose paragraph cites [two](https://example.com/b).
         self.assertIn("candidates: 1, 2", message)
 
 
+DATED_LEDGER = {
+    "report_date": "2026-09-14",
+    "sources": [{"source_id": "S1", "url": "https://example.com/a"}],
+    "claims": [],
+}
+
+
 class FindingClassTests(unittest.TestCase):
-    def _date_line_klass(self, date_line):
+    """R28 restatement: these families warn instead of blocking `issue`."""
+
+    def _date_line(self, date_line):
         report = f"# Title\n\n> Standfirst.\n> {date_line}\n\nBody.\n"
         findings = validate_report.integrity_findings(
             report, {"report_date": "2026-09-14"}, lang="en"
         )
         return next(
-            finding.klass
+            finding
             for finding in findings
             if finding.family == "integrity/date-line"
         )
 
-    def test_structure_defects_are_class_a(self):
+    def test_structure_defects_are_warnings(self):
         findings = validate_report.integrity_findings(
             "Body only.\n", {}, lang=None
         )
@@ -1168,25 +1179,95 @@ class FindingClassTests(unittest.TestCase):
             if finding.family == "integrity/structure"
         ]
         self.assertEqual(2, len(structure))
-        self.assertEqual({"A"}, {finding.klass for finding in structure})
+        self.assertEqual({"warn"}, {finding.severity for finding in structure})
+        self.assertEqual([], hard_errors(findings))
 
-    def test_date_line_is_class_a_only_when_fix_cannot_repair_it(self):
-        self.assertEqual("F", self._date_line_klass("14  September 2026"))
-        self.assertEqual("A", self._date_line_klass("September 14, 2026"))
+    def test_date_line_warns_whether_or_not_fix_can_repair_it(self):
+        for date_line in ("14  September 2026", "September 14, 2026"):
+            with self.subTest(date_line=date_line):
+                finding = self._date_line(date_line)
+                self.assertEqual("warn", finding.severity)
+                self.assertEqual([], hard_errors([finding]))
 
-    def test_sources_section_is_class_a_and_fabrication_stays_f(self):
+    def test_length_outside_both_thresholds_only_warns(self):
+        findings = [
+            finding
+            for finding in validate_report.integrity_findings(
+                "# Title\n\n> 14 September 2026\n\nToo short.\n",
+                DATED_LEDGER,
+                lang="en",
+            )
+            if finding.family == "integrity/length"
+        ]
+        self.assertEqual(1, len(findings))
+        self.assertEqual("warn", findings[0].severity)
+        self.assertEqual([], hard_errors(findings))
+
+    def test_altered_quotation_is_hard_and_a_removed_one_only_warns(self):
+        snapshot = 'The memo said "alpha beta gamma delta" in full.'
+        header = "# Title\n\n> 14 September 2026\n\n"
+
+        def quotation_findings(body):
+            return [
+                finding
+                for finding in validate_report.integrity_findings(
+                    header + body,
+                    DATED_LEDGER,
+                    snapshot_text=snapshot,
+                    lang="en",
+                )
+                if finding.family == "integrity/quotation-lost"
+            ]
+
+        altered = quotation_findings(
+            'The memo said "alpha beta gamma omega" in full.\n'
+        )
+        self.assertEqual(["hard"], [finding.severity for finding in altered])
+        self.assertIn("altered", altered[0].message)
+
+        removed = quotation_findings("The memo said nothing at all.\n")
+        self.assertEqual(["warn"], [finding.severity for finding in removed])
+        self.assertIn("removed", removed[0].message)
+        self.assertEqual([], hard_errors(removed))
+
+    def test_sources_section_warns_and_fabrication_stays_hard(self):
         report = "# Title\n\n> 14 September 2026\n\nCites [x](https://other.example/x).\n"
+        findings = validate_report.binding_findings(report, DATED_LEDGER)
+        by_family = {finding.family: finding.severity for finding in findings}
+        self.assertEqual("warn", by_family["binding/sources-section"])
+        self.assertEqual("hard", by_family["binding/link-not-in-ledger"])
+
+    def test_claim_paragraph_binding_defects_only_warn(self):
+        report = (
+            "# Title\n\n> 14 September 2026\n\n"
+            "Body citing [a](https://example.com/a).\n\n"
+            "## Sources\n\n- [a](https://example.com/a)\n"
+        )
         ledger = {
-            "report_date": "2026-09-14",
-            "sources": [{"source_id": "S1", "url": "https://example.com/a"}],
-            "claims": [],
+            **DATED_LEDGER,
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "include_in_report": True,
+                    "source_ids": ["S1"],
+                    "report_paragraph": 99,
+                },
+                {
+                    "claim_id": "C2",
+                    "include_in_report": True,
+                    "source_ids": ["S404"],
+                },
+            ],
         }
-        by_family = {
-            finding.family: finding.klass
-            for finding in validate_report.binding_findings(report, ledger)
-        }
-        self.assertEqual("A", by_family["binding/sources-section"])
-        self.assertEqual("F", by_family["binding/link-not-in-ledger"])
+        findings = validate_report.binding_findings(report, ledger)
+        bindings = [
+            finding
+            for finding in findings
+            if finding.family == "binding/claim-paragraph"
+        ]
+        self.assertEqual(2, len(bindings))
+        self.assertEqual({"warn"}, {finding.severity for finding in bindings})
+        self.assertEqual([], hard_errors(findings))
 
 
 class RewildReceiptLedgerBindingTests(unittest.TestCase):

@@ -1410,7 +1410,8 @@ class CacheAndPolicyTests(unittest.TestCase):
                 ),
             )
 
-    def test_context_change_is_hard_finding_quoting_window(self):
+    def test_context_change_is_warn_finding_quoting_window(self):
+        """R28: a changed context is reported with its window; it never blocks."""
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
             first = source_fidelity.FetchResult(
@@ -1458,11 +1459,14 @@ class CacheAndPolicyTests(unittest.TestCase):
             )
             families = [item.family for item in findings]
             self.assertIn("fidelity/context-changed", families)
-            message = next(
-                item.message
+            changed = next(
+                item
                 for item in findings
                 if item.family == "fidelity/context-changed"
             )
+            self.assertEqual("warn", changed.severity)
+            self.assertEqual("A", changed.klass)
+            message = changed.message
             self.assertIn("re-read", message.casefold())
             self.assertTrue(
                 any(marker in message for marker in ("更正", "correction", "retract")),
@@ -1537,7 +1541,8 @@ class CliResilienceTests(unittest.TestCase):
             self.assertIn("mismatch", stderr.getvalue().casefold())
             self.assertIn("===", stderr.getvalue())
 
-    def test_hard_findings_block_and_out_is_json(self):
+    def test_a_changed_context_never_blocks_and_out_is_json(self):
+        """R28: fidelity/context-changed is recorded in --out, not an error."""
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
             source_fidelity.write_cache(
@@ -1592,9 +1597,14 @@ class CliResilienceTests(unittest.TestCase):
             errors = source_fidelity.fidelity_errors(
                 checked, policy=source_fidelity.POLICY_V2
             )
+            self.assertEqual([], errors)
             self.assertTrue(
-                any("context" in error.casefold() for error in errors),
-                errors,
+                any(
+                    item["family"] == "fidelity/context-changed"
+                    and item["severity"] == "warn"
+                    for item in checked["findings"]
+                ),
+                checked["findings"],
             )
             ledger_path = Path(directory) / "ledger.json"
             ledger_path.write_text(json.dumps(value), encoding="utf-8")
@@ -1612,7 +1622,7 @@ class CliResilienceTests(unittest.TestCase):
                         "0",
                     ]
                 )
-            self.assertNotEqual(0, code)
+            self.assertEqual(0, code)
             written = json.loads(out.read_text(encoding="utf-8"))
             self.assertTrue(written["findings"])
             self.assertIsInstance(written["findings"][0], dict)

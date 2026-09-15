@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from scripts.gate_severity import is_warning
 from scripts.md_to_pdf import validate_rewild_for_render
 from scripts.rewild_gate import (
     MAX_FIDELITY_NOTES,
@@ -204,7 +205,8 @@ class RewildReceiptTests(unittest.TestCase):
             self.assertTrue(errors)
             self.assertFalse(receipt.exists())
 
-    def test_hong_kong_register_warning_cannot_be_waived(self):
+    def test_hong_kong_register_warning_is_reported_as_a_warning(self):
+        """R28: the register defect is printed; only Fidelity withholds the receipt."""
         text = (
             "這份報告係說明，新系統一樣處理到工作。"
             "項目團隊會在下星期再檢查結果。"
@@ -234,7 +236,7 @@ class RewildReceiptTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            errors = run_gate(
+            findings = run_gate(
                 report,
                 source,
                 report_lang="zh-HK",
@@ -242,10 +244,12 @@ class RewildReceiptTests(unittest.TestCase):
                 receipt_path=receipt,
                 waiver_path=waivers,
             )
-            self.assertIn("Hard Rewild warning", " ".join(errors))
-            self.assertFalse(receipt.exists())
+            self.assertIn("Hard Rewild warning", " ".join(findings))
+            self.assertTrue(all(is_warning(item) for item in findings), findings)
+            self.assertTrue(receipt.is_file())
 
-    def test_semantic_direction_reversal_is_blocked(self):
+    def test_semantic_direction_reversal_is_warned(self):
+        """R28: fidelity/semantic is a warning; the receipt still issues."""
         source_text = "研究顯示，銷售額上升。"
         report_text = "研究顯示，銷售額下跌。"
         with tempfile.TemporaryDirectory() as directory:
@@ -258,17 +262,19 @@ class RewildReceiptTests(unittest.TestCase):
             report.write_text(report_text, encoding="utf-8")
             write_review(review, report_lang="zh-HK")
 
-            errors = run_gate(
+            findings = run_gate(
                 report,
                 source,
                 report_lang="zh-HK",
                 review_note_path=review,
                 receipt_path=receipt,
             )
-            self.assertIn("direction", " ".join(errors).lower())
-            self.assertFalse(receipt.exists())
+            self.assertIn("direction", " ".join(findings).lower())
+            self.assertTrue(all(is_warning(item) for item in findings), findings)
+            self.assertTrue(receipt.is_file())
 
-    def test_causal_substitution_is_blocked(self):
+    def test_causal_substitution_is_warned(self):
+        """R28: fidelity/semantic is a warning; the receipt still issues."""
         source_text = "服務中斷是設定錯誤所致。"
         report_text = "服務中斷是網絡攻擊所致。"
         with tempfile.TemporaryDirectory() as directory:
@@ -281,15 +287,16 @@ class RewildReceiptTests(unittest.TestCase):
             report.write_text(report_text, encoding="utf-8")
             write_review(review, report_lang="zh-HK")
 
-            errors = run_gate(
+            findings = run_gate(
                 report,
                 source,
                 report_lang="zh-HK",
                 review_note_path=review,
                 receipt_path=receipt,
             )
-            self.assertIn("causal", " ".join(errors).lower())
-            self.assertFalse(receipt.exists())
+            self.assertIn("causal", " ".join(findings).lower())
+            self.assertTrue(all(is_warning(item) for item in findings), findings)
+            self.assertTrue(receipt.is_file())
 
     def test_multi_claim_direction_swap_is_blocked(self):
         errors = _semantic_fidelity_errors(
@@ -411,7 +418,8 @@ class RewildReceiptTests(unittest.TestCase):
         )
         self.assertIn("causal", " ".join(errors).lower())
 
-    def test_full_gate_blocks_correlation_rewritten_as_causation(self):
+    def test_full_gate_warns_correlation_rewritten_as_causation(self):
+        """R28: the finding is printed with the receipt, not instead of it."""
         filler = " ".join(f"word{index}" for index in range(7500))
         source_text = (
             "# Report\n\n## Finding\n\n"
@@ -433,17 +441,19 @@ class RewildReceiptTests(unittest.TestCase):
             report.write_text(report_text, encoding="utf-8")
             write_review(review)
 
-            errors = run_gate(
+            findings = run_gate(
                 report,
                 source,
                 report_lang="en",
                 review_note_path=review,
                 receipt_path=receipt,
             )
-            self.assertIn("causal", " ".join(errors).lower())
-            self.assertFalse(receipt.exists())
+            self.assertIn("causal", " ".join(findings).lower())
+            self.assertTrue(all(is_warning(item) for item in findings), findings)
+            self.assertTrue(receipt.is_file())
 
-    def test_full_gate_blocks_common_semantic_paraphrase_reversals(self):
+    def test_full_gate_warns_common_semantic_paraphrase_reversals(self):
+        """R28: the findings are printed with the receipt, not instead of it."""
         filler = " ".join(f"word{index}" for index in range(7500))
         source_text = (
             "# Report\n\n## Finding\n\n"
@@ -471,18 +481,19 @@ class RewildReceiptTests(unittest.TestCase):
             report.write_text(report_text, encoding="utf-8")
             write_review(review)
 
-            errors = run_gate(
+            findings = run_gate(
                 report,
                 source,
                 report_lang="en",
                 review_note_path=review,
                 receipt_path=receipt,
             )
-            joined = " ".join(errors).lower()
+            joined = " ".join(findings).lower()
             self.assertIn("direction", joined)
             self.assertIn("negation", joined)
             self.assertIn("causal", joined)
-            self.assertFalse(receipt.exists())
+            self.assertTrue(all(is_warning(item) for item in findings), findings)
+            self.assertTrue(receipt.is_file())
 
     def test_blind_review_is_bound_to_report_source_language_and_profile(self):
         first = (
@@ -536,7 +547,8 @@ class RewildReceiptTests(unittest.TestCase):
         self.assertNotIn("Early source", prose)
         self.assertNotIn("Final source", prose)
 
-    def test_full_gate_rejects_traditional_body_as_simplified_chinese(self):
+    def test_full_gate_warns_a_traditional_body_in_simplified_chinese(self):
+        """R28: the script finding is a warning; render still refuses it."""
         traditional = (
             "經濟風險評估趨勢監測維護規劃環境財務審計價值"
             "運營競爭優勢投資決策治理機制"
@@ -556,15 +568,16 @@ class RewildReceiptTests(unittest.TestCase):
             report.write_text(text, encoding="utf-8")
             write_review(review, report_lang="zh-CN")
 
-            errors = run_gate(
+            findings = run_gate(
                 report,
                 source,
                 report_lang="zh-CN",
                 review_note_path=review,
                 receipt_path=receipt,
             )
-            self.assertIn("traditional", " ".join(errors).lower())
-            self.assertFalse(receipt.exists())
+            self.assertIn("traditional", " ".join(findings).lower())
+            self.assertTrue(all(is_warning(item) for item in findings), findings)
+            self.assertTrue(receipt.is_file())
 
             checker = (
                 Path(__file__).resolve().parents[1]
@@ -647,7 +660,7 @@ class RewildReceiptTests(unittest.TestCase):
                     report.write_text(text, encoding="utf-8")
                     write_review(review, report_lang="zh-CN")
 
-                    errors = run_gate(
+                    findings = run_gate(
                         report,
                         source,
                         report_lang="zh-CN",
@@ -656,9 +669,12 @@ class RewildReceiptTests(unittest.TestCase):
                     )
                     self.assertIn(
                         "traditional",
-                        " ".join(errors).lower(),
+                        " ".join(findings).lower(),
                     )
-                    self.assertFalse(receipt.exists())
+                    self.assertTrue(
+                        all(is_warning(item) for item in findings), findings
+                    )
+                    self.assertTrue(receipt.is_file())
 
     def test_visual_callout_is_not_treated_as_a_verbatim_quote(self):
         simplified = "市场研究显示数据支持结论风险可控方案有效。" * 250
@@ -777,7 +793,9 @@ class RewildReceiptTests(unittest.TestCase):
         )
         self.assertIn("semantic", " ".join(errors).lower())
 
-    def test_handcrafted_receipt_cannot_skip_the_checker(self):
+    def test_a_handcrafted_audit_trail_is_still_caught_by_the_recheck(self):
+        """R28: boilerplate alone is a warning, so the recheck passes it; the
+        recomputed audit trail is what a handcrafted receipt cannot forge."""
         boilerplate = (
             "In today's rapidly evolving landscape, it is worth noting that "
             "this groundbreaking platform serves as a testament to innovation. "
@@ -820,12 +838,17 @@ class RewildReceiptTests(unittest.TestCase):
                 "style_waivers": [],
             }
 
-            errors = validate_rewild_receipt(
-                report,
-                forged,
-                expected_lang="en",
+            self.assertEqual(
+                [],
+                validate_rewild_receipt(report, forged, expected_lang="en"),
             )
-            self.assertIn("recheck failed", " ".join(errors).lower())
+            forged["heuristic_exemptions"] = ["invented exemption"]
+            self.assertIn(
+                "altered after issue",
+                " ".join(
+                    validate_rewild_receipt(report, forged, expected_lang="en")
+                ),
+            )
 
 
 if __name__ == "__main__":

@@ -1270,27 +1270,54 @@ class IssueTests(AlxTestCase):
             report.index(alx.VERIFICATION_NOTE_PREFIX["en"]), report.index("## Sources")
         )
 
-    def test_length_floor_is_class_a_and_only_deliver_issues(self):
-        """Spec §6.10: `rewild/length` is Class A, and `rewild_gate` owns the class."""
+    def test_length_floor_is_warn_and_issue_delivers_without_deliver(self):
+        """R28: `rewild/length` is a warning; plain `issue` still delivers."""
         from contextlib import ExitStack
 
         self.prepared()
         _code, out = self.run_in("check")
         self.assertIn("[rewild/length]", out)
-        # Class A: `rewild_gate` set it, so `issue` gets past step 1.
         self.assertEqual(0, self.state()["last_check"]["class_f"])
         with ExitStack() as stack:
             self.stub_gates(stack, rewild=False)
             code, out = self.run_in("issue")
-            self.assertEqual(1, code, out)
-            self.assertFalse((self.dir / "receipts" / "issue.json").exists())
-            code, out = self.run_in("issue", "--deliver")
         self.assertEqual(0, code, out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
         notes = json.loads(
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
         )
         self.assertTrue(any("minimum is" in note for note in notes["notes"]), notes)
-        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
+
+    def test_deliver_is_a_no_op_alias_when_nothing_is_hard(self):
+        """R28: with zero HARD, `--deliver` only says where the warnings went."""
+        from contextlib import ExitStack
+
+        self.prepared()
+        with ExitStack() as stack:
+            self.stub_gates(stack, rewild=False)
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        self.assertIn("warnings recorded in delivery notes", out)
+        self.assertNotIn("auto-remedy", out)
+
+    def test_every_downgraded_family_is_warn_and_never_blocks(self):
+        """R28 severity table: the families `alx` itself emits as warnings."""
+        for family in (
+            "tooling/receipt",
+            "tooling/render",
+            "rewild/humanization",
+            "review/rewild",
+            "review/content-missing",
+            "review/content-stale",
+            "fidelity/unreachable",
+            "fidelity/undecodable",
+        ):
+            with self.subTest(family=family):
+                item = alx.finding(family, "message", severity="hard")
+                self.assertEqual("warn", item.severity)
+                self.assertEqual("A", item.klass)
+                self.assertEqual([], alx.hard_findings([item]))
+                self.assertEqual([], alx.class_f_findings([item]))
 
     def test_issue_stamps_the_note_hashes_before_running_the_gates(self):
         """Spec §6.8/§6.9 step 4: stamp, then gate; `check` never judges hashes."""
@@ -1396,7 +1423,8 @@ class IssueTests(AlxTestCase):
         self.assertTrue(notes["notes"])
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
-    def test_issue_without_deliver_aborts_on_class_a_failure(self):
+    def test_a_refused_fidelity_receipt_is_a_warning_not_an_abort(self):
+        """R28: tooling/receipt is a warning; `issue` delivers and records it."""
         from contextlib import ExitStack
 
         self.prepared()
@@ -1413,9 +1441,16 @@ class IssueTests(AlxTestCase):
                     side_effect=failing_online,
                 )
             )
-            code, _out = self.run_in("issue")
-        self.assertEqual(1, code)
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )["notes"]
+        self.assertTrue(
+            any("source-fidelity receipt not issued" in note for note in notes),
+            notes,
+        )
 
 
 class RenderTests(AlxTestCase):
@@ -1485,6 +1520,44 @@ class RenderTests(AlxTestCase):
         self.assertEqual(before["online"], calls["online"])
         self.assertEqual(0, calls["network"])
         self.assertIn(".pdf", out)
+
+    def test_a_missing_gate_receipt_is_noted_and_render_still_returns(self):
+        """R28: tooling/render is a warning — render produces what it can."""
+        from contextlib import ExitStack
+
+        issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(issue_tests, name, getattr(self, name))
+        issue_tests.prepared()
+        with ExitStack() as stack:
+            issue_tests.stub_gates(stack)
+            code, out = self.run_in("issue")
+            self.assertEqual(0, code, out)
+            (self.dir / "receipts" / "rewild.json").unlink()
+
+            from scripts import md_to_pdf
+
+            def strict_render(input_path, output_path, **kwargs):
+                if "rewild_receipt" not in kwargs:
+                    raise ValueError("A Rewild gate receipt is required.")
+                Path(output_path).write_bytes(b"%PDF-1.7\n")
+
+            stack.enter_context(
+                mock.patch.object(
+                    md_to_pdf, "render_pdf", side_effect=strict_render
+                )
+            )
+            code, out = self.run_in("render")
+        self.assertEqual(0, code, out)
+        self.assertIn("[tooling/render]", out)
+        self.assertIn("=== WARN", out)
+        notes = json.loads(
+            (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
+        )["notes"]
+        self.assertTrue(any("not rendered" in note for note in notes), notes)
 
 
 class StatusTests(AlxTestCase):
@@ -1701,7 +1774,8 @@ class CheckOutputTests(AlxTestCase):
         _code, second = self.run_in("check", "--fix")
         self.assertEqual(self.grouped_block(first), self.grouped_block(second))
 
-    def test_an_unrepairable_date_line_is_class_a_with_a_prose_remedy(self):
+    def test_an_unrepairable_date_line_keeps_its_prose_remedy(self):
+        """R28: no class label is printed; the prose remedy still is."""
         self.bootstrap()
         self.break_the_date_line_and_the_supports()
         _code, out = self.run_in("check", "--fix")
@@ -1709,15 +1783,18 @@ class CheckOutputTests(AlxTestCase):
             line for line in self.finding_lines(out) if "Date line" in line
         )
         self.assertIn("(edit prose; waivable by alx issue --deliver)", line)
-        self.assertIn("[integrity/date-line] 1 (A, waivable by --deliver)", out)
+        self.assertIn("[integrity/date-line] 1", out)
+        self.assertNotIn("waivable by --deliver)", out)
 
     # item 3 --------------------------------------------------------------
-    def test_family_headers_and_the_status_line_carry_the_class(self):
+    def test_family_headers_and_the_status_line_carry_the_tier_not_a_class(self):
+        """R28: "Class A" is gone from the output; HARD/WARN is the whole story."""
         self.bootstrap()
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         _code, out = self.run_in("check")
-        self.assertRegex(out, r"\[fidelity/cache-detached\] \d+ \(F\)")
-        self.assertRegex(out, r"=== STATUS: \d+ hard \(\d+ Class F, \d+ Class A\), \d+ warn ===")
+        self.assertRegex(out, r"\[fidelity/cache-detached\] \d+\n")
+        self.assertRegex(out, r"=== STATUS: \d+ hard, \d+ warn ===")
+        self.assertNotIn("Class A", out)
 
     # item 4 --------------------------------------------------------------
     def test_the_claim_paragraph_table_lists_every_included_claim(self):
@@ -1810,7 +1887,25 @@ class LiveFidelityTests(AlxTestCase):
         collected = alx._fidelity_findings(alx.Workspace(self.dir), self.ledger())
         self.assertTrue(collected, "section (d) dropped T1's payload findings")
         self.assertIn("fidelity/mismatch", {item.family for item in collected})
-        self.assertEqual({"F"}, {alx.adopted_class(item) for item in collected})
+        # R28: the mismatch is fabrication (F); a changed context only warns.
+        self.assertEqual(
+            {"fidelity/mismatch": "F", "fidelity/context-changed": "A"}[
+                "fidelity/mismatch"
+            ],
+            next(
+                alx.adopted_class(item)
+                for item in collected
+                if item.family == "fidelity/mismatch"
+            ),
+        )
+        self.assertEqual(
+            {"A"},
+            {
+                alx.adopted_class(item)
+                for item in collected
+                if item.family == "fidelity/context-changed"
+            },
+        )
         _code, out = self.run_in("check")
         self.assertIn("[fidelity/mismatch]", out)
 
@@ -1837,7 +1932,8 @@ class LiveFidelityTests(AlxTestCase):
         self.assertIn("issue refused", out)
         self.assertFalse((self.dir / "receipts" / "issue.json").exists())
 
-    def test_a_live_unreachable_beyond_quorum_is_class_a(self):
+    def test_a_live_unreachable_beyond_quorum_is_a_warning(self):
+        """R28: an unreachable source is availability, never a refusal."""
         from contextlib import ExitStack
 
         issue_tests = self.prepared()
@@ -1852,6 +1948,7 @@ class LiveFidelityTests(AlxTestCase):
         adopted = alx.adopt(alx._online_findings(result), online=True)
         self.assertTrue(adopted)
         self.assertEqual({"A"}, {item.klass for item in adopted})
+        self.assertEqual({"warn"}, {item.severity for item in adopted})
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             stack.enter_context(
@@ -1860,8 +1957,8 @@ class LiveFidelityTests(AlxTestCase):
                 )
             )
             code, out = self.run_in("issue")
-        self.assertEqual(1, code, out)
-        self.assertFalse((self.dir / "receipts" / "issue.json").exists())
+        self.assertEqual(0, code, out)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
 
     def test_deliver_waives_a_live_unreachable_as_a_delivery_note(self):
         from contextlib import ExitStack
@@ -2339,7 +2436,9 @@ class FixRoundTests(AlxTestCase):
             f"{self.state()['claim_files']['C1']}",
             line,
         )
-        self.assertIn("Remove: `alx claim drop C1 --apply`", line)
+        # R28: fidelity/context-changed is a warning, so it carries no
+        # scope-dropping Remove remedy.
+        self.assertNotIn("Remove:", line)
 
     def test_the_two_step_remedy_clears_the_context_finding(self):
         self.stale_context()
@@ -2609,7 +2708,8 @@ class DeliveryRoundTests(AlxTestCase):
         self.assertIn("tooling/render", out)
 
     # J10 -----------------------------------------------------------------
-    def test_an_aborted_issue_takes_its_verification_note_back_out(self):
+    def test_a_recorded_online_failure_keeps_its_verification_note(self):
+        """R28: nothing is aborted, so the note that records it stays in."""
         from contextlib import ExitStack
 
         issue_tests = self.helper()
@@ -2627,10 +2727,10 @@ class DeliveryRoundTests(AlxTestCase):
                     side_effect=refused,
                 )
             )
-            code, _out = self.run_in("issue")
-        self.assertEqual(1, code)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
-        self.assertNotIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
+        self.assertIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
 
 
 class RemedyTests(AlxTestCase):
@@ -3490,7 +3590,7 @@ class ClaimFileRemedyTests(AlxTestCase):
         helper.stale_context()
         _code, out = self.run_in("check")
         line = next(item for item in out.splitlines() if "context changed" in item)
-        printed = line.split("Fix: ")[1].split(". Remove:")[0]
+        printed = line.split("Fix: ")[1].split(". Remove:")[0].rstrip(".")
         first, second = printed.split(", then ")
         with mock_production_transport(responses(CHANGED_PAGE)):
             code, out = self.run_in(*shlex.split(first)[1:])
@@ -3727,8 +3827,10 @@ class CheckerBudgetTests(AlxTestCase):
         notes = json.loads(
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
         )["notes"]
-        self.assertEqual(
-            1, sum(1 for note in notes if "Rewild checker timed out" in note), notes
+        # R28: the timeout is a warning, recorded in the notes; `calls` above
+        # is what pins the single subprocess payment.
+        self.assertTrue(
+            any("Rewild checker timed out" in note for note in notes), notes
         )
 
 

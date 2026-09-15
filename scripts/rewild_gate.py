@@ -29,9 +29,9 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[1]
 FIDELITY_NOTES_SCHEMA = ROOT / "references" / "rewild-fidelity-notes.schema.json"
-#: Checker sections that can never be waived or downgraded: fabricated figures
-#: and attribution drift (Fidelity), wrong-region vocabulary (Region), and AI
-#: vocabulary. Every other section is style, which reports without blocking.
+#: Checker sections reported outside the style tier: fabricated figures and
+#: attribution drift (Fidelity), wrong-region vocabulary (Region), and AI
+#: vocabulary. R28: only Fidelity blocks; the rest are warnings, as is style.
 HARD_WARNING_SECTIONS = ("Fidelity", "Region", "AI vocabulary")
 #: Default naturalness-checker subprocess budget. `run_check`/`run_gate` take a
 #: `timeout` keyword so a deadline-bound caller can shorten it (spec 6.11: `alx`
@@ -1595,8 +1595,22 @@ _CHECK_CLASSES = {
 FAMILIES = frozenset(_CHECK_CLASSES)
 
 
-def _finding(family, message, *, severity="hard", fix=""):
-    klass = _CHECK_CLASSES[family]
+#: Ruling R28: only fabrication and evidence integrity block delivery. Every
+#: other family this module emits is a warning — printed with its fix, never
+#: blocking `issue`.
+_HARD_FAMILIES = frozenset(
+    {
+        "integrity/control-chars",
+        "fidelity/quotation-lost",
+        "fidelity/rewild",
+    }
+)
+
+
+def _finding(family, message, *, severity=None, fix=""):
+    if severity is None:
+        severity = "hard" if family in _HARD_FAMILIES else "warn"
+    klass = _CHECK_CLASSES[family] if severity == "hard" else "A"
     return Finding(
         family=family,
         severity=severity,
@@ -1862,13 +1876,15 @@ def run_gate(
             f"semantic findings, above the limit of {MAX_FIDELITY_NOTES}; "
             "a report changing meaning this often must be re-drafted."
         ]
-    errors.extend(semantic_errors)
+    # R28: semantic drift and the length band are warnings; they are reported
+    # with the receipt, they never withhold it.
+    soft = [warning(message) for message in semantic_errors]
     errors.extend(
         "Fidelity note matched no semantic finding: "
         f"'{note['source_fragment']}' → '{note['report_fragment']}'."
         for note in unused_notes
     )
-    errors.extend(_length_errors(report_text, report_lang))
+    soft.extend(warning(message) for message in _length_errors(report_text, report_lang))
 
     checker = _checker_path(report_lang)
     checker_lang = PROFILES[report_lang][1]
@@ -1879,7 +1895,14 @@ def run_gate(
         return checker_errors
     warnings = result.get("warnings", [])
     hard_warnings = _hard_checker_warnings(result, report_lang)
-    errors.extend(_hard_checker_errors(result, report_lang))
+    # R28: of the checker's unwaivable sections only Fidelity (fabricated
+    # figures, attribution drift) still blocks; Region, AI vocabulary and the
+    # Hong Kong register lines are warnings.
+    for message in _hard_checker_errors(result, report_lang):
+        if message.startswith("Hard Rewild warning remains: Fidelity"):
+            errors.append(message)
+        else:
+            soft.append(warning(message))
     if errors:
         return errors
 
@@ -1896,7 +1919,7 @@ def run_gate(
     # warning is a judgment about phrasing, not evidence, so it is reported
     # and the receipt still issues; a waiver only records the reason.
     waived_warnings = []
-    findings = []
+    findings = soft
     for item in style_warnings:
         key = (
             str(item.get("section", "")),

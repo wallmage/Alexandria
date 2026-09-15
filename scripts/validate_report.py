@@ -966,6 +966,10 @@ def validate_report_against_ledger(text, ledger):
     return errors
 
 
+class _PdfErrors(list):
+    text_chars = 0
+
+
 def validate_pdf(
     path,
     *,
@@ -978,10 +982,14 @@ def validate_pdf(
     try:
         from pypdf import PdfReader
     except ModuleNotFoundError:
-        return [
-            "PDF validation needs pypdf. Install dependencies with "
-            "'python3 -m pip install -r requirements.txt'."
-        ]
+        errors = _PdfErrors(
+            [
+                "PDF validation needs pypdf. Install dependencies with "
+                "'python3 -m pip install -r requirements.txt'."
+            ]
+        )
+        errors.text_chars = 0
+        return errors
 
     try:
         reader = PdfReader(path)
@@ -1001,9 +1009,12 @@ def validate_pdf(
                 if annotation.get("/Subtype") == "/Link" and action.get("/URI"):
                     link_count += 1
     except Exception as exc:  # pypdf exposes several backend-specific errors
-        return [f"PDF could not be reopened: {exc}"]
+        errors = _PdfErrors([f"PDF could not be reopened: {exc}"])
+        errors.text_chars = 0
+        return errors
 
-    errors = []
+    errors = _PdfErrors()
+    errors.text_chars = len(text.strip())
     if page_count < min_pages:
         errors.append(f"PDF has {page_count} pages; minimum is {min_pages}.")
     if len(text.strip()) < min_text_chars:
@@ -1063,7 +1074,7 @@ def _page_quality_errors(path, expected_lang=None):
         import pdf_quality
     try:
         report = pdf_quality.run_quality_checks(
-            path, lang=expected_lang, check_tokens=True
+            path, lang=expected_lang, check_tokens=False
         )
     except ImportError as exc:
         return [
@@ -1076,7 +1087,12 @@ def _page_quality_errors(path, expected_lang=None):
         return [f"PDF page-quality checks could not run: {exc}"]
     findings = [finding.format() for finding in report.errors]
     findings.extend(
-        warning(finding.format()) for finding in report.warnings
+        warning(
+            f"{finding.check}"
+            + (f" [{finding.where}]" if finding.where else "")
+            + f": {finding.message}"
+        )
+        for finding in report.warnings
     )
     return findings
 

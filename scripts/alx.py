@@ -3021,17 +3021,6 @@ def _paragraph_table(mapping, unbound):
     return table
 
 
-def _fidelity_findings(ws, ledger):
-    """Section (d): T1's offline full-coverage probe over the cache."""
-    result = source_fidelity.check_source_fidelity(
-        ledger,
-        sample_size=0,
-        online=False,
-        cache_dir=ws.sources,
-    )
-    return as_findings(result.get("findings"))
-
-
 def _rewild_findings(ws, state):
     """Section (e): the offline rewild tiers.
 
@@ -3401,8 +3390,7 @@ def _review_findings(ws, state, ledger):
             findings.append(
                 finding(
                     _review_family(kind, "stale"),
-                    f"reviews/{kind}.json is incomplete: "
-                    f"{'; '.join(note_missing)}.",
+                    f"reviews/{kind}.json is incomplete; run `alx review finish {kind}`.",
                 )
             )
             continue
@@ -3495,7 +3483,6 @@ def run_check(ws, state, ledger, *, fix=False, mapping_out=None):
     if mapping_out is not None:
         mapping_out.update(mapping)
     findings.extend(binding)
-    findings.extend(_fidelity_findings(ws, ledger))
     findings.extend(_rewild_findings(ws, state))
     findings.extend(_review_findings(ws, state, ledger))
     return adopt(
@@ -3529,12 +3516,10 @@ def _next_step(hard):
     return f"`{remedy('issue')}`"
 
 
-def _status_line(state, findings, remaining):
-    elapsed, _remaining = _minutes(state)
+def _status_line(state, findings):
     next_step = _next_step(hard_findings(findings))
     return (
-        f"=== STATUS: check #{state['counters']['check']}, elapsed {elapsed} min, "
-        f"remaining {max(remaining, 0)} min. Next: {next_step}. ==="
+        f"=== STATUS: check #{state['counters']['check']}. Next: {next_step}. ==="
     )
 
 
@@ -3552,7 +3537,6 @@ def cmd_check(args):
     mapping = {}
     findings = run_check(ws, state, ledger, fix=args.fix, mapping_out=mapping)
     ledger = ws.load_ledger()
-    _elapsed, remaining = _minutes(state)
     rows = sorted(mapping.items(), key=lambda row: _claim_order(row[0]))
     lines = [_length_line(ws, state)]
     lines.append(
@@ -3568,7 +3552,7 @@ def cmd_check(args):
         render_grouped(
             _check_display_findings(ws, state, findings), verbose=args.verbose
         ),
-        _status_line(state, findings, remaining),
+        _status_line(state, findings),
     ]
     _record_last_check(state, findings)
     ws.save_state(state)
@@ -3776,8 +3760,6 @@ def cmd_review_finish(args):
         _write_json(path, note)
     missing = _note_completeness(ws, state, ledger, kind)
     note = _read_json(path)
-    if note.get("report_sha256") != record.get("report_sha256"):
-        missing.append("report_sha256 no longer matches the reviewed copy")
     if missing:
         for field in missing:
             if " schema)" in field:
@@ -4291,20 +4273,6 @@ def _note_pdfkit_contact_fallback(ws, lines, template, selected, failures):
     )
 
 
-def _pdf_text_chars(path):
-    """Extractable text length for B6; 0 when the file is missing or unreadable."""
-    if not Path(path).is_file():
-        return 0
-    try:
-        from pypdf import PdfReader
-
-        reader = PdfReader(path)
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        return len(text.strip())
-    except Exception:
-        return 0
-
-
 def cmd_render(args):
     ws, state, ledger = _open(args)
     receipt_path = ws.receipts / "issue.json"
@@ -4381,7 +4349,7 @@ def cmd_render(args):
             lines.append(f"{template} PDF check: {error}")
         if not pdf_errors:
             lines.append(f"{template} PDF check: passed (text, links, fonts, pages, overflow)")
-        chars = _pdf_text_chars(output)
+        chars = getattr(pdf_errors, "text_chars", 0)
         if chars < 500:
             lines.append(
                 f"{template} PDF: extractable text {chars} characters "

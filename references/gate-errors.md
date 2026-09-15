@@ -8,7 +8,7 @@ Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
-Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 800 characters (the quoted window is truncated with `…`, never the remedy).
+Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 800 characters (the quoted window is truncated with `…`, never the remedy); the WARN tier prints one line per family (family, count, the first member's message cut at 160 characters, its fix), and `alx check --verbose` expands it to one line per item (5 per family, then `+N more`).
 
 ## Runtime (`alx`, before any command runs)
 
@@ -20,22 +20,22 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Ledger (`check` b / `validate_ledger`)
 
-### `ledger/quantity` — F/W
-- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R26 (W): a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) is a warn when the extracts do not carry it; digits, percentages, currency and dates stay hard.
+### `ledger/quantity` — F
+- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R29: a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) carries no obligation and raises no finding; digits, percentages, currency and dates stay hard.
 - **fix:** `alx find S<n> TOKEN` then extend quote, or reword claim to dated form.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
 
-### `ledger/status` — F
-- **rule:** status assertion (patched, discontinued, approved, …) not in extracts.
+### `ledger/status` — W
+- **rule:** status assertion (patched, discontinued, approved, …) not in extracts. R29: a lexical heuristic, not verbatim fidelity.
 - **fix:** quote a sentence carrying the status via `alx find`.
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** claim says "all since patched"; extract has figures only.
 
-### `ledger/direction` — F
+### `ledger/direction` — W
 - **rule:** increased/decreased (and numeric/legal carriers) must appear in extracts. Bare `under|below|settled` without a carrier is not a trigger. R17: the negation window stops at ASCII `.`/`;` as well as `。`/`；`, so a 未/不 in an earlier sentence of a scraped Chinese page no longer denies the evidence; and two CJK carriers bind on a shared four-character phrase, since the 0.75 bigram ratio is unreachable for Chinese clauses.
 - **fix:** quote the directional sentence or drop the clause.
-- **remove:** `alx claim drop C<n> --apply`
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** "increased 12%" vs extract "12% in 2024".
 
 ### `ledger/derived` — F/W
@@ -56,10 +56,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `source_evidence: []`.
 
-### `ledger/schema` — F
-- **rule:** ledger fails `evidence-ledger.schema.json`.
+### `ledger/schema` — W
+- **rule:** ledger fails `evidence-ledger.schema.json`. R29: the ledger is machine-written, so a schema defect is never something the model can repair.
 - **fix:** set field `<name>` in `ledger.json` via `alx ledger merge` (brief/people/coverage/synthesis only).
-- **remove:** `alx claim drop C<n> --apply` if the invalid object is a claim.
+- **remove:** n/a (warning; never blocks `issue`)
 - **example:** missing `schema_version`.
 
 ### `ledger/key-claim` — W
@@ -243,7 +243,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** C2 extract "4,000 documents" not in S1.txt.
 
 ### `fidelity/context-changed` — W
-- **rule:** the probe is present but a recorded probe-context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing.
+- **rule:** the probe is present but the probe's own recorded context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing. R29: contexts are recorded per probe, not per claim, so a claim quoting one source twice no longer reports a change on a cache that was never refetched, and a probe with no recorded context is not compared.
 - **fix:** `alx fetch --id S<n> --refresh, then alx claim add claims/<file>` — the refresh alone keeps the recorded probe contexts; `claim add` re-confirms the extract and re-binds them.
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** S7 paragraph now begins "Correction:".
@@ -316,25 +316,13 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** Rewild checker timed out after 120 seconds.
 
-### `rewild/humanization` — W
-- **rule:** `issue` had to create the snapshot itself, so the report was never humanized (`humanization: none`).
-- **fix:** `alx snapshot`
-- **remove:** n/a (warning; never blocks `issue`)
-- **example:** issue run straight after drafting.
-
 ## Reviews (`check` f / `content_gate`, `rewild_gate`, `alx`)
 
 ### `review/rewild` — W
-- **rule:** the blind-review note is missing, incomplete, or no longer matches the reviewed report/source/language/profile.
+- **rule:** the blind-review note exists but is incomplete, or no longer matches the reviewed report/source/language/profile. R29: a missing review is not a finding.
 - **fix:** `alx review start rewild --iter`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** note does not match the reviewed report: report_sha256.
-
-### `review/content-missing` — W
-- **rule:** no finished content review.
-- **fix:** `alx review start content --iter`
-- **remove:** n/a (warning; never blocks `issue`)
-- **example:** `reviews/content.json` absent.
 
 ### `review/content-stale` — W
 - **rule:** report or ledger changed beyond the §6.8 mechanical-delta allowlist since the content review.
@@ -349,11 +337,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `scores.evidence.score = 3`.
 
 ### `content/check` — W
-- **rule:** the content note fails `content-review.schema.json` or its completeness rules; the same family also carries the two claim-binding errors below.
+- **rule:** the content note fails `content-review.schema.json` or its completeness rules. R29: claim↔paragraph binding is the binding gate's job and is no longer re-reported here.
 - **fix:** `alx review start content --iter`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `status` is not `completed`.
-- **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → write `[C<n>]` at the end of the sentence in paragraph `<n>` of report.md, then `alx check --fix`. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
 
 ### `content/critical-finding` — W
 - **rule:** a critical review finding is not dispositioned `resolved`.
@@ -366,18 +353,6 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx review start content --iter`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** disclosure quotes a sentence that was edited away.
-
-### `content/claim-support` — W
-- **rule:** a retained claim→paragraph mapping has no support disposition in the note.
-- **fix:** `alx review start content --iter`
-- **remove:** n/a (warning; never blocks `issue`)
-- **example:** C4 bound to paragraph 8, no `claim_support` entry.
-
-### `content/claim-binding` — W
-- **rule:** the note's claim binding disagrees with the ledger's mapping.
-- **fix:** `alx claim bind C<n> --paragraph N`
-- **remove:** n/a (warning; never blocks `issue`)
-- **example:** note says paragraph 7, ledger says 8.
 
 ### `content/language` — W
 - **rule:** report language does not match the ledger's `report_language`.
@@ -403,6 +378,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 `ledger/harm` — deleted with the person harm rules (R25/R28). `human_harm_review` is no longer a field and no harm finding is raised; ignore any residual emission.
 
+R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `review/content-missing` — reviews are optional and their absence is silent. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. The two binding errors `content/check` used to carry ("cannot be located in the report", "has no nearby citation to its ledger source") are no longer emitted there. Han-numeral quantities raise no `ledger/quantity` finding.
+
 ## Aliases
 
 Spec and legacy spellings, and the family the code actually emits. Use the emitted name.
@@ -421,7 +398,6 @@ Spec and legacy spellings, and the family the code actually emits. Use the emitt
 | `rewild/semantic-fidelity` | `fidelity/semantic` |
 | `rewild/regional` | `rewild/region` |
 | `rewild/review-stale` | `review/rewild` |
-| `rewild/humanization-none` | `rewild/humanization` |
 | `length-below-floor` | `rewild/length`, `integrity/length` |
 | `sources-section` | `binding/sources-section` |
 | `tooling/renderer`, `tooling/rasterizer` | `tooling/render` |

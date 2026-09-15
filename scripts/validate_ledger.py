@@ -54,11 +54,19 @@ FAMILIES = frozenset(
 )
 
 
+#: R29: lexical and semantic heuristics and ledger shape are not verbatim
+#: fidelity, and the ledger is machine-written, so these are printed with
+#: their fix and never block.
+WARN_FAMILIES = frozenset({"ledger/status", "ledger/direction", "ledger/schema"})
+
+
 def _ids_in(message):
     return re.findall(r"\b[CSP]\d+\b", str(message))
 
 
 def _f(family, message, *, severity="hard", ids=None, fix="", remove=""):
+    if family in WARN_FAMILIES:
+        severity = "warn"
     return Finding(
         family=family,
         severity=severity,
@@ -400,16 +408,16 @@ _CJK_ABBREVIATED_TAIL_RE = re.compile(
 #: both worked examples ("三個漏洞", "十八個月"); broadening it is deferred.
 _CJK_COUNT_CLASSIFIERS = frozenset("個个項项名家次種种款位條条篇卷册冊")
 
-#: R26: a quantity spelled with Han numeral words ("三位作者"), with or without
-#: the classifier the scan leaves out of the display. Digits, percentages,
-#: currency and dates never match, so those stay hard.
+#: R29: a quantity spelled with Han numeral words ("三位作者"), with or without
+#: the classifier the scan leaves out of the display, raises no finding at all.
+#: Digits, percentages, currency and dates never match, so those stay hard.
 _CJK_NUMERAL_TOKEN_RE = re.compile(
     "^[" + _HAN_NUMERAL_CHARS + "]+[位次个個年月日]?$"
 )
 
 
 def _is_cjk_numeral_token(display):
-    """R26: tag the Han-numeral quantities the coverage finding downgrades."""
+    """R29: tag the Han-numeral quantities that carry no obligation."""
     return bool(_CJK_NUMERAL_TOKEN_RE.match(str(display or "").strip()))
 
 #: Measure units whose figure is comparable across notations, each mapped to
@@ -1762,6 +1770,9 @@ def _evidence_coverage_findings(
         if matching_expressions:
             used_expressions.update(matching_expressions)
             continue
+        # R29: a quantity spelled with Han numerals raises no finding at all.
+        if _is_cjk_numeral_token(display):
+            continue
         if _quantity_is_covered(claim_forms, evidence_forms):
             continue
         if _year_documented_coverage(claim_forms, evidence_forms, source_text):
@@ -1807,15 +1818,13 @@ def _evidence_coverage_findings(
                 f"the source's form ({offer_form})"
             )
             detail = "The extract states the month and day but not the year."
-        cjk_word = _is_cjk_numeral_token(display)
         errors.append(
             _f(
                 "ledger/quantity",
                 f"{claim_id}: quantity '{display}' appears in claim but not in "
                 f"extract_or_location (claim {', '.join(sorted(claim_forms))}; "
                 f"{'; '.join(offered)}). {detail}"
-                + ("" if cjk_word else f" Remove: `{_drop(claim_id)}`."),
-                severity="warn" if cjk_word else "hard",
+                f" Remove: `{_drop(claim_id)}`.",
                 ids=_ids_in(f"{claim_id} {find_id or ''}"),
                 fix=fix,
                 remove=_drop(claim_id),

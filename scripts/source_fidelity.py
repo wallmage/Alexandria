@@ -372,15 +372,26 @@ def write_cache(cache_dir, source_id, result: FetchResult) -> None:
 
 
 def record_probe_contexts(cache_dir, source_id, claim_id, probes) -> None:
+    """Bind one claim's probes, keyed by probe (R22, R29).
+
+    One claim may quote the same source twice, so the caller records one
+    evidence entry at a time. Keyed per claim alone, the second entry
+    overwrote the first, and comparing the first entry's probes against the
+    second entry's hashes then reported a context change on every cache that
+    had never been refetched. Keyed per probe the slots merge instead.
+    """
     cached = read_cache(cache_dir, source_id)
     if cached is None:
         raise ValueError(f"No cache for {source_id}")
     text, meta = cached
     contexts = dict(meta.get("probe_contexts") or {})
-    contexts[str(claim_id)] = _probe_context_sha256s(
-        normalize_text(text),
-        list(probes or []),
-    )
+    recorded = contexts.get(str(claim_id))
+    recorded = dict(recorded) if isinstance(recorded, dict) else {}
+    probes = list(probes or [])
+    contexts_now = _probe_context_sha256s(_document(text), probes)
+    for probe, hashes in zip(probes, contexts_now, strict=True):
+        recorded[_probe_key(probe)] = hashes
+    contexts[str(claim_id)] = recorded
     meta["probe_contexts"] = contexts
     cache_paths(cache_dir, source_id)[1].write_text(
         json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
@@ -966,7 +977,7 @@ def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
                 break
     if extract is None:
         extract = claim.get("extract_or_location")
-    document = strip_markup(text) if "<" in str(text or "") else normalize_text(text)
+    document = _document(text)
     findings = []
     segments = _extract_segments(extract, document)
     usable = []
@@ -996,9 +1007,17 @@ def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
         recorded = None
         if isinstance(stored, dict):
             recorded = stored.get(claim_id)
-        if recorded:
-            current = _probe_context_sha256s(document, probe_strings(extract))
-            if current != recorded:
+        if isinstance(recorded, dict) and recorded:
+            probes = probe_strings(extract)
+            changed = [
+                probe
+                for probe, hashes in zip(
+                    probes, _probe_context_sha256s(document, probes), strict=True
+                )
+                if _probe_key(probe) in recorded
+                and recorded[_probe_key(probe)] != hashes
+            ]
+            if changed:
                 window = usable[0][:120]
                 markers = CONTEXT_MARKERS.findall(str(text or ""))
                 marker_note = (
@@ -1113,6 +1132,15 @@ def _claim_weight(claim, central_ids):
     if claim.get("include_in_report") is True:
         return 1
     return 0
+
+
+def _document(text):
+    """The normalized haystack both recording and comparison must agree on."""
+    return strip_markup(text) if "<" in str(text or "") else normalize_text(text)
+
+
+def _probe_key(probe):
+    return hashlib.sha256(str(probe).encode("utf-8")).hexdigest()
 
 
 def _probe_context_sha256s(document, probes):

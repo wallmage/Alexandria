@@ -49,16 +49,16 @@ class GateErrorsDocTests(unittest.TestCase):
             self.assertIn(marker, text)
         self.assertRegex(text, r"### `[^`]+` — [FAW]\b")
 
-    def test_doc_severities_match_the_r28_table(self):
-        """R28: F only for the fabrication/integrity list; every other family W."""
+    def test_doc_severities_match_the_r29_table(self):
+        """R29: F only for verbatim/numeric fidelity; every other family W."""
         text = (ROOT / "references" / "gate-errors.md").read_text(encoding="utf-8")
         letters = {
             name: letter
             for name, letter in re.findall(r"### `([^`]+)`[^\n]*? — ([FW])(?:/[FW])?\b", text)
         }
         hard = {
-            "runtime/missing", "ledger/quantity", "ledger/status", "ledger/direction",
-            "ledger/derived", "ledger/claim-input", "ledger/schema", "ledger/reference",
+            "runtime/missing", "ledger/quantity",
+            "ledger/derived", "ledger/claim-input", "ledger/reference",
             "integrity/control-chars", "integrity/replacement-char", "integrity/encoding",
             "integrity/quotation-lost", "binding/link-not-in-ledger",
             "binding/leftover-prose", "fidelity/mismatch", "fidelity/cache-missing",
@@ -70,13 +70,22 @@ class GateErrorsDocTests(unittest.TestCase):
         for downgraded in (
             "ledger/key-claim", "ledger/person", "ledger/portfolio", "integrity/length",
             "binding/claim-paragraph", "fidelity/context-changed", "fidelity/semantic",
-            "rewild/region", "review/content-missing", "content/score", "tooling/receipt",
+            "rewild/region", "ledger/status", "ledger/direction", "ledger/schema",
+            "rewild/style", "content/score", "tooling/receipt",
         ):
             with self.subTest(family=downgraded):
                 self.assertEqual("W", letters[downgraded])
         self.assertIn("never blocks `issue`", text)
         self.assertNotIn("Class A only via", text)
         self.assertNotIn("### `ledger/harm`", text)
+        # R29: every deleted family keeps its name only under "Removed families".
+        for deleted in (
+            "content/claim-support", "content/claim-binding",
+            "review/content-missing", "rewild/humanization",
+        ):
+            with self.subTest(deleted=deleted):
+                self.assertNotIn(f"### `{deleted}`", text)
+        self.assertIn("alx check --verbose", text)
 
     def test_module_families_appear_when_exported(self):
         text = (ROOT / "references" / "gate-errors.md").read_text(encoding="utf-8")

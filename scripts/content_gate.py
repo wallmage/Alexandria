@@ -33,12 +33,9 @@ try:
     )
     from .validate_report import (
         SOURCE_HEADINGS,
-        _foundation_urls,
         _h2_sections,
         binding_findings,
-        extract_markdown_urls,
         normalize_url,
-        split_body_paragraphs,
         validate_report_against_ledger,
     )
 except ImportError:
@@ -62,12 +59,9 @@ except ImportError:
     )
     from validate_report import (
         SOURCE_HEADINGS,
-        _foundation_urls,
         _h2_sections,
         binding_findings,
-        extract_markdown_urls,
         normalize_url,
-        split_body_paragraphs,
         validate_report_against_ledger,
     )
 
@@ -100,9 +94,13 @@ FAMILIES = (
     "content/check",
     "content/critical-finding",
     "content/disclosure",
-    "content/claim-support",
-    "content/claim-binding",
     "content/language",
+)
+
+#: R29: claim<->paragraph binding is the binding gate's job, so `content/check`
+#: no longer re-reports the two binding errors `validate_report` raises.
+_BINDING_EXCEPTIONS = re.compile(
+    r"cannot be located in the report|has no nearby citation"
 )
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
@@ -457,16 +455,6 @@ def _finding(family, message, *, ids=None, severity="warn", fix="", remove=""):
     )
 
 
-def _claim_support_map(review):
-    mapping = {}
-    raw = review.get("claim_support") if isinstance(review, dict) else None
-    if isinstance(raw, list):
-        for item in raw:
-            if isinstance(item, dict) and item.get("claim_id"):
-                mapping[item["claim_id"]] = item.get("disposition") or ""
-    return mapping
-
-
 def _receipt_is_stale(receipt_path, report_path, ledger_path):
     try:
         payload = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
@@ -524,9 +512,10 @@ def run_check(
         for error in review_errors:
             findings.append(_finding("content/check", error))
         review = review or {}
-    claim_support = _claim_support_map(review)
     if isinstance(ledger, dict):
         for error in validate_report_against_ledger(report_text, ledger):
+            if _BINDING_EXCEPTIONS.search(str(error)):
+                continue
             findings.append(
                 _finding("content/check", error.removeprefix(WARNING_PREFIX))
             )
@@ -608,83 +597,6 @@ def run_check(
                                 fix="place a ≥40-character disclosure excerpt in the report",
                             )
                         )
-        if isinstance(ledger, dict):
-            findings.extend(
-                _per_claim_binding_findings(
-                    report_text, ledger, claim_support
-                )
-            )
-    return findings
-
-
-def _per_claim_binding_findings(report_text, ledger, claim_support):
-    findings = []
-    paragraphs = [block for _number, block in split_body_paragraphs(report_text)]
-    sources_by_id = {
-        source.get("source_id"): source
-        for source in ledger.get("sources", [])
-        if isinstance(source, dict) and source.get("source_id")
-    }
-    for claim in ledger.get("claims", []) if isinstance(ledger.get("claims"), list) else []:
-        if not isinstance(claim, dict) or claim.get("include_in_report") is not True:
-            continue
-        claim_id = claim.get("claim_id", "<unknown>")
-        paragraph = claim.get("report_paragraph")
-        try:
-            paragraph = int(paragraph) if paragraph is not None else None
-        except (TypeError, ValueError):
-            paragraph = None
-        if paragraph is not None and not (1 <= paragraph <= len(paragraphs)):
-            paragraph_label = "out-of-range"
-            paragraph = None
-        else:
-            paragraph_label = None
-        if paragraph is None and paragraph_label is None:
-            foundation_urls = _foundation_urls(claim, sources_by_id)
-            candidates = [
-                index
-                for index, block in enumerate(paragraphs, start=1)
-                if foundation_urls
-                & {normalize_url(url) for url in extract_markdown_urls(block)}
-            ]
-            if len(candidates) == 1:
-                paragraph = candidates[0]
-        support = claim_support.get(claim_id)
-        citation = "missing"
-        if isinstance(paragraph, int) and 1 <= paragraph <= len(paragraphs):
-            foundation_urls = _foundation_urls(claim, sources_by_id)
-            cited = {
-                normalize_url(url)
-                for url in extract_markdown_urls(paragraphs[paragraph - 1])
-            }
-            if not foundation_urls or foundation_urls & cited:
-                citation = "ok"
-        if support is None:
-            findings.append(
-                _finding(
-                    "content/claim-support",
-                    f"Claim {claim_id} is missing a support disposition in the content note.",
-                    ids=[claim_id],
-                    fix="record claim_support disposition in the content review",
-                    remove=f"alx claim drop {claim_id} --apply",
-                )
-            )
-            support = "missing"
-        if paragraph_label is None:
-            paragraph_label = paragraph if paragraph is not None else "unbound"
-        line = (
-            f"{claim_id}: paragraph={paragraph_label} "
-            f"support={support} citation={citation}"
-        )
-        findings.append(
-            _finding(
-                "content/claim-binding",
-                line,
-                ids=[claim_id],
-                severity="warn",
-                fix="run `alx claim bind` and record support disposition",
-            )
-        )
     return findings
 
 

@@ -133,7 +133,10 @@ class FindingRecordTests(unittest.TestCase):
         warn = self._finding(severity="warn", klass="A", family="ledger/coverage")
         rendered = render_grouped([self._finding(), warn], with_class=True)
         self.assertIn("[ledger/quantity] 1 (F)", rendered)
-        self.assertIn("[ledger/coverage] 1\n", rendered)
+        # R29: the WARN tier is one compact line per family.
+        self.assertIn(
+            f"[ledger/coverage] 1 — {warn.message} — Fix: {warn.fix}\n", rendered
+        )
         self.assertNotIn("waivable by --deliver", rendered)
         self.assertNotIn("Class F", rendered)
         self.assertIn("=== STATUS: 1 hard, 1 warn ===", rendered)
@@ -208,15 +211,17 @@ class GateEntryPointSeverityTests(unittest.TestCase):
                     module.emit_findings.__module__.rpartition(".")[2],
                 )
 
-    def test_ledger_command_still_fails_on_a_schema_error(self):
+    def test_ledger_command_reports_a_schema_error_without_refusing(self):
+        """R29: the ledger is machine-written, so its shape is a WARN."""
         with tempfile.TemporaryDirectory() as directory:
             ledger = Path(directory) / "ledger.json"
             ledger.write_text("{}", encoding="utf-8")
             err = io.StringIO()
             with redirect_stderr(err), redirect_stdout(io.StringIO()):
                 code = validate_ledger.main([str(ledger)])
-        self.assertEqual(1, code)
-        self.assertIn("=== HARD", err.getvalue())
+        self.assertEqual(0, code)
+        self.assertIn("=== HARD 0", err.getvalue())
+        self.assertIn("[ledger/schema]", err.getvalue())
 
     def test_evidence_and_citation_findings_are_never_warnings(self):
         ledger = json.loads(LEDGER_FIXTURE.read_text(encoding="utf-8"))
@@ -413,3 +418,44 @@ class PdfPageQualitySeverityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompactWarnTierTests(unittest.TestCase):
+    """R29/A5: the WARN tier is one line per family; HARD is unchanged."""
+
+    def _item(self, **overrides):
+        base = {
+            "family": "ledger/coverage",
+            "severity": "warn",
+            "klass": "A",
+            "ids": ["C1"],
+            "message": "coverage linkage is missing",
+            "fix": "alx check --fix",
+            "remove": "",
+        }
+        base.update(overrides)
+        return Finding(**base)
+
+    def test_one_line_per_family_with_count_message_and_fix(self):
+        rendered = render_grouped([self._item(), self._item(ids=["C2"])])
+        self.assertIn(
+            "[ledger/coverage] 2 — coverage linkage is missing — Fix: alx check --fix",
+            rendered,
+        )
+        self.assertNotIn("\n  ", rendered)
+
+    def test_a_long_message_is_cut_at_160_characters(self):
+        rendered = render_grouped([self._item(message="x" * 400, fix="")])
+        line = next(
+            item for item in rendered.splitlines() if item.startswith("[ledger")
+        )
+        self.assertTrue(line.endswith("…"), line)
+        self.assertNotIn(" — Fix:", line)
+        self.assertEqual("x" * 160 + "…", line.split(" — ", 1)[1])
+
+    def test_verbose_restores_the_per_item_form_and_its_cap(self):
+        items = [self._item(ids=[f"C{index}"]) for index in range(7)]
+        rendered = render_grouped(items, per_family=5, verbose=True)
+        self.assertIn("[ledger/coverage] 7", rendered)
+        self.assertIn("  +2 more", rendered)
+        self.assertIn("  C0: coverage linkage is missing. Fix: alx check --fix.", rendered)

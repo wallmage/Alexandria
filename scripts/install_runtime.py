@@ -141,6 +141,24 @@ def verify_runtime():
                 raise RuntimeError(f"PDF page rendering failed: {language}")
 
 
+def write_launchers(runtime):
+    """One path, no JSON: SKILL.md invokes RUNTIME/bin/python (or python.cmd)."""
+    launchers = runtime / "bin"
+    launchers.mkdir(parents=True, exist_ok=True)
+    posix = launchers / "python"
+    posix.write_text(
+        '#!/bin/sh\n'
+        'here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
+        'exec "$here/bin/micromamba" --no-rc run --prefix "$here/env" python "$@"\n',
+        encoding="utf-8",
+    )
+    posix.chmod(0o755)
+    (launchers / "python.cmd").write_text(
+        '@"%~dp0..\\Library\\bin\\micromamba.exe" --no-rc run --prefix "%~dp0..\\env" python %*\n',
+        encoding="utf-8",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", type=Path, required=True)
@@ -172,6 +190,7 @@ def main():
     text = json.dumps(manifest, indent=2) + "\n"
     for target in (runtime / ".runtime.json", ROOT / ".runtime.json"):
         target.write_text(text, encoding="utf-8")
+    write_launchers(runtime)
     print("Installation verified.")
 
 

@@ -1,7 +1,6 @@
 param([string]$Runtime = $(if ($env:ALEXANDRIA_RUNTIME_DIR) { $env:ALEXANDRIA_RUNTIME_DIR } else { Join-Path $env:USERPROFILE '.alexandria\runtime' }))
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$skillRoot = Split-Path $PSScriptRoot -Parent
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 $log = Join-Path $Runtime 'install.log'
 $channels = @('https://conda.anaconda.org/conda-forge', 'https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge')
@@ -40,7 +39,7 @@ try {
     if (-not $installed) { throw 'Could not create the runtime.' }
     $code = Invoke-Native -Program $mamba -Arguments @('--no-rc', 'run', '--prefix', $prefix, 'python', (Join-Path $PSScriptRoot 'install_runtime.py'), '--runtime', $Runtime)
     if ($code -ne 0) { throw 'Runtime verification failed.' }
-    Write-Output "Installed and verified. Runtime: $skillRoot\.runtime.json"
+    Write-Output "Installed and verified. Runtime: $Runtime (launcher: $Runtime\bin\python.cmd)"
 } catch {
     $_ | Out-File -Append $log
     Write-Error "Installation failed; see $log"

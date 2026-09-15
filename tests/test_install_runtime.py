@@ -66,7 +66,8 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(
                 '#!/bin/sh\n'
                 'here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
-                'exec "$here/bin/micromamba" --no-rc run --prefix "$here/env" python "$@"\n',
+                'MAMBA_ROOT_PREFIX="$here/mamba" exec "$here/bin/micromamba" --no-rc run '
+                '--prefix "$here/env" python "$@"\n',
                 posix.read_text(encoding="utf-8"),
             )
             self.assertTrue(os.access(posix, os.X_OK))

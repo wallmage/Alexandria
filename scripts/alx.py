@@ -50,6 +50,9 @@ def runtime_command():
     to SKILL.md second: refreshing the installed skill copy deletes the latter.
     """
     runtime = runtime_directory()
+    # micromamba.exe aborts on its second start when no root prefix is set;
+    # the installer pins the runtime's own, so every relocation does too.
+    os.environ.setdefault("MAMBA_ROOT_PREFIX", str(runtime / "mamba"))
     for manifest in (runtime / ".runtime.json", ROOT / ".runtime.json"):
         if manifest.is_file():
             command = json.loads(manifest.read_text(encoding="utf-8"))["command"]

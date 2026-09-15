@@ -73,7 +73,13 @@ jobs:
           Write-Output "--- F launcher via cmd /c (no pipe)"
           cmd /c "`"$b\bin\python.cmd`" -c `"print('F ok')`""
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- G env"
+          Write-Output "--- G root prefix probe"
+          Get-ChildItem "$env:USERPROFILE" -Force -Filter "*mamba*" | Out-String | Write-Output
+          Get-ChildItem "$env:LOCALAPPDATA" -Force -Filter "*mamba*" -ErrorAction SilentlyContinue | Out-String | Write-Output
+          $env:MAMBA_ROOT_PREFIX = "$b\mamba"
+          & $m --version
+          Write-Output "exit with MAMBA_ROOT_PREFIX=$LASTEXITCODE"
+          Write-Output "--- H env"
           Get-ChildItem env: | Where-Object { $_.Name -match 'MAMBA|CONDA|PYTHON|COMSPEC|PATHEXT' } | Out-String | Write-Output
       - name: Run alx through the one-path launcher SKILL.md uses
         shell: pwsh

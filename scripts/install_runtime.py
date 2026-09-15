@@ -149,7 +149,7 @@ def write_launchers(runtime):
     posix.write_text(
         '#!/bin/sh\n'
         'here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
-        'exec "$here/bin/micromamba" --no-rc run --prefix "$here/env" python "$@"\n',
+        'MAMBA_ROOT_PREFIX="$here/mamba" exec "$here/bin/micromamba" --no-rc run --prefix "$here/env" python "$@"\n',
         encoding="utf-8",
     )
     posix.chmod(0o755)
@@ -164,6 +164,7 @@ WINDOWS_LAUNCHER = (
     "setlocal\r\n"
     'for %%I in ("%~dp0..") do set "root=%%~fI"\r\n'
     'set "root=%root:/=\\%"\r\n'
+    'set "MAMBA_ROOT_PREFIX=%root%\\mamba"\r\n'
     'if not exist "%root%\\Library\\bin\\micromamba.exe" (\r\n'
     '  echo alx launcher: micromamba.exe missing under "%root%\\Library\\bin" 1>&2\r\n'
     "  exit /b 2\r\n"

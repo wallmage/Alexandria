@@ -1159,6 +1159,62 @@ class EstimateTests(unittest.TestCase):
         self.assertEqual([], errors)
 
 
+class AnalysisReasoningTests(unittest.TestCase):
+    """B1: analysis without reasoning is accepted + ledger/reference WARN."""
+
+    def test_analysis_requires_reasoning_in_the_ledger(self):
+        data = ledger_with_fact(
+            kind="analysis",
+            claim="The second review round is the only change between the figures.",
+            extract_or_location="The second review round is the only change.",
+        )
+        errors = validate_ledger.validate_references(data)
+        self.assertTrue(
+            any("an analysis must record its reasoning" in error for error in errors),
+            errors,
+        )
+        findings = [
+            item
+            for item in validate_ledger.collect_findings(data)
+            if "an analysis must record its reasoning" in item.message
+        ]
+        self.assertEqual(1, len(findings), findings)
+        self.assertEqual("ledger/reference", findings[0].family)
+        self.assertEqual("warn", findings[0].severity)
+        self.assertEqual(
+            "set field reasoning in claims/*.json, then alx claim add claims/*.json",
+            findings[0].fix,
+        )
+        printed = validate_ledger.render_grouped(findings)
+        self.assertIn(
+            "C2: an analysis must record its reasoning; "
+            "state the inference that produced it",
+            printed,
+        )
+        self.assertIn(
+            "set field reasoning in claims/*.json, then alx claim add claims/*.json",
+            printed,
+        )
+        self.assertEqual([], [item for item in findings if item.severity == "hard"])
+
+    def test_reasoning_clears_the_analysis_warn(self):
+        data = ledger_with_fact(
+            kind="analysis",
+            claim="The second review round is the only change between the figures.",
+            extract_or_location="The second review round is the only change.",
+            reasoning=(
+                "The second review round is the only change between the two "
+                "retention figures."
+            ),
+        )
+        errors = [
+            error
+            for error in validate_ledger.validate_references(data)
+            if "an analysis must record its reasoning" in error
+        ]
+        self.assertEqual([], errors)
+
+
 class LedgerReferenceTests(unittest.TestCase):
     def test_two_evidence_records_for_one_source_are_allowed(self):
         # R22 restatement of test_direct_sources_need_one_unique_evidence_record
@@ -1527,7 +1583,11 @@ class LedgerReferenceTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.assertTrue(validate_ledger.validate_schema(data, schema))
+        errors = validate_ledger.validate_schema(data, schema)
+        self.assertTrue(
+            any("synthesis.adversarial_tests" in error for error in errors),
+            errors,
+        )
 
         data = valid_quality_ledger()
         data["synthesis"]["adversarial_tests"][0]["claim_ids"] = ["C9"]
@@ -3139,10 +3199,14 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         findings = validate_ledger.claim_findings(item, data)
         families = {item.family for item in findings}
         self.assertGreaterEqual(len(findings), 2)
-        # R28 restatement: this analysis carries no `reasoning`, which used to
-        # raise ledger/claim-input. Every conditional field is optional now, so
-        # the remaining families must still all report.
+        # B1 restatement of 01eb2db/e7e1258: analysis without reasoning is
+        # accepted (no ledger/claim-input) and prints ledger/reference WARN.
         self.assertNotIn("ledger/claim-input", families)
+        self.assertIn("ledger/reference", families)
+        self.assertTrue(
+            any("an analysis must record its reasoning" in item.message for item in findings),
+            findings,
+        )
         self.assertIn("ledger/extract-length", families)
         self.assertIn("ledger/person", families)
 
@@ -3330,6 +3394,98 @@ class SchemaRemedyTests(unittest.TestCase):
         self.assertEqual(
             "set field people.0.name in people via alx ledger merge",
             self._fix_for(ledger, "people.0"),
+        )
+
+    def test_empty_top_level_arrays_warn_with_schema_remedy(self):
+        ledger = {
+            "schema_version": 4,
+            "subject": "X",
+            "research_question": "Y",
+            "brief": {
+                "intended_reader": "reader",
+                "decision_or_use": "use",
+                "archetype": "artifact",
+                "report_language": "en",
+                "editorial_mode": "analytical",
+                "scope": "now",
+            },
+            "people": [],
+            "report_date": "2026-07-28",
+            "coverage": [],
+            "sources": [],
+            "claims": [],
+            "synthesis": {
+                "central_judgment_claim_ids": [],
+                "counterevidence_claim_ids": [],
+                "adversarial_tests": [],
+                "implications": [],
+                "decisions_or_takeaways": [],
+                "scenarios": [],
+                "limitations": [],
+                "research_stop_reason": "stop",
+            },
+            "unresolved_questions": [],
+        }
+        findings = self._schema_findings(ledger)
+        self.assertTrue(findings)
+        self.assertEqual({"warn"}, {item.severity for item in findings})
+        printed = validate_ledger.render_grouped(findings)
+        self.assertIn("[] should be non-empty", printed)
+        for item in findings:
+            self.assertTrue(
+                "via alx ledger merge" in item.fix or "in ledger.json" in item.fix
+                or "claims/*.json" in item.fix,
+                item.fix,
+            )
+        self.assertEqual(
+            "set field coverage in coverage via alx ledger merge",
+            self._fix_for(ledger, "coverage"),
+        )
+        self.assertEqual(
+            "set field sources in ledger.json",
+            self._fix_for(ledger, "sources"),
+        )
+        self.assertEqual(
+            "set field brief.intended_reader in brief via alx ledger merge",
+            self._fix_for({"brief": {}}, "brief", "intended_reader"),
+        )
+
+    def test_missing_brief_required_field_points_at_ledger_merge(self):
+        ledger = living_harm_ledger()
+        ledger["brief"] = {
+            "decision_or_use": "use",
+            "archetype": "artifact",
+            "report_language": "en",
+            "editorial_mode": "analytical",
+            "scope": "now",
+        }
+        self.assertEqual(
+            "set field brief.intended_reader in brief via alx ledger merge",
+            self._fix_for(ledger, "brief"),
+        )
+        printed = validate_ledger.render_grouped(
+            self._schema_findings(ledger), verbose=True
+        )
+        self.assertIn("brief: 'intended_reader' is a required property", printed)
+        self.assertIn(
+            "set field brief.intended_reader in brief via alx ledger merge",
+            printed,
+        )
+
+    def test_hollow_implication_warns_with_merge_remedy(self):
+        ledger = living_harm_ledger()
+        ledger["synthesis"]["implications"] = [{}]
+        printed = validate_ledger.render_grouped(
+            self._schema_findings(ledger), verbose=True
+        )
+        self.assertIn("'statement' is a required property", printed)
+        self.assertIn(
+            "set field synthesis.implications.0.statement in synthesis via alx ledger merge",
+            printed,
+        )
+        self.assertEqual(
+            {"warn"},
+            {item.severity for item in self._schema_findings(ledger)},
         )
 
     def test_no_finding_names_a_field_its_message_did_not(self):
@@ -3602,3 +3758,82 @@ class R29SeverityTests(unittest.TestCase):
         )
         self.assertTrue(digits)
         self.assertTrue(all(error.startswith("WARNING:") for error in digits), digits)
+
+
+class ContentReviewFloorTests(unittest.TestCase):
+    """B7: content-review minLength 20 is the full floor; no Latin doubling."""
+
+    SCHEMA = json.loads(
+        (ROOT / "references" / "content-review.schema.json").read_text(encoding="utf-8")
+    )
+
+    def note(self, text):
+        return {
+            "section_reviews": [
+                {
+                    "section_heading": "Findings",
+                    "purpose": "Advance the report's governing question fully.",
+                    "new_value": "Adds distinct evidence and decision value.",
+                    "evidence_or_reasoning": "Supported by the bound ledger.",
+                    "limitation_or_tradeoff": text,
+                    "contribution_to_governing_question": "Moves to the judgment.",
+                    "disposition": "keep",
+                }
+            ]
+        }
+
+    def test_latin_fourteen_fails_schema_at_twenty_not_forty(self):
+        errors = [
+            error
+            for error in validate_ledger.validate_schema(self.note("Thin, unusable"), self.SCHEMA)
+            if "limitation_or_tradeoff" in error
+        ]
+        self.assertTrue(errors, errors)
+        self.assertTrue(any("too short" in error for error in errors), errors)
+        floor = [
+            error
+            for error in validate_ledger.prose_floor_errors(self.note("Thin, unusable"), self.SCHEMA)
+            if "limitation_or_tradeoff" in error
+        ]
+        self.assertTrue(any("threshold 20, actual 14" in error for error in floor), floor)
+        self.assertFalse(any("threshold 40" in error for error in floor), floor)
+
+    def test_cjk_twenty_passes_and_is_not_doubled(self):
+        text = "监管机构在其案卷中公布了签署的执法记录。"
+        self.assertGreaterEqual(len(text), 20)
+        self.assertEqual(
+            [],
+            [
+                error
+                for error in validate_ledger.validate_schema(self.note(text), self.SCHEMA)
+                if "limitation_or_tradeoff" in error
+            ],
+        )
+        self.assertEqual(
+            [],
+            [
+                error
+                for error in validate_ledger.prose_floor_errors(self.note(text), self.SCHEMA)
+                if "limitation_or_tradeoff" in error
+            ],
+        )
+
+    def test_latin_twenty_passes_schema_and_floor(self):
+        text = "Twenty chars Latin.."
+        self.assertEqual(20, len(text))
+        self.assertEqual(
+            [],
+            [
+                error
+                for error in validate_ledger.validate_schema(self.note(text), self.SCHEMA)
+                if "limitation_or_tradeoff" in error
+            ],
+        )
+        self.assertEqual(
+            [],
+            [
+                error
+                for error in validate_ledger.prose_floor_errors(self.note(text), self.SCHEMA)
+                if "limitation_or_tradeoff" in error
+            ],
+        )

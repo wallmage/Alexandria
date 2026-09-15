@@ -113,6 +113,9 @@ _NUMERIC_OR_LEGAL_CARRIER = re.compile(
 )
 _CJK_PROSE_MIN = 20
 _LATIN_PROSE_MIN = 40
+_CONTENT_REVIEW_SCHEMA_ID = (
+    "https://github.com/wallmage/Alexandria/references/content-review.schema.json"
+)
 
 #: Days a time-sensitive record may lag the report date before it is stale.
 FRESHNESS_WINDOW_DAYS = 30
@@ -2669,6 +2672,17 @@ def _reference_findings(data, cache_dir=None):
                     f"{claim_id}: an estimate must record its assumptions; "
                     "state the inputs and the arithmetic that produced it."
                 )
+        if claim.get("kind") == "analysis" and not _text(claim.get("reasoning")):
+            errors.append(
+                _f(
+                    "ledger/reference",
+                    f"{claim_id}: an analysis must record its reasoning; "
+                    "state the inference that produced it.",
+                    severity="warn",
+                    ids=[claim_id],
+                    fix=_claim_input_remedy("reasoning"),
+                )
+            )
         if claim.get("time_sensitive") is True:
             if claim_day is None:
                 errors.append(
@@ -3390,7 +3404,14 @@ def prose_floor_errors(data, schema):
     except ModuleNotFoundError:
         return []
 
-    validator = Draft202012Validator(_halved_minimums(schema))
+    # B7: content-review minLength is the full floor for every script; no
+    # J3 doubling (Latin would become 40). CJK still skips below.
+    floor_schema = (
+        schema
+        if schema.get("$id") == _CONTENT_REVIEW_SCHEMA_ID
+        else _halved_minimums(schema)
+    )
+    validator = Draft202012Validator(floor_schema)
     errors = []
     for error in sorted(validator.iter_errors(data), key=lambda item: list(item.path)):
         if error.validator != "minLength" or not isinstance(error.instance, str):

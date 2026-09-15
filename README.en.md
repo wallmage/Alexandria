@@ -6,11 +6,11 @@ Alexandria takes its name from the Library of Alexandria and its ambition to gat
 
 Ancient history, modern technology, a person's life, a school of philosophy: each calls for different questions. Alexandria selects a research framework and runs successive rounds of searches. The material has to survive scrutiny before it earns a place in the report. Researchers look for evidence that could overturn their conclusions as well as evidence that supports them. Ten websites repeating one article count as one source. Official claims are distinguished from independent findings; unresolved disagreements stay visible, along with their implications.
 
-Before drafting, the team organizes the evidence and works through the reasoning, and important citations receive priority in a final spot-check against the original pages. The finished report explains mechanisms, causes, and trade-offs, gives serious objections their due, and includes citations you can follow to check the argument yourself. You receive a typeset PDF and an editable Markdown manuscript, with a design chosen to suit the subject.
+Before drafting, the team organizes the evidence and works through the reasoning, and important citations receive priority in a final spot-check against the original pages. Rewild edits the prose, followed by an eight-dimension content review. The finished report explains mechanisms, causes, and trade-offs, gives serious objections their due, and includes citations you can follow to check the argument yourself. You receive a typeset PDF and an editable Markdown manuscript, with a design chosen to suit the subject.
 
 [简体中文](README.md) · [English](README.en.md) · [繁體中文（香港）](README.zh-HK.md)
 
-Alexandria can research anything: there are no fixed subject limits. Delivery uses `alx`: init → fetch → find/claims → draft → check --fix → render. You receive a professionally produced PDF with citations beside the claims.
+Alexandria can research anything: there are no fixed subject limits. Delivery uses `alx` (init, fetch, claim add, check, snapshot, review, issue, render) on a 60-minute budget. When remaining time is 15 minutes or less, run `alx issue` then `alx render`. You receive a professionally produced PDF with citations beside the claims.
 
 ## A framework for any subject
 
@@ -100,6 +100,18 @@ These choices shape the whole report. In history, the circumstances of the perio
 
 Chinese and English have their own editing rules. Simplified Chinese uses natural Chinese phrasing; Hong Kong Traditional Chinese follows local vocabulary and written usage. English editing attends to diction, sentence rhythm, and the connections in an argument. Figures, quotations, and necessary qualifications must remain faithful to the evidence in every mode.
 
+## Two editorial reviews after the draft
+
+**Rewild handles the prose.** Built-in rules for English, Simplified Chinese, and Hong Kong Traditional Chinese catch empty language, mechanical transitions, repeated sentence patterns, forced parallelism, and formulaic paragraph endings. The edit cuts unnecessary sentences and rewrites awkward passages while retaining the professional register of a research report.
+
+The edited text is then compared with the draft. The editor checks figures, quotations, citations, qualifications, and causal relationships for changes in meaning. A "may" must not become a "will".
+
+**The content review checks the finished argument.** It scores eight dimensions: how well the report answers the question, evidence strength, evidence coverage, completeness of reasoning, treatment of counterevidence, explanatory depth, practical value, and clarity. Every dimension must reach 4/5; substantive problems send the report back for revision.
+
+The review also examines the structure of the long-form piece. Do sections repeat the same paragraph pattern? Have minor questions received as much space as major ones? Does each section leave the reader understanding something they did not understand before?
+
+Automated checks apply only to the version checked. Later changes to the text require another check. When automated tools are unavailable, the agent carries out the corresponding verification and review manually.
+
 ## A finished report you can read, check, and reuse
 
 Alexandria includes **11 visual templates** for business reports, history and the humanities, technology, ecology, and other subjects. By default, you receive two PDFs with identical content: one in Executive and another in a style selected for the subject. You can also request a particular template.
@@ -117,7 +129,7 @@ You receive:
 
 A complete research assignment follows this sequence:
 
-**Define the questions → Assign the searches → Assess the sources → Cross-check and seek contrary evidence → Consolidate the findings → Draft the report → Produce and visually check the PDFs**
+**Define the questions → Assign the searches → Assess the sources → Cross-check and seek contrary evidence → Consolidate the findings → Draft the report → Edit with Rewild → Review the content → Produce and visually check the PDFs**
 
 Some steps need another pass. Conflicting sources can send researchers back to the original records. An argument that looks under-supported in the draft calls for more research. An edit that affects a conclusion requires another evidence check.
 

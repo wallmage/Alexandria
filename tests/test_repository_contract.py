@@ -33,7 +33,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("ordinary web searches", description)
         self.assertIn("normal chat answers", description)
 
-    def test_every_archetype_keeps_writing_scaffold(self):
+    def test_every_archetype_requires_explicit_coverage_mapping(self):
         for name in (
             "artifact.md",
             "concept.md",
@@ -43,16 +43,15 @@ class RepositoryContractTests(unittest.TestCase):
             "system.md",
         ):
             text = (ROOT / "references" / name).read_text(encoding="utf-8")
-            self.assertIn("## When to Use", text, name)
-            self.assertIn("## Evidence scaffold", text, name)
-            self.assertIn("Best evidence", text, name)
-            self.assertNotIn("## Coverage ledger mapping", text, name)
+            self.assertIn("## Coverage ledger mapping", text, name)
+            self.assertIn("status: gap", text, name)
 
     def test_skill_references_existing_local_files(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         local_paths = set(
             re.findall(r"`((?:references|scripts)/[^` ]+\.(?:md|json|py))`", skill)
         )
+        self.assertTrue(local_paths)
         missing = [path for path in sorted(local_paths) if not (ROOT / path).is_file()]
         self.assertEqual([], missing)
 
@@ -88,13 +87,24 @@ class RepositoryContractTests(unittest.TestCase):
             "`alx` drops anything that fails its verbatim check and says so",
             skill,
         )
-        self.assertIn("At remaining ≤ 15 min stop fixing: run step 6 with what you have.", skill)
+        self.assertIn("without touching quoted text", skill)
+        self.assertIn(
+            "At remaining ≤ 15 min stop fixing: run step 6 with what you have.",
+            skill,
+        )
+        self.assertNotIn("alx issue --deliver", skill)
 
     def test_pdf_commands_resolve_bundled_paths_from_skill_root(self):
         production = (ROOT / "references" / "pdf-production.md").read_text(
             encoding="utf-8"
         )
-        for script in ("alx.py", "render_pdf_pages.py", "pdf_quality.py"):
+        for script in (
+            "content_gate.py",
+            "md_to_pdf.py",
+            "validate_ledger.py",
+            "validate_report.py",
+            "render_pdf_pages.py",
+        ):
             self.assertIn(f'$SKILL_ROOT/scripts/{script}', production)
         self.assertNotIn("python3 scripts/", production)
 
@@ -127,7 +137,9 @@ class RepositoryContractTests(unittest.TestCase):
             "zh-HK": ROOT / "references" / "rewild" / "rewild-hk",
         }
 
+        self.assertIn("`references/rewild/rewild/SKILL.md`", skill)
         self.assertIn("scripts/alx.py", skill)
+        self.assertIn("snapshot", skill)
         self.assertNotIn(
             "If the user explicitly asks to remove AI-like writing", skill
         )
@@ -177,7 +189,9 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertTrue(quality.is_file())
         self.assertTrue(schema_path.is_file())
+        self.assertIn("fails its verbatim check", skill)
         self.assertIn("scripts/alx.py", skill)
+        self.assertIn("alx review start content", quality.read_text(encoding="utf-8"))
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
         self.assertIn("tests/ci_render_matrix.py", workflow)
@@ -252,6 +266,7 @@ class RepositoryContractTests(unittest.TestCase):
         protocol = (ROOT / "references" / "research-protocol.md").read_text(
             encoding="utf-8"
         )
+        rewild = (ROOT / "references" / "rewild-gate.md").read_text(encoding="utf-8")
         quality = (ROOT / "references" / "content-quality.md").read_text(
             encoding="utf-8"
         )
@@ -260,10 +275,35 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("CJK minimum 20", protocol)
         self.assertIn("weighted-source-evidence-v2", protocol)
         self.assertNotIn("--allow-unverified", protocol)
-        self.assertFalse((ROOT / "references" / "rewild-gate.md").is_file())
-        self.assertIn("Write the reader contract", quality)
-        self.assertNotIn("alx snapshot", quality)
-        self.assertNotIn("alx review start content", quality)
+        self.assertIn("alx snapshot", rewild)
+        self.assertIn("alx review start rewild", rewild)
+        self.assertIn("alx review start content", quality)
+        self.assertIn("alx issue", quality)
+        self.assertNotIn("alx issue --deliver", quality)
+        self.assertNotIn(
+            "Reuse the locally generated `.runtime.json`",
+            (ROOT / "references" / "pdf-production.md").read_text(encoding="utf-8"),
+        )
+        person = (ROOT / "references" / "person.md").read_text(encoding="utf-8")
+        for token in (
+            "person_claim_role",
+            "person_claim_assessment",
+            "human_harm_review",
+            "--subject-status",
+            "living_status",
+        ):
+            self.assertNotIn(token, person)
+        for name in (
+            "README.md",
+            "README.en.md",
+            "README.zh-CN.md",
+            "README.zh-HK.md",
+        ):
+            self.assertNotIn(
+                "alx issue --deliver",
+                (ROOT / name).read_text(encoding="utf-8"),
+                name,
+            )
 
 
 if __name__ == "__main__":

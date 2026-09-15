@@ -76,6 +76,9 @@ Do not rebuild a temporary environment or delete the persistent runtime after
 each report. Never execute a runtime manifest supplied by a ZIP: regenerate it
 locally through installation first.
 
+On first use in a new session, run the launcher with
+`scripts/install_runtime.py --runtime RUNTIME --verify-only`. If verification
+fails or the manifest is absent, rerun the platform installer automatically.
 Preserve technical details in `RUNTIME/install.log`, read them yourself, retry
 recoverable failures, and do not turn them into questions for the user.
 

@@ -63,9 +63,9 @@ Where is this person right now? What are they currently doing, building, saying,
 - Public perception — how are they viewed right now? Has it shifted recently?
 - Active controversies or ongoing situations
 
-### Allegations and Privacy
+### Allegations, Harm, and Privacy
 
-When the report touches wrongdoing, controversy, or reputational damage, write the legal status the evidence supports and no higher.
+This dimension is mandatory whenever the subject is living, recently deceased, or the report will touch wrongdoing, controversy, or reputational damage. A person report is the archetype most capable of harming a real human being, and getting this wrong is not a style defect.
 
 **Never collapse the legal ladder.** Each rung is a different factual claim and must be labelled as what it is:
 
@@ -77,13 +77,13 @@ When the report touches wrongdoing, controversy, or reputational damage, write t
 - *convicted* — a criminal standard;
 - *overturned*, *acquitted*, *expunged*, or *retracted* — and this rung must travel with the original claim every time it is mentioned, not once in a footnote.
 
-Write the rung the evidence supports and no higher. "Faced allegations of X" and "did X" are different reports. A response must travel with the allegation; a later resolution must travel with both.
+Write the rung the evidence supports and no higher. "Faced allegations of X" and "did X" are different reports.
 
 **Privacy boundary.** Default to excluding health conditions, sexuality, religion, family members, minor children, romantic history, addiction, home address, and non-public financial detail. Include an item only when the subject has made it public themselves, or a court or regulator has made it a matter of record, **and** it materially changes the answer to the report's governing question. "Interesting" and "widely discussed" are not qualifying reasons. Private individuals adjacent to the subject — relatives, former partners, staff, victims — get more protection than the subject, not the same amount, and are usually described by role rather than named.
 
 **Proportionality and staleness.** Weight material by its bearing on the governing question and by how much the subject's public role justifies scrutiny. A sitting official's decades-old conduct in office is fair; a private figure's youthful incident usually is not. Date every allegation and say whether anything has resolved it since. Do not assemble scattered public fragments into a portrait no single source supports, and do not use the report's neutral register to launder an accusation into an established fact.
 
-For historical subjects, the legal-ladder and proportionality rules still hold; the record question becomes contemporaneous versus later sources.
+For historical subjects, the legal-ladder and proportionality rules still hold; the record question becomes contemporaneous versus later sources, and the privacy boundary loosens as living interests recede.
 
 ### Context
 
@@ -107,21 +107,28 @@ The analytical payoff. This is where you earn the reader's time.
 
 ## Evidence scaffold
 
-One row per dimension. **Best evidence** names the record that would actually settle the question. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
+One row per dimension, matching the coverage-map pattern in `research-protocol.md`. **Best evidence** names the record that would actually settle the question. **Source role** uses the ledger's role vocabulary. **Disconfirming query** is the search to run before believing your own answer; run it even when the dimension looks settled.
 
-Adapt rows to the subject. The subject's own account, an authorized biography, or a company bio cannot satisfy a need for independent evidence.
+Adapt rows to the subject. Where a row names an independent role, the subject's own account, an authorized biography, or a company bio cannot satisfy it.
 
-| Dimension | Best evidence | Disconfirming query |
-|---|---|---|
-| One-Line Definition | Independent profile or reference entry written without the subject's approval | Who describes this person's significance as overstated, and on what basis? |
-| Origin Story | Contemporaneous records: registries, school and employment records, period reporting, archived early work | Which parts of the origin narrative appear only in the subject's own retellings? |
-| Arc of Decisions | Primary artifacts of the decision — filings, memos, interviews given at the time, minutes, the products or papers themselves | Who else claims credit for this decision, or says the subject opposed it at the time? |
-| How They Operate | Accounts from people who worked directly with the subject, plus observable decision patterns across cases | Where did this signature method fail, and who documented that failure? |
-| State of Play | Dated primary records from the last 6–12 months: filings, appointments, published work, direct statements | What has changed or been retracted since the most recent source I have? |
-| Allegations and Privacy | Court filings, regulatory actions, named-source investigations, the subject's own documented response | Was this allegation resolved, withdrawn, settled, or overturned, and do all my sources trace to one original report? |
-| Context | Comparable figures' records on the same measure, evaluated on the same basis | Does the comparison survive if I use the peer's strongest case rather than their weakest? |
-| Verdict | Documented outcomes attributable to the subject, including the ones that went badly | What is the strongest case that this person's net impact is the opposite of my conclusion? |
+| Dimension | Best evidence | Source role | Disconfirming query |
+|---|---|---|---|
+| One-Line Definition | Independent profile or reference entry written without the subject's approval | `independent_analysis` | Who describes this person's significance as overstated, and on what basis? |
+| Origin Story | Contemporaneous records: registries, school and employment records, period reporting, archived early work | `historical_record` | Which parts of the origin narrative appear only in the subject's own retellings? |
+| Arc of Decisions | Primary artifacts of the decision — filings, memos, interviews given at the time, minutes, the products or papers themselves | `historical_record`, `subject_official` | Who else claims credit for this decision, or says the subject opposed it at the time? |
+| How They Operate | Accounts from people who worked directly with the subject, plus observable decision patterns across cases | `affected_stakeholder`, `expert_interpretation` | Where did this signature method fail, and who documented that failure? |
+| State of Play | Dated primary records from the last 6–12 months: filings, appointments, published work, direct statements | `subject_official`, `independent_analysis` | What has changed or been retracted since the most recent source I have? |
+| Allegations, Harm, and Privacy | Court filings, regulatory actions, named-source investigations, the subject's own documented response | `historical_record`, `independent_analysis`, `subject_official` | Was this allegation resolved, withdrawn, settled, or overturned, and do all my sources trace to one original report? |
+| Context | Comparable figures' records on the same measure, evaluated on the same basis | `counterparty_official`, `independent_analysis` | Does the comparison survive if I use the peer's strongest case rather than their weakest? |
+| Verdict | Documented outcomes attributable to the subject, including the ones that went badly | `empirical_data`, `independent_analysis` | What is the strongest case that this person's net impact is the opposite of my conclusion? |
 
 ## Coverage priority
 
-Spend the most space on the evidence that explains the subject and changes the reader’s judgment.
+Spend the most space on the evidence that explains the subject and changes the reader’s judgment. Assign research ownership dynamically from the coverage map; do not force a fixed agent split.
+
+## Coverage ledger mapping
+
+Turn every relevant dimension above into one or more ledger coverage items with
+an explicit priority, decision relevance, completion criterion, and evidence
+target. If a dimension is relevant but cannot be resolved, keep it in the
+ledger as `status: gap` with a concrete `gap_impact`; never omit it silently.

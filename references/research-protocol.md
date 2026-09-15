@@ -1,8 +1,8 @@
 # Research protocol
 
-## Question map
+## Coverage map
 
-Start from the reader contract. Turn each relevant dimension into a concrete question, priority, decision relevance, owner, evidence target, and completion criterion. Skip irrelevant dimensions. Add cross-cutting questions for incentives, alternatives, risks, and what would change the conclusion.
+Start from the selected archetype and reader contract. Turn each relevant dimension into a concrete question, priority, decision relevance, owner, evidence target, and completion criterion. Skip irrelevant dimensions. Add cross-cutting questions for incentives, alternatives, risks, and what would change the conclusion.
 
 Example:
 
@@ -28,13 +28,13 @@ Use several query families:
 
 Use the current runtime date. Search in the source language when it improves recall.
 
-For every provisional judgment, write the strongest rival explanation and the evidence that would distinguish between them. Search for that evidence before confirming the judgment.
+For every provisional key judgment, write the strongest rival explanation and the evidence that would distinguish between them. Search for that evidence before confirming the judgment.
 
 ## Source evaluation
 
 Judge sources on two separate axes.
 
-### Independence
+### Provenance and independence
 
 - primary and independent;
 - primary but interested or promotional;
@@ -45,7 +45,7 @@ Judge sources on two separate axes.
 ### Evidentiary status
 
 - audited or legally accountable record;
-- peer-reviewed study;
+- peer-reviewed synthesis or study;
 - preprint or working paper;
 - official documentation or direct observation;
 - independent test or dataset;
@@ -54,12 +54,27 @@ Judge sources on two separate axes.
 
 The right source depends on the claim. A filing may establish reported revenue, not product quality. A company announcement may establish its stated plan, not the plan's feasibility. A preprint can be useful but must remain a preprint in the report.
 
-Several pages from one publisher, syndicated stories, and studies built on the same underlying dataset do not create independent confirmation. Two pages on one host — one marketing, one framed as independent — still count as one voice.
+Assign each source a family and one or more roles. Several pages from one publisher, syndicated stories, and studies built on the same underlying dataset do not create independent triangulation.
 
-A central judgment holds as independently confirmed only when at least two genuinely separate source families converge and at least one foundation is independent of the subject. Confirmation counts a claim's direct sources plus at most one declared level of `supports`; a claim may not inherit a foundation through a chain.
+`source_family` defaults to the source URL's registrable domain, or that
+domain's leading label. Any other family name needs a
+`family_justification` of at least 40 characters (CJK minimum 20) saying why this source is
+genuinely independent of the others that share its domain. A declared family
+can only ever be coarser than the evidence: the validator merges sources that
+share a registrable domain or a publisher whatever they are called, and merges
+sources that declare the same family across domains. Two pages on one host may
+not carry different independence classes — one marketing, one "independent" —
+without that same justification. This is what stops `acme.example.com/pricing`
+and `acme.example.com/blog` from triangulating each other.
 
-A set of sources with no independent item cannot support the governing
-judgment. Record the affected question as a gap; do not redefine the search
+A key judgment may declare triangulation `met` only when at least two of those
+merged families converge and at least one foundation is independent of the
+subject. Triangulation counts a claim's direct sources plus at most one
+declared level of `supports`; a claim may not inherit a foundation through a
+chain.
+
+An evidence portfolio with no independent source cannot support the governing
+judgment. Record the affected coverage as a gap; do not redefine the search
 scope so that interested sources appear sufficient.
 
 ### Support links point downward
@@ -67,14 +82,14 @@ scope so that interested sources appear sufficient.
 `supports` is strictly downward. Listing B in A's `supports` means B is part of
 the evidence for A, never the reverse. Mutual pairs and longer cycles are
 rejected outright: a cycle collapses the source graph and lets a thinly
-sourced claim inherit the whole set.
+sourced claim inherit the whole portfolio.
 
-### Central judgments need a source outside the subject
+### Key judgments need a source outside the subject
 
-There is no source minimum. But a central judgment whose every direct source is
-only the subject's own account is a claim the subject wrote about itself,
-and no count of such pages changes that. A central judgment needs at least one
-foundation source of another kind: independent analysis, empirical data, an
+There is no source minimum. But a key claim whose every direct source carries
+only the `subject_official` role is a claim the subject wrote about itself,
+and no count of such pages changes that. A key claim needs at least one
+foundation source in another role: independent analysis, empirical data, an
 affected stakeholder, expert interpretation, or a historical record. When none
 exists, that is the finding — record the area as a gap and say so.
 
@@ -95,18 +110,18 @@ When reliable sources disagree:
 
 1. check dates, definitions, samples, and incentives;
 2. look for a primary record or correction;
-3. preserve the disagreement;
+3. preserve the disagreement in the ledger;
 4. explain which account is stronger and why;
 5. lower confidence when the conflict cannot be resolved.
 
 Never average incompatible estimates without a defensible method.
 
-Make contradiction links reciprocal. A disputed claim records the disagreement, the resolution or unresolved uncertainty, and the effect on the conclusion.
+Make contradiction links reciprocal in the ledger. A disputed claim records the disagreement, the resolution or remaining uncertainty, and the effect on the conclusion.
 
 ### Evidence of absence
 
 Claims that no equivalent, correction, benchmark, policy, or record was found
-need their own record. Fill `evidence_of_absence.queries`,
+need their own ledger entry. Fill `evidence_of_absence.queries`,
 `expected_locations`, and `searched_at` with the searches run, the repositories
 or authorities checked, and where the evidence would normally appear. Phrase
 the report as a bounded search result, not proof that the thing cannot exist.
@@ -114,7 +129,8 @@ the report as a bounded search result, not proof that the thing cannot exist.
 The validator reads the `claim` text for negative existence — "no published
 source measures it", "none was located", "no public equivalent appears to
 exist", "we found no third-party audit" — and requires the record whenever it
-finds one. Absence decays faster than presence: a search from last year says nothing about today.
+finds one. Absence decays faster than presence, so `searched_at` must fall
+inside the freshness window: a search from last year says nothing about today.
 
 ### Claim text may not outrun per-source evidence
 
@@ -149,12 +165,12 @@ arithmetic is not obvious from the extracts.
 `as_of` is the date the claim was true. `verified_at` is the date its extract
 was last re-read against the live source. They are different facts, and moving
 `as_of` forward at delivery is not verification. A time-sensitive claim
-requires a current `verified_at`, and `verified_at` may not
+requires `verified_at` inside the freshness window, and `verified_at` may not
 be later than the most recent access date among the claim's own sources.
 
 ### Re-reading the source
 
-`alx issue` re-fetches a weighted sample under policy
+`alx issue` (step 2) re-fetches a weighted sample under policy
 `weighted-source-evidence-v2`: top-N by weight; unreachable/undecodable pairs
 are substituted by the next candidate for the same claim; issue when 0
 mismatches and unverified ≤ 25%. Central-judgment pairs still unverified set
@@ -163,7 +179,7 @@ Offline `alx check` probes the cache; missing
 cache is `cache-missing`. Production writes `receipts/source-fidelity.json`;
 `alx render` verifies hashes without fetching again. v1 receipts remain valid.
 
-### Current facts
+### Freshness records
 
 Mark claims whose truth can change during the report cycle as
 `time_sensitive: true`. They require a current `as_of` date and a current
@@ -171,12 +187,13 @@ Mark claims whose truth can change during the report cycle as
 the report date as stale; use a shorter window when the subject moves faster.
 
 The evidence must be as current as the claim, not merely dated. Every
-foundation source of a time-sensitive claim must have been `accessed` recently,
-and must be either published recently or explain that the page is continuously
-updated — a pricing page updated in place, not "no date shown". A page last
-opened eight months ago supports nothing about today.
+foundation source of a time-sensitive claim must have been `accessed` inside
+the freshness window, and must be either published inside it or carry an
+`undated_reason` that says the page is continuously updated — "living pricing
+page updated in place", not "no date shown". A living page read eight months
+ago supports nothing about today.
 
-## Evidence before drafting
+## Evidence coverage gate
 
 Before drafting, classify each planned conclusion:
 
@@ -193,11 +210,11 @@ Remove or soften conclusions that outrun their evidence. A report may be inconcl
 Stop only when:
 
 - every high-priority area is supported, disputed, or an explicit gap;
-- central analysis has independent confirmation or carries a reduced-confidence limitation;
+- key analysis has met triangulation or carries a reduced-confidence limitation;
 - the strongest counterevidence and rival explanation have been tested;
 - the adversarial test and its effect on the conclusion are recorded;
 - current facts have been checked near the report date;
 - another search pass is repeating known evidence rather than changing the decision;
 - unresolved questions and their effect on the verdict are recorded.
 
-Record the stop reason. Length is never a stopping criterion.
+Record the stop reason in the ledger synthesis. Length is never a stopping criterion.

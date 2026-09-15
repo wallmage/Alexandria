@@ -9,9 +9,7 @@ Never rely on the current working directory. Pass paths as argument-array values
 ## Environment
 
 Read `INSTALL.md` and automatically run its platform installer if the runtime
-is absent or fails verification. Reuse the locally generated `.runtime.json`
-command prefix for every Python invocation below, including validation and page
-rendering. Do not create a new environment or install global packages per report.
+is absent or fails verification. Do not create a new environment or install global packages per report.
 
 ## Chinese fonts
 
@@ -38,10 +36,20 @@ On Debian/Ubuntu CI, install `fonts-noto-cjk`. A PDF that extracts the right Uni
 Read `references/pdf-templates.md` and resolve the intake values before rendering. The available systems are Executive, Spectrum, Atlas, Horizon, Maison, Blueprint, Terrain, Orbit, Sunbeam, Current, and Apricot. Set `REPORT_TEMPLATE` to the matching lowercase identifier; use `auto` only when deterministic topic adaptation is intended.
 
 ```bash
-"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" render
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_ledger.py" "$LEDGER_JSON"
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/source_fidelity.py" "$LEDGER_JSON" \
+  --online --receipt "$SOURCE_FIDELITY_RECEIPT"
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/content_gate.py" "$REPORT_MD" \
+  --ledger "$LEDGER_JSON" --review-note "$CONTENT_REVIEW_NOTE" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
+  --receipt "$CONTENT_RECEIPT"
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/md_to_pdf.py" \
+  "$REPORT_MD" "$REPORT_PDF" --lang "$REPORT_LANG" \
+  --template "$REPORT_TEMPLATE" --prepared-by "$PREPARED_BY" \
+  --ledger "$LEDGER_JSON" --rewild-receipt "$REWILD_RECEIPT" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
+  --content-receipt "$CONTENT_RECEIPT"
 ```
-
-`alx render` issues the report first, then writes both PDFs and their contact sheets. A standalone `md_to_pdf.py` call without an issue receipt needs `--manual-review`.
 
 The renderer writes PDF/A-3u. The file carries Unicode text maps, embedded
 fonts, an embedded sRGB output profile, tags, and PDF/A metadata. Raster images
@@ -65,15 +73,16 @@ running the gates, put every non-default identity value in the immediate H1
 metadata block as `> Client: Acme Research` or
 `> Prepared by: Alice Smith`; the renderer accepts only that exact typed value.
 The constant default preparer `Alexandria` needs no metadata line. Identity
-fields use a short person/organization grammar and reject sentences and unsafe
-punctuation.
+fields use a short person/organization grammar and reject sentences, unsafe
+punctuation, and harm language.
 
-Every custom cover or Markdown body image needs a report-relative path,
-exact SHA-256, `cover`/`body` usage, and a check of visible text and claims. The
-renderer rejects images whose pixels changed and assets unused by the
+Every custom cover or Markdown body image must also have an `approved`
+`visual_assets` record in the content review with its report-relative path,
+exact SHA-256, `cover`/`body` usage, and visible text/claims assessment. The
+renderer rejects unreviewed images, changed pixels, and approvals unused by the
 actual sanitized HTML.
 
-When the user did not choose a template, render Executive first, then render the non-Executive result from `select_adaptive_companion()` in `scripts/pdf_templates.py` to a second filename. Both PDFs must use the same Markdown and evidence.
+When the user did not choose a template, render Executive first, then render the non-Executive result from `select_adaptive_companion()` in `scripts/pdf_templates.py` to a second filename. Both PDFs must use the same Markdown, evidence, Rewild receipt, and content receipt.
 
 The contents page includes only the report structure: section titles and page numbers. Truncated section teasers were removed - they read as filler and forced the contents onto a second, mostly empty sheet. Do not add document-control or engagement panels.
 
@@ -86,14 +95,24 @@ resolution floor.
 
 Reopen and cross-check the report and rendered PDF:
 
-`alx check` runs these checks; the standalone `validate_report.py` needs `--fast` when no receipts exist.
+```bash
+"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/validate_report.py" \
+  "$REPORT_MD" --ledger "$LEDGER_JSON" \
+  --rewild-receipt "$REWILD_RECEIPT" \
+  --source-fidelity-receipt "$SOURCE_FIDELITY_RECEIPT" \
+  --content-receipt "$CONTENT_RECEIPT" \
+  --pdf "$REPORT_PDF" \
+  --expected-lang "$REPORT_LANG" \
+  --min-sources 1 --min-sections 3 \
+  --min-pages 10 --min-text-chars 5000 --min-links 1
+```
 
 Set `REPORT_LANG` to `en`, `zh-CN`, or `zh-HK`. Also enforce `--min-words 7500 --max-words 15000` for English, or `--min-chars 5000 --max-chars 10000` for Simplified or Traditional Chinese.
 
 The PDF check also requires title and author metadata, the declared document
 language, tagged structure for assistive technology, navigation bookmarks,
 consistent A4 pages, selectable text, and clickable source links. Rendering
-revalidates the report, receipts, and local assets before writing the
+revalidates the report, receipts, and reviewed local assets before writing the
 PDF; validation then reopens the delivered file and checks its structure.
 
 ## Byte reproducibility
@@ -160,7 +179,7 @@ Poppler can display an embedded font that Preview cannot. Use
 `--backend pdfium` only for cross-renderer diagnosis. Outside macOS, `auto`
 uses PDFium; `--backend pdfkit` is rejected.
 
-For a compatibility check, install the external renderers and run:
+For a compatibility review, install the external renderers and run:
 
 ```bash
 "$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/pdf_compatibility.py" \
@@ -196,4 +215,4 @@ Delete only task-owned inspection directories after delivery; retain the managed
 
 ## Tooling fallback
 
-Follow the SKILL.md complete-delivery rule when automated checks are unavailable. Use `md_to_pdf.py INPUT OUTPUT --lang LANG --template TEMPLATE --manual-review`. This mode does not certify automated receipts. Reopen and inspect the resulting PDF and run available standalone PDF checks before delivery.
+Follow the SKILL.md complete-delivery rule when automated checks are unavailable. Use `md_to_pdf.py INPUT OUTPUT --manual-review --lang LANG --template TEMPLATE` after agent source, content, language, and image review. This mode does not certify automated receipts. Reopen and inspect the resulting PDF and run available standalone PDF checks before delivery.

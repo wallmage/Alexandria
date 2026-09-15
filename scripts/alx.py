@@ -353,7 +353,7 @@ ONLINE_CAP_MINUTES = 4
 EXCERPT_CHARS = 60
 MIN_EXTRACT_CHARS = 20
 MAX_WINDOW_CHARS = 300
-MAX_FINDING_CHARS = 300
+MAX_FINDING_CHARS = 800
 
 DEGRADE_INSTRUCTION = (
     "remaining <= 15 min: stop fixing, run `alx issue --deliver`, then `alx render`."
@@ -581,7 +581,6 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
         "ledger/status",
         "ledger/direction",
         "ledger/derived",
-        "ledger/date-granularity",
     }:
         return _quote_or_find(item, source_id, claim_id)
     if family == "ledger/triangulation":
@@ -737,7 +736,7 @@ def _strip_embedded_remedies(message):
 
 
 def _fit(message, ids, fix, remove):
-    """Item 6: the line stays under 300 chars; the remedy is never truncated."""
+    """Item 6: the line stays under 800 chars; the remedy is never truncated."""
     prefix = f"{', '.join(ids)}: " if ids else ""
     tail = ""
     if fix:
@@ -1364,6 +1363,27 @@ def cmd_init(args):
 # --------------------------------------------------------------------------
 
 
+#: `published` is a schema `date`, but a scraped page offers a timestamp or a
+#: localized form; anything that is not a date the ledger can carry is dropped.
+_PUBLISHED_ISO_RE = re.compile(r"^([0-9]{4}-[0-9]{2}-[0-9]{2})")
+_PUBLISHED_SLASH_RE = re.compile(r"^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})")
+_PUBLISHED_CJK_RE = re.compile(r"^([0-9]{4})\s*年\s*([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*日")
+
+
+def _normalized_published(value):
+    """Item A3: a published stamp is kept only as `YYYY-MM-DD`, else dropped."""
+    text = str(value or "").strip()
+    iso = _PUBLISHED_ISO_RE.match(text)
+    if iso:
+        return iso.group(1)
+    for pattern in (_PUBLISHED_SLASH_RE, _PUBLISHED_CJK_RE):
+        match = pattern.match(text)
+        if match:
+            year, month, day = match.groups()
+            return f"{year}-{int(month):02d}-{int(day):02d}"
+    return None
+
+
 def _upsert_source(ledger, source_id, result, args, aliases):
     domain = _registrable_domain(result.final_url) or ""
     existing = next(
@@ -1383,7 +1403,9 @@ def _upsert_source(ledger, source_id, result, args, aliases):
             "publisher": domain.split(".")[0].title() or domain,
             "accessed": date.today().isoformat(),
             "source_family": domain,
-            "published": result.published or source.get("published"),
+            "published": _normalized_published(
+                result.published or source.get("published")
+            ),
         }
     )
     source.setdefault("author", None)
@@ -1646,7 +1668,6 @@ CLAIM_ADD_FAMILIES = frozenset(
         "ledger/status",
         "ledger/direction",
         "ledger/derived",
-        "ledger/date-granularity",
         "ledger/person",
         "ledger/reference",
         "ledger/excluded-supports",
@@ -2048,7 +2069,9 @@ def cmd_claim_drop(args):
 
 
 #: Spec §6.5: `ledger merge` deep-merges only these keys.
-MERGEABLE_LEDGER_KEYS = frozenset({"brief", "people", "coverage", "synthesis"})
+MERGEABLE_LEDGER_KEYS = frozenset(
+    {"brief", "people", "coverage", "synthesis", "unresolved_questions"}
+)
 
 
 def _deep_merge(target, patch):
@@ -2071,7 +2094,7 @@ def cmd_ledger_merge(args):
             file=sys.stderr,
         )
         return 1
-    # Spec §6.5: only these four keys merge; anything else is ignored with a WARN.
+    # Spec §6.5: only these keys merge; anything else is ignored with a WARN.
     merged = [key for key in patch if key in MERGEABLE_LEDGER_KEYS]
     ignored = [key for key in patch if key not in MERGEABLE_LEDGER_KEYS]
     for key in merged:

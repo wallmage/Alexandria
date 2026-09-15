@@ -1872,9 +1872,9 @@ class CheckOutputTests(AlxTestCase):
         )
 
     # item 6 --------------------------------------------------------------
-    def test_no_finding_line_is_longer_than_300_characters(self):
+    def test_no_finding_line_is_longer_than_800_characters(self):
         rendered = self.rendered(
-            self.item(message="C1: quantity '1916' is uncovered. " + "窗" * 400)
+            self.item(message="C1: quantity '1916' is uncovered. " + "窗" * 900)
         )
         for line in self.finding_lines(rendered):
             self.assertLessEqual(len(line), alx.MAX_FINDING_CHARS, line)
@@ -2377,7 +2377,7 @@ class HonestRemedyTests(AlxTestCase):
         """Minor 2: the ids and the remedy may overrun; the message may not."""
         body = alx._fit(
             "m" * 500,
-            [f"C{number}" for number in range(1, 60)],
+            [f"C{number}" for number in range(1, 200)],
             "alx claim drop C1 --apply",
             "alx claim drop C1 --apply",
         )
@@ -4164,3 +4164,134 @@ class FlowFixTests(AlxTestCase):
         bare = alx.render_grouped(alx.adopt([item]))
         self.assertIn("extend the quote in claims/*.json", bare)
         self.assertNotIn("claims/<file>", bare)
+
+
+class LedgerSchemaCeremonyTests(AlxTestCase):
+    """09-15-01 A1/A2/A3: the schema carries evidence, not ceremony."""
+
+    PERSON_EXTRACT = (
+        "The reading room keeps 「原始日記」 under restricted access "
+        "for named researchers."
+    )
+
+    def ledger_schema(self):
+        return json.loads(
+            alx.validate_ledger.DEFAULT_SCHEMA.read_text(encoding="utf-8")
+        )
+
+    def merge(self, name, patch):
+        return self.run_in("ledger", "merge", self.write_json(name, patch))
+
+    # A1 -------------------------------------------------------------------
+    def test_a_claim_add_accepts_validates_against_the_ledger_schema(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        code, out = self.merge(
+            "people.json", {"people": [{"person_id": "P1", "name": "Rowan Ash"}]}
+        )
+        self.assertEqual(0, code, out)
+        batch = self.write_json(
+            "person_claim.json",
+            [
+                {
+                    "claim_id": "C7",
+                    "claim": (
+                        "Rowan Ash records that the reading room keeps "
+                        "「原始日記」 under restricted access for named researchers."
+                    ),
+                    "importance": "key",
+                    "supports": [],
+                    "source_evidence": [
+                        {
+                            "source_id": "S1",
+                            "extract_or_location": self.PERSON_EXTRACT,
+                        }
+                    ],
+                }
+            ],
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        claim = self.ledger()["claims"][-1]
+        self.assertEqual(["P1"], claim["person_ids"])
+        self.assertIsNone(claim["decision_relevance"])
+        self.assertEqual(
+            [],
+            alx.validate_ledger.validate_schema(
+                self.ledger(), self.ledger_schema()
+            ),
+        )
+
+    def test_a_free_form_brief_patch_merges_with_no_hard_finding(self):
+        self.bootstrap()
+        code, out = self.merge(
+            "brief.json",
+            {
+                "brief": {
+                    "goal": "Map the release against the registry tally.",
+                    "scope": "Public records for March 2026 only.",
+                    "deliverable": "One English report with a timeline.",
+                }
+            },
+        )
+        self.assertEqual(0, code, out)
+        self.assertNotIn("ledger/schema", out)
+        brief = self.ledger()["brief"]
+        self.assertEqual("Public records for March 2026 only.", brief["scope"])
+        self.assertEqual("One English report with a timeline.", brief["deliverable"])
+
+    def test_a_name_only_people_patch_merges_with_no_hard_finding(self):
+        self.bootstrap()
+        code, out = self.merge(
+            "people.json",
+            {
+                "people": [
+                    {"name": "Rowan Ash", "role": "subject", "note": "1887-1975"},
+                    {"name": "Wen Li", "role": "expert", "note": "archive historian"},
+                ]
+            },
+        )
+        self.assertEqual(0, code, out)
+        self.assertNotIn("ledger/schema", out)
+        self.assertEqual(
+            ["Rowan Ash", "Wen Li"],
+            [person["name"] for person in self.ledger()["people"]],
+        )
+
+    # A2 -------------------------------------------------------------------
+    def test_ledger_merge_carries_unresolved_questions(self):
+        self.bootstrap()
+        code, out = self.merge(
+            "questions.json",
+            {"unresolved_questions": ["Who audited the registry tally?"]},
+        )
+        self.assertEqual(0, code, out)
+        self.assertNotIn("ignored key(s)", out)
+        self.assertEqual(
+            ["Who audited the registry tally?"],
+            self.ledger()["unresolved_questions"],
+        )
+
+    # A3 -------------------------------------------------------------------
+    def test_fetch_normalizes_a_published_timestamp_to_a_date(self):
+        page = PAGE.replace(
+            '<meta property="article:published_time" content="2026-01-05">',
+            '<meta property="article:published_time" '
+            'content="2010-04-16 01:50:56">',
+        )
+        self.init()
+        code, out = self.fetch("https://example.org/study", page=page)
+        self.assertEqual(0, code, out)
+        self.assertEqual("2010-04-16", self.ledger()["sources"][0]["published"])
+        self.assertEqual(
+            [],
+            alx.validate_ledger.validate_schema(
+                self.ledger(), self.ledger_schema()
+            ),
+        )
+
+    def test_published_forms_alx_cannot_read_are_dropped(self):
+        self.assertEqual("2010-04-16", alx._normalized_published("2010/4/16"))
+        self.assertEqual("1948-11-24", alx._normalized_published("1948年11月24日"))
+        self.assertIsNone(alx._normalized_published("Spring 2010"))
+        self.assertIsNone(alx._normalized_published(None))

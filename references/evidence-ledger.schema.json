@@ -105,47 +105,11 @@
       }
     }
   },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "brief": {
-            "properties": {
-              "archetype": {"const": "person"}
-            },
-            "required": ["archetype"]
-          }
-        },
-        "required": ["brief"]
-      },
-      "then": {
-        "properties": {
-          "people": {
-            "minItems": 1,
-            "contains": {
-              "properties": {
-                "relationship": {"const": "primary_subject"}
-              },
-              "required": ["relationship"]
-            },
-            "minContains": 1
-          }
-        }
-      }
-    }
-  ],
   "$defs": {
     "brief": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "intended_reader",
-        "decision_or_use",
-        "archetype",
-        "report_language",
-        "editorial_mode",
-        "scope"
-      ],
+      "additionalProperties": true,
+      "required": [],
       "properties": {
         "intended_reader": {
           "type": "string",
@@ -180,89 +144,15 @@
           ]
         },
         "scope": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "time_horizon",
-            "geography",
-            "inclusions",
-            "exclusions"
-          ],
-          "properties": {
-            "time_horizon": {
-              "type": "string",
-              "minLength": 1
-            },
-            "geography": {
-              "type": "string",
-              "minLength": 1
-            },
-            "inclusions": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            },
-            "exclusions": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              },
-              "uniqueItems": true
-            }
-          }
+          "type": ["object", "string", "null"],
+          "additionalProperties": true
         }
       }
     },
     "coverageItem": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "claim_ids"
-      ],
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "enum": ["supported", "disputed"]
-              }
-            },
-            "required": ["status"]
-          },
-          "then": {
-            "properties": {
-              "claim_ids": {
-                "minItems": 1
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "gap"
-              }
-            },
-            "required": ["status"]
-          },
-          "then": {
-            "properties": {
-              "claim_ids": {
-                "maxItems": 0
-              },
-              "gap_impact": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        }
-      ],
+      "additionalProperties": true,
+      "required": [],
       "properties": {
         "area": {
           "type": "string",
@@ -428,15 +318,8 @@
     },
     "person": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "person_id",
-        "name",
-        "aliases",
-        "living_status",
-        "public_role",
-        "relationship"
-      ],
+      "additionalProperties": true,
+      "required": ["name"],
       "properties": {
         "person_id": {
           "type": "string",
@@ -455,13 +338,13 @@
           "uniqueItems": true
         },
         "living_status": {
-          "enum": ["living", "recently_deceased", "deceased", "unknown"]
+          "enum": ["living", "recently_deceased", "deceased", "unknown", null]
         },
         "public_role": {
-          "enum": ["public", "limited_public", "private"]
+          "enum": ["public", "limited_public", "private", null]
         },
         "relationship": {
-          "enum": ["primary_subject", "adjacent"]
+          "enum": ["primary_subject", "adjacent", null]
         }
       }
     },
@@ -544,146 +427,6 @@
         }
       }
     },
-    "rightOfReply": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["status", "response_claim_ids", "search_record"],
-      "properties": {
-        "status": {
-          "enum": [
-            "documented",
-            "declined",
-            "no_public_response",
-            "not_applicable"
-          ]
-        },
-        "response_claim_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^C[0-9]+$"
-          },
-          "uniqueItems": true
-        },
-        "search_record": {
-          "anyOf": [
-            {"$ref": "#/$defs/searchRecord"},
-            {"type": "null"}
-          ]
-        }
-      }
-    },
-    "humanHarmReview": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "category",
-        "legal_stage",
-        "source_floor",
-        "accountable_source_ids",
-        "attributed_to",
-        "sourcing_limitation_excerpt",
-        "event_period",
-        "resolution_status",
-        "resolution_claim_ids",
-        "resolution_search",
-        "right_of_reply",
-        "privacy_basis",
-        "privacy_basis_source_ids",
-        "governing_question_relevance"
-      ],
-      "properties": {
-        "category": {
-          "enum": [
-            "wrongdoing",
-            "misconduct",
-            "personal_failing",
-            "sensitive_private_fact"
-          ]
-        },
-        "legal_stage": {
-          "enum": [
-            "alleged",
-            "investigated",
-            "charged",
-            "indicted",
-            "settled_no_admission",
-            "settled_with_admission",
-            "found_liable",
-            "convicted",
-            "acquitted",
-            "overturned",
-            "expunged",
-            "retracted",
-            "nonlegal"
-          ]
-        },
-        "source_floor": {
-          "enum": ["met", "single_source_limited"]
-        },
-        "accountable_source_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^S[0-9]+$"
-          },
-          "uniqueItems": true
-        },
-        "attributed_to": {
-          "type": "string",
-          "minLength": 1
-        },
-        "sourcing_limitation_excerpt": {
-          "type": ["string", "null"]
-        },
-        "event_period": {
-          "type": "string",
-          "minLength": 1
-        },
-        "resolution_status": {
-          "enum": ["unresolved", "resolved", "not_applicable"]
-        },
-        "resolution_claim_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^C[0-9]+$"
-          },
-          "uniqueItems": true
-        },
-        "resolution_search": {
-          "anyOf": [
-            {"$ref": "#/$defs/searchRecord"},
-            {"type": "null"}
-          ]
-        },
-        "right_of_reply": {
-          "anyOf": [
-            {"$ref": "#/$defs/rightOfReply"},
-            {"type": "null"}
-          ]
-        },
-        "privacy_basis": {
-          "enum": [
-            "not_sensitive",
-            "self_disclosed",
-            "court_or_regulator_record"
-          ]
-        },
-        "privacy_basis_source_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^S[0-9]+$"
-          },
-          "uniqueItems": true
-        },
-        "governing_question_relevance": {
-          "type": "string",
-          "minLength": 20
-        }
-      }
-    },
     "triangulation": {
       "type": "object",
       "additionalProperties": false,
@@ -716,29 +459,8 @@
     },
     "claim": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "claim_id",
-        "claim",
-        "kind",
-        "importance",
-        "source_ids",
-        "as_of",
-        "confidence",
-        "status",
-        "include_in_report",
-        "report_excerpts",
-        "supports",
-        "contradicts",
-        "person_ids",
-        "human_harm_review",
-        "reasoning",
-        "decision_relevance",
-        "what_would_change",
-        "triangulation",
-        "resolution",
-        "limitations"
-      ],
+      "additionalProperties": true,
+      "required": ["claim_id", "claim"],
       "allOf": [
         {
           "if": {
@@ -756,190 +478,6 @@
               }
             },
             "required": ["source_evidence"]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "kind": {
-                "enum": ["fact", "reported_claim", "estimate"]
-              }
-            },
-            "required": ["kind"]
-          },
-          "then": {
-            "properties": {
-              "source_ids": {
-                "minItems": 1
-              },
-              "extract_or_location": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "required": ["extract_or_location"]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "estimate"
-              }
-            },
-            "required": ["kind"]
-          },
-          "then": {
-            "properties": {
-              "assumptions": {
-                "type": "array",
-                "minItems": 1
-              }
-            },
-            "required": ["assumptions"]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "analysis"
-              }
-            },
-            "required": ["kind"]
-          },
-          "then": {
-            "properties": {
-              "reasoning": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "anyOf": [
-              {
-                "properties": {
-                  "source_ids": {
-                    "minItems": 1
-                  }
-                }
-              },
-              {
-                "properties": {
-                  "supports": {
-                    "minItems": 1
-                  }
-                }
-              }
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "importance": {
-                "const": "key"
-              }
-            },
-            "required": ["importance"]
-          },
-          "then": {
-            "properties": {
-              "decision_relevance": {
-                "type": "string",
-                "minLength": 1
-              },
-              "what_would_change": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "disputed"
-              }
-            },
-            "required": ["status"]
-          },
-          "then": {
-            "properties": {
-              "contradicts": {
-                "minItems": 1
-              },
-              "resolution": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "person_ids": {
-                "minItems": 1
-              }
-            },
-            "required": ["person_ids"]
-          },
-          "then": {
-            "required": ["person_claim_role", "person_claim_assessment"]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "person_claim_role": {
-                "enum": ["harmful", "sensitive_private_fact"]
-              }
-            },
-            "required": ["person_claim_role"]
-          },
-          "then": {
-            "properties": {
-              "human_harm_review": {
-                "$ref": "#/$defs/humanHarmReview"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "person_claim_role": {
-                "const": "response"
-              }
-            },
-            "required": ["person_claim_role"]
-          },
-          "then": {
-            "required": ["responds_to_claim_ids"],
-            "properties": {
-              "responds_to_claim_ids": {
-                "minItems": 1
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "person_claim_role": {
-                "const": "resolution"
-              }
-            },
-            "required": ["person_claim_role"]
-          },
-          "then": {
-            "required": ["resolves_claim_ids"],
-            "properties": {
-              "resolves_claim_ids": {
-                "minItems": 1
-              }
-            }
           }
         }
       ],
@@ -1065,59 +603,6 @@
             "$ref": "#/$defs/namedSubject"
           }
         },
-        "person_claim_role": {
-          "description": "Required whenever person_ids is non-empty. Classifies the claim before vocabulary-based safety checks so harmful, private, response, and resolution claims cannot rely on a finite keyword list.",
-          "enum": [
-            "neutral",
-            "harmful",
-            "sensitive_private_fact",
-            "response",
-            "resolution"
-          ]
-        },
-        "person_claim_assessment": {
-          "description": "Human/agent semantic screening for every person-linked claim. It makes the role decision explicit instead of treating a finite keyword list as the classifier.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["classification", "rationale"],
-          "properties": {
-            "classification": {
-              "enum": [
-                "neutral",
-                "harmful",
-                "sensitive_private_fact",
-                "response",
-                "resolution"
-              ]
-            },
-            "rationale": {
-              "type": "string",
-              "minLength": 20
-            }
-          }
-        },
-        "responds_to_claim_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^C[0-9]+$"
-          },
-          "uniqueItems": true
-        },
-        "resolves_claim_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^C[0-9]+$"
-          },
-          "uniqueItems": true
-        },
-        "human_harm_review": {
-          "anyOf": [
-            {"$ref": "#/$defs/humanHarmReview"},
-            {"type": "null"}
-          ]
-        },
         "reasoning": {
           "type": ["string", "null"]
         },
@@ -1150,11 +635,11 @@
     },
     "implication": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["claim_ids"],
+      "additionalProperties": true,
+      "required": [],
       "properties": {
         "statement": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "claim_ids": {
@@ -1176,13 +661,11 @@
     },
     "takeaway": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "rationale_claim_ids"
-      ],
+      "additionalProperties": true,
+      "required": [],
       "properties": {
         "statement": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "rationale_claim_ids": {
@@ -1195,28 +678,26 @@
           "uniqueItems": true
         },
         "tradeoff": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "success_signal": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "failure_signal": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         }
       }
     },
     "scenario": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "claim_ids"
-      ],
+      "additionalProperties": true,
+      "required": [],
       "properties": {
         "name": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "conditions": {
@@ -1244,7 +725,7 @@
           }
         },
         "implication": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "claim_ids": {
@@ -1260,7 +741,7 @@
     },
     "synthesis": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "central_judgment_claim_ids": {
           "type": "array",
@@ -1303,7 +784,7 @@
           }
         },
         "limitations": {
-          "type": ["array", "string"],
+          "type": ["array", "string", "null"],
           "items": {
             "type": "string",
             "minLength": 1
@@ -1311,24 +792,22 @@
           "uniqueItems": true
         },
         "research_stop_reason": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         }
       }
     },
     "adversarialTest": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "claim_ids"
-      ],
+      "additionalProperties": true,
+      "required": [],
       "properties": {
         "hypothesis": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "test": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "claim_ids": {
@@ -1344,11 +823,11 @@
           "enum": ["supported", "rejected", "unresolved"]
         },
         "result": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         },
         "effect_on_conclusion": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         }
       }

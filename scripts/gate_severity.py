@@ -82,7 +82,10 @@ def render_grouped(findings, *, per_family=5, with_class=False):
     def emit(items):
         for family, members in group(items).items():
             lines.append(f"[{family}] {len(members)}{label(members)}")
-            shown = members[:per_family]
+            # Item 7: every schema line is distinct and names its own field, so
+            # `ledger/schema` is never capped; the other families still are.
+            cap = len(members) if family == "ledger/schema" else per_family
+            shown = members[:cap]
             for item in shown:
                 prefix = f"{', '.join(item.ids)}: " if item.ids else ""
                 tail = item.message.rstrip(".") + "."
@@ -91,7 +94,7 @@ def render_grouped(findings, *, per_family=5, with_class=False):
                 if getattr(item, "remove", ""):
                     tail += f" Remove: `{item.remove}`."
                 lines.append(f"  {prefix}{tail}")
-            extra = len(members) - per_family
+            extra = len(members) - cap
             if extra > 0:
                 lines.append(f"  +{extra} more")
 

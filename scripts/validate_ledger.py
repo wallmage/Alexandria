@@ -41,7 +41,6 @@ FAMILIES = frozenset(
         "ledger/synthesis",
         "ledger/source-family",
         "ledger/derived",
-        "ledger/date-granularity",
         "ledger/person",
         "ledger/excluded-supports",
         "ledger/undated-reason",
@@ -811,6 +810,11 @@ _MONTH_NAME_DATE_RE = re.compile(
 _SLASH_DATE_RE = re.compile(
     _NOT_WORD_BEFORE + r"([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})" + _NOT_WORD_AFTER
 )
+#: 1948.11.24 is a date, not a three-part version; normalizing it here keeps the
+#: version scan from claiming it.
+_DOT_DATE_RE = re.compile(
+    _NOT_WORD_BEFORE + r"([0-9]{4})\.([0-9]{1,2})\.([0-9]{1,2})" + _NOT_WORD_AFTER
+)
 #: 2026年7月28日 is one date, exactly as "28 July 2026" is. Left as bare digits it
 #: would assert three separate figures, so it is normalized like every other
 #: date form. A bare 2026年 stays a number, which is what "in 2026" already does.
@@ -866,6 +870,12 @@ def _normalize_dates(text):
         text,
     )
     text = _SLASH_DATE_RE.sub(
+        lambda match: (
+            f"{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
+        ),
+        text,
+    )
+    text = _DOT_DATE_RE.sub(
         lambda match: (
             f"{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
         ),
@@ -935,24 +945,6 @@ def _date_fragment_covered(claim_form, evidence_form):
     if cm and not em:
         return False
     return not (cd and not ed)
-
-
-def _quantity_granularity_only(claim_forms, evidence_forms):
-    if any(form in evidence_forms for form in claim_forms):
-        return False
-    dates = [form for form in claim_forms if form.startswith("d:")]
-    if not dates:
-        return False
-    for form in dates:
-        parts = _parse_date_form(form)
-        if not parts or parts[1] or parts[2]:
-            return False
-        if not any(
-            other.startswith("d:") and _date_fragment_covered(form, other) and other != form
-            for other in evidence_forms
-        ):
-            return False
-    return True
 
 
 #: R21: a 4-digit number is read as a year only inside this range.
@@ -1769,20 +1761,6 @@ def _evidence_coverage_findings(
         ]
         if matching_expressions:
             used_expressions.update(matching_expressions)
-            continue
-        if _quantity_granularity_only(claim_forms, evidence_forms):
-            errors.append(
-                _f(
-                    "ledger/date-granularity",
-                    f"{claim_id}: quantity '{display}' is a bare year; "
-                    f"extracts offer month granularity "
-                    f"(claim {', '.join(sorted(claim_forms))}; offered "
-                    f"{', '.join(sorted(evidence_forms))}).",
-                    severity="warn",
-                    ids=_ids_in(claim_id),
-                    fix="set field claim",
-                )
-            )
             continue
         if _quantity_is_covered(claim_forms, evidence_forms):
             continue
@@ -3146,7 +3124,6 @@ CLAIM_DEFAULTS = {
     "supports": [],
     "contradicts": [],
     "person_ids": [],
-    "human_harm_review": None,
     "reasoning": None,
     "decision_relevance": None,
     "what_would_change": None,

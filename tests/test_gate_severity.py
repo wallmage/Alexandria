@@ -80,6 +80,18 @@ class FindingRecordTests(unittest.TestCase):
         self.assertIn("=== STATUS:", rendered)
         self.assertNotIn("qty 5", rendered.split("+1 more")[0])
 
+    def test_every_ledger_schema_member_is_printed(self):
+        """A7: each schema line names a distinct field, so none is hidden."""
+        findings = [
+            self._finding(family="ledger/schema", ids=[], message=f"claims.{i}.kind")
+            for i in range(40)
+        ]
+        rendered = render_grouped(findings, per_family=5)
+        self.assertIn("[ledger/schema] 40", rendered)
+        self.assertNotIn("more", rendered)
+        for index in range(40):
+            self.assertIn(f"claims.{index}.kind.", rendered)
+
     def test_a_finding_without_a_fix_keeps_its_sentence_final_period(self):
         item = self._finding(fix="", remove="alx snapshot --restore")
         rendered = render_grouped([item])

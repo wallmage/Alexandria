@@ -1132,7 +1132,7 @@ class AccountabilityNoteFloorTests(unittest.TestCase):
 
 
 class EstimateTests(unittest.TestCase):
-    def test_estimate_requires_assumptions_in_the_ledger_and_the_schema(self):
+    def test_estimate_requires_assumptions_in_the_ledger(self):
         data = ledger_with_fact(
             kind="estimate",
             claim="A team of 12 engineers costs about 4800 per month.",
@@ -1142,28 +1142,6 @@ class EstimateTests(unittest.TestCase):
         self.assertTrue(
             any("an estimate must record its assumptions" in error for error in errors),
             errors,
-        )
-        schema = json.loads(
-            (ROOT / "references" / "evidence-ledger.schema.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        schema_errors = validate_ledger.validate_schema(
-            {"claims": [data["claims"][1]]},
-            {
-                "type": "object",
-                "properties": {
-                    "claims": {
-                        "type": "array",
-                        "items": schema["$defs"]["claim"],
-                    }
-                },
-                "$defs": schema["$defs"],
-            },
-        )
-        self.assertTrue(
-            any("assumptions" in error for error in schema_errors),
-            schema_errors,
         )
 
     def test_assumptions_carry_the_arithmetic_behind_an_estimate(self):
@@ -2523,7 +2501,6 @@ class ResilienceLedgerApiTests(unittest.TestCase):
     R28_WARN_FAMILIES = frozenset(
         {
             "ledger/coverage",
-            "ledger/date-granularity",
             "ledger/excluded-supports",
             "ledger/freshness",
             "ledger/host-conflict",
@@ -2616,20 +2593,6 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         unverified = valid_quality_ledger()
         unverified["sources"][1]["provenance"] = "unverified"
         findings.extend(validate_ledger.collect_findings(unverified))
-        year = {
-            "claim_id": "C80",
-            "kind": "fact",
-            "claim": "事件发生在1918年。",
-            "extract_or_location": "档案记于1918年1月。",
-            "source_evidence": [
-                {"source_id": "S16", "extract_or_location": "档案记于1918年1月。"}
-            ],
-        }
-        findings.extend(
-            item
-            for item in validate_ledger.collect_findings(ledger_with_fact(**year))
-            if item.family == "ledger/date-granularity"
-        )
         findings.extend(
             validate_ledger.claim_findings(
                 {
@@ -2748,18 +2711,19 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             },
         )
 
-    def test_bare_year_versus_year_month_is_a_granularity_warning(self):
-        errors = validate_ledger.evidence_coverage_errors(
-            {
-                "claim_id": "C80",
-                "kind": "fact",
-                "claim": "事件发生在1918年。",
-                "extract_or_location": "档案记于1918年1月。",
-            }
+    def test_bare_year_is_covered_by_any_date_of_that_year(self):
+        """A5: the date-granularity family is gone; the year is simply covered."""
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C80",
+                    "kind": "fact",
+                    "claim": "事件发生在1918年。",
+                    "extract_or_location": "档案记于1918年1月。",
+                }
+            ),
         )
-        self.assertTrue(errors, errors)
-        self.assertTrue(all(item.startswith("WARNING:") for item in errors), errors)
-        self.assertTrue(any("1918" in item for item in errors), errors)
         findings = validate_ledger.collect_findings(
             ledger_with_fact(
                 claim_id="C80",
@@ -2770,9 +2734,23 @@ class ResilienceLedgerApiTests(unittest.TestCase):
                 ],
             )
         )
-        grains = [item for item in findings if item.family == "ledger/date-granularity"]
-        self.assertTrue(grains, findings)
-        self.assertEqual("warn", grains[0].severity)
+        self.assertEqual(
+            [], [item for item in findings if item.family == "ledger/quantity"]
+        )
+
+    def test_a_dotted_date_in_an_extract_is_a_date_not_a_version(self):
+        """A4: 1948.11.24 covers the claim's 1948年11月24日."""
+        self.assertEqual(
+            [],
+            validate_ledger.evidence_coverage_errors(
+                {
+                    "claim_id": "C81",
+                    "kind": "fact",
+                    "claim": "日记记于1948年11月24日。",
+                    "extract_or_location": "档案编号 1948.11.24 的日记条目。",
+                }
+            ),
+        )
 
     def test_quantity_remedy_never_names_extracts_as_a_source(self):
         errors = validate_ledger.evidence_coverage_errors(
@@ -3285,8 +3263,8 @@ class SchemaRemedyTests(unittest.TestCase):
 
     def test_short_claim_rationale_points_at_that_claim_path(self):
         ledger = living_harm_ledger()
-        ledger["claims"][-1]["person_claim_assessment"]["rationale"] = "本主張需複核"
-        path = "claims.1.person_claim_assessment.rationale"
+        ledger["claims"][-1]["triangulation"]["rationale"] = ""
+        path = "claims.1.triangulation.rationale"
         fix = self._fix_for(ledger, path)
         self.assertEqual(
             f"set field {path} in claims/*.json, then alx claim add claims/*.json",
@@ -3304,15 +3282,15 @@ class SchemaRemedyTests(unittest.TestCase):
 
     def test_mergeable_section_path_points_at_ledger_merge(self):
         ledger = living_harm_ledger()
-        ledger["people"][0].pop("living_status", None)
+        ledger["people"][0].pop("name", None)
         self.assertEqual(
-            "set field people.0.living_status in people via alx ledger merge",
+            "set field people.0.name in people via alx ledger merge",
             self._fix_for(ledger, "people.0"),
         )
 
     def test_no_finding_names_a_field_its_message_did_not(self):
         ledger = living_harm_ledger()
-        ledger["claims"][-1]["person_claim_assessment"]["rationale"] = "本主張需複核"
+        ledger["claims"][-1]["triangulation"]["rationale"] = ""
         for item in self._schema_findings(ledger):
             location = item.message.split(":", 1)[0]
             named = re.match(r"^set field (\S+) ", item.fix)

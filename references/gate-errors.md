@@ -8,7 +8,7 @@ Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
-Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 300 characters (the quoted window is truncated with `…`, never the remedy).
+Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 800 characters (the quoted window is truncated with `…`, never the remedy).
 
 ## Runtime (`alx`, before any command runs)
 
@@ -43,12 +43,6 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx find S<n> KEYWORD` then extend the quote in claims/<file>.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** derived "therefore the fleet doubled"; no extract carries the base.
-
-### `ledger/date-granularity` — W
-- **rule:** bare year asserted where extracts offer year-month only (or the reverse).
-- **fix:** reword the claim to the granular form via `alx find`.
-- **remove:** n/a (warning; never blocks `issue`)
-- **example:** claim `1918`; extract `1918-01`.
 
 ### `ledger/extract-length` — W
 - **rule:** advice only (ruling R13): the whole extract is < 20 normalized chars (< 10 when it contains CJK). Never raised on an ellipsis-separated piece, and never blocks `claim add`. Length is not a fabrication check; `fidelity/mismatch` decides that. An empty `extract_or_location` is still hard.
@@ -424,7 +418,6 @@ Spec and legacy spellings, and the family the code actually emits. Use the emitt
 | `ledger/disputed` | `ledger/synthesis` |
 | `ledger/family-label` | `ledger/source-family` |
 | `ledger/derived-assertions` | `ledger/derived` |
-| `ledger/granularity` | `ledger/date-granularity` |
 | `rewild/semantic-fidelity` | `fidelity/semantic` |
 | `rewild/regional` | `rewild/region` |
 | `rewild/review-stale` | `review/rewild` |

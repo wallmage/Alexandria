@@ -26,17 +26,137 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
 
+### `ledger/status` — W
+- **rule:** status assertion (patched, discontinued, approved, …) not in extracts. R29: a lexical heuristic, not verbatim fidelity.
+- **fix:** quote a sentence carrying the status via `alx find`.
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** claim says "all since patched"; extract has figures only.
+
+### `ledger/direction` — W
+- **rule:** increased/decreased (and numeric/legal carriers) must appear in extracts. Bare `under|below|settled` without a carrier is not a trigger. R17: the negation window stops at ASCII `.`/`;` as well as `。`/`；`, so a 未/不 in an earlier sentence of a scraped Chinese page no longer denies the evidence; and two CJK carriers bind on a shared four-character phrase, since the 0.75 bigram ratio is unreachable for Chinese clauses.
+- **fix:** quote the directional sentence or drop the clause.
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** "increased 12%" vs extract "12% in 2024".
+
+### `ledger/derived` — F/W
+- **rule:** `derived_assertions` must be covered by the extracts; hard when the derivation asserts what no source offers, warn when it only excuses a gap.
+- **fix:** `alx find S<n> KEYWORD` then extend the quote in claims/<file>.
+- **remove:** `alx claim drop C<n> --apply`
+- **example:** derived "therefore the fleet doubled"; no extract carries the base.
+
+### `ledger/extract-length` — W
+- **rule:** advice only (ruling R13): the whole extract is < 20 normalized chars (< 10 when it contains CJK). Never raised on an ellipsis-separated piece, and never blocks `claim add`. Length is not a fabrication check; `fidelity/mismatch` decides that. An empty `extract_or_location` is still hard.
+- **fix:** extend the quote in claims/<file>; widen with `alx find S<n> KEYWORD`.
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `extract_or_location: "short"` (5 chars, threshold 20).
+
 ### `ledger/claim-input` — F
 - **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch, or has an empty `claim`, `source_evidence` or `extract_or_location`. Every conditional field — `reasoning`, `assumptions`, `responds_to_claim_ids`, `resolves_claim_ids`, `decision_relevance`, `what_would_change`, `limitations`, `confidence`, `triangulation` — is optional and never a finding (R28).
 - **fix:** set field `<name>` in `claims/<file>.json`, then `alx claim add claims/<file>.json` (the claim re-enters the ledger only through `claim add`, which upserts by `claim_id`).
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** `source_evidence: []`.
 
-### `ledger/reference` — F
-- **rule:** `C<n> references unknown source S<n>` — the claim names a source the ledger never fetched. Other cross-reference bookkeeping is gone.
-- **fix:** set field source_ids
-- **remove:** `alx claim drop C<n> --apply`
-- **example:** C2 `source_ids: ["S99"]`; no S99.
+### `ledger/schema` — W
+- **rule:** ledger fails `evidence-ledger.schema.json`. R29: the ledger is machine-written, so a schema defect is never something the model can repair.
+- **fix:** set field `<name>` in `ledger.json` via `alx ledger merge` (brief/people/coverage/synthesis only).
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** missing `schema_version`.
+
+### `ledger/key-claim` — W
+- **rule:** key/central claim rests on `unverified`/interested-only sources, or lacks `decision_relevance`/`what_would_change`. `unverified` counts as interested.
+- **fix:** `alx source set S<n> --provenance P`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** C5 is central; S1 and S2 are both `unverified`.
+
+### `ledger/provenance` — W
+- **rule:** provenance/roles/accountability combination is not admissible for the claim's use.
+- **fix:** `alx source set S<n> --provenance P --role R`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** subject-controlled page classified `primary_independent`.
+
+### `ledger/portfolio` — W
+- **rule:** the source portfolio is not independent enough for the claim set (all sources interested, or one family only).
+- **fix:** `alx source set S<n> --provenance P`, or fetch an independent source. The message lists the allowed values, one line each:
+  - `--provenance`: `primary_independent, primary_interested, secondary_independent, secondary_dependent, unverified`
+  - `--type`: `accountable_record, peer_reviewed, preprint, official_documentation, dataset_or_test, reported_interview, news_report, opinion_or_forecast, marketing, anecdote`
+  - `--role`: `subject_official, counterparty_official, independent_analysis, empirical_data, affected_stakeholder, expert_interpretation, historical_record`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** 9 of 9 claims on one publisher.
+- **`--provenance`:** `primary_independent` `primary_interested` `secondary_independent` `secondary_dependent` `unverified`
+- **`--type`:** `accountable_record` `peer_reviewed` `preprint` `official_documentation` `dataset_or_test` `reported_interview` `news_report` `opinion_or_forecast` `marketing` `anecdote`
+- **`--role`:** `subject_official` `counterparty_official` `independent_analysis` `empirical_data` `affected_stakeholder` `expert_interpretation` `historical_record` (repeat the flag per role)
+
+### `ledger/triangulation` — W
+- **rule:** `triangulation.status`/`rationale` contradicts the merged source families.
+- **fix:** set field triangulation in claims/<file>, then `alx claim add claims/<file>`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `status: met` with one family.
+
+### `ledger/host-conflict` — W
+- **rule:** sources presented as independent share one host; reported in one pass with provenance per id.
+- **fix:** `alx source set S<n> --family-justification FILE` (free text via file, D10)
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** S3 and S7 both on `example.org`.
+
+### `ledger/source-family` — W
+- **rule:** `source_family` label is not the registrable domain and no `family_justification` explains the split.
+- **fix:** `alx check --fix` (auto-derives from the domain).
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** family `Example` for `records.example.org`.
+
+### `ledger/source-ids` — W
+- **rule:** `source_ids` missing (warn; derived from `source_evidence`) or naming a source the evidence does not carry (hard).
+- **fix:** `alx check --fix` (derives `source_ids` from `source_evidence`)
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** C5 has extracts on S1,S2; `source_ids` empty.
+
+### `ledger/https` — W
+- **rule:** `source.url` is not https (aliases may be http).
+- **fix:** `alx fetch <https form of the url>` (`--refresh` re-fetches the http url and fails again).
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `http://records.example.org/a`.
+
+### `ledger/freshness` — W
+- **rule:** a `time_sensitive` claim is older than its freshness window, or `verified_at` precedes `as_of`.
+- **fix:** `alx fetch --id S<n> --refresh`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `as_of` 2026-09-14, `verified_at` 2026-09-13.
+
+### `ledger/undated-reason` — W
+- **rule:** an undated source has no accepted `undated_reason` phrasing.
+- **fix:** `alx source set S<n> --undated-reason FILE`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** S4 has no `published` and no reason.
+
+### `ledger/person` — W
+- **rule:** a person-linked claim names an unregistered person id. R15: a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix`. The harm rules are deleted (R25/R28): `person_claim_role`, `person_claim_assessment` and `human_harm_review` are gone, and `living_status: unknown` is not a finding.
+- **fix:** `alx ledger merge people.json` (auto-link warn: `alx check --fix`)
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** C3 names P9; no P9 in `people`.
+
+### `ledger/excluded-supports` — W
+- **rule:** a surviving claim's `supports` names a claim in `excluded_claims`.
+- **fix:** set field `supports` in `claims/<file>.json`, then `alx claim add claims/<file>.json`.
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** C4 supports C2, and C2 was dropped.
+
+### `ledger/coverage` — W
+- **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims).
+- **fix:** `alx ledger merge coverage.json` (`--fix` repairs no coverage linkage)
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** area `supported` with an empty `claim_ids`.
+
+### `ledger/synthesis` — W
+- **rule:** synthesis names a claim that does not exist, or a central judgment with no claim behind it.
+- **fix:** `alx ledger merge coverage.json`
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `central_judgment_claim_ids: ["C9"]`; C9 was dropped.
+
+### `ledger/reference` — F/W
+- **rule:** cross-reference between claims, people or sources does not resolve. R22: two or more `source_evidence` entries with the same `source_id` are legitimate (two passages from one page) — no finding, and each entry is probed on its own. R23: counterevidence with no adversarial test is a thin synthesis, not a fabrication (W). R24: `as_of` up to 1 day after `verified_at` is timezone drift (UTC fetch vs local date); past that the finding names both dates and the threshold.
+- **fix:** set field supports in claims/<file>, then `alx claim add claims/<file>`; untested counterevidence: `set field synthesis.adversarial_tests, then alx ledger merge synthesis`; as_of drift: set field as_of in claims/<file>, then `alx claim add claims/<file>`
+- **remove:** `alx claim drop C<n> --apply` — hard half only (a `source_id` no fetched source carries); every other cross-reference is W and carries no remove
+- **example:** `responds_to_claim_ids: ["C12"]`; no C12.
 
 ## Integrity (`check` a / `validate_report`)
 
@@ -259,8 +379,6 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 `ledger/harm` — deleted with the person harm rules (R25/R28). `human_harm_review` is no longer a field and no harm finding is raised; ignore any residual emission.
 
 R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `review/content-missing` — reviews are optional and their absence is silent. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. The two binding errors `content/check` used to carry ("cannot be located in the report", "has no nearby citation to its ledger source") are no longer emitted there. Han-numeral quantities raise no `ledger/quantity` finding.
-
-R30 deletions (not a finding): `ledger/status`, `ledger/direction`, `ledger/schema`, `ledger/key-claim`, `ledger/provenance`, `ledger/portfolio`, `ledger/triangulation`, `ledger/host-conflict`, `ledger/source-family`, `ledger/source-ids`, `ledger/https`, `ledger/freshness`, `ledger/undated-reason`, `ledger/person`, `ledger/excluded-supports`, `ledger/coverage`, `ledger/synthesis`, `ledger/derived`, `ledger/extract-length`. The WARN half of `ledger/reference` (unknown claim id, circular reference, non-reciprocal contradiction, `as_of`/`verified_at` drift, untested counterevidence) is deleted; empty extract lives under `ledger/claim-input`.
 
 ## Aliases
 

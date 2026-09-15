@@ -181,7 +181,7 @@ Preview, because PDFium and Poppler can display an embedded font that Preview
 cannot); when PDFKit fails it prints
 `<template> contact sheet: PDFKit failed (<reason>); rendered with <backend>`,
 keeps the PDF, and returns 0. Use `--backend pdfium` only for cross-renderer
-diagnosis. Outside macOS, CLI `auto` falls through after PDFKit is rejected;
+diagnosis. Outside macOS, CLI `auto` starts at PDFium, then Poppler;
 `alx render` is unchanged; `--backend pdfkit` is rejected.
 
 For a compatibility review, install the external renderers and run:

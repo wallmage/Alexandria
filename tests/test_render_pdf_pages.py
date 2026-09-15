@@ -281,35 +281,47 @@ class RenderPagesCommandTests(unittest.TestCase):
     def test_fallback_errors_are_one_line_each(self):
         from scripts import render_pdf_pages
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            pdf = temp / "report.pdf"
-            output = temp / "pages"
-            pdf.write_bytes(b"%PDF")
-            with (
-                mock.patch.object(
-                    render_pdf_pages,
-                    "render_with_pdfkit",
-                    side_effect=RuntimeError("pdfkit failed\nstack"),
-                ),
-                mock.patch.object(
-                    render_pdf_pages,
-                    "render_with_pdfium",
-                    side_effect=RuntimeError("pdfium failed\nstack"),
-                ),
-                mock.patch.object(
-                    render_pdf_pages,
-                    "render_with_poppler",
-                    side_effect=RuntimeError("poppler failed\nstack"),
-                ),
-                self.assertRaises(RuntimeError) as raised,
-            ):
-                render_pdf_pages.render_pages(pdf, output, backend="auto")
-        message = str(raised.exception)
-        self.assertNotIn("\n", message)
-        self.assertIn("pdfkit:", message)
-        self.assertIn("pdfium:", message)
-        self.assertIn("poppler:", message)
+        cases = (
+            ("darwin", ("pdfkit:", "pdfium:", "poppler:"), ()),
+            ("linux", ("pdfium:", "poppler:"), ("pdfkit:",)),
+        )
+        for platform, present, absent in cases:
+            with self.subTest(platform=platform):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp = Path(temp_dir)
+                    pdf = temp / "report.pdf"
+                    output = temp / "pages"
+                    pdf.write_bytes(b"%PDF")
+                    with (
+                        mock.patch.object(
+                            render_pdf_pages,
+                            "render_with_pdfkit",
+                            side_effect=RuntimeError("pdfkit failed\nstack"),
+                        ),
+                        mock.patch.object(
+                            render_pdf_pages,
+                            "render_with_pdfium",
+                            side_effect=RuntimeError("pdfium failed\nstack"),
+                        ),
+                        mock.patch.object(
+                            render_pdf_pages,
+                            "render_with_poppler",
+                            side_effect=RuntimeError("poppler failed\nstack"),
+                        ),
+                        mock.patch.object(
+                            render_pdf_pages.sys, "platform", platform
+                        ),
+                        self.assertRaises(RuntimeError) as raised,
+                    ):
+                        render_pdf_pages.render_pages(
+                            pdf, output, backend="auto"
+                        )
+                message = str(raised.exception)
+                self.assertNotIn("\n", message)
+                for token in present:
+                    self.assertIn(token, message)
+                for token in absent:
+                    self.assertNotIn(token, message)
 
     def test_subprocess_renderers_use_90s_timeout(self):
         from scripts import render_pdf_pages

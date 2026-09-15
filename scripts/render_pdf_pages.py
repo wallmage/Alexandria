@@ -207,7 +207,8 @@ def render_pages(pdf_path, output_dir, *, dpi=144, backend="auto", force=False):
     failures = []
     if backend == "auto":
         selected = None
-        for name in AUTO_FALLBACK:
+        chain = AUTO_FALLBACK if sys.platform == "darwin" else AUTO_FALLBACK[1:]
+        for name in chain:
             try:
                 selected = _render_named_backend(name, pdf_path, output_dir, dpi=dpi)
                 break

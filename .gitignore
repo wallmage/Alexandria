@@ -1,5 +1,5 @@
 .DS_Store
-.venv/
+.venv
 tmp/
 # Generated deliverables: reports are produced per run, not carried in the repo.
 reports/

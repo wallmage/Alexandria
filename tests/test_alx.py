@@ -3960,7 +3960,7 @@ class ClaimAddDryRunTests(AlxTestCase):
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(1, code, out)
         lines = out.splitlines()
-        self.assertEqual("3 submitted, 2 accepted, 1 failed: C3(2)", lines[0])
+        self.assertEqual("3 submitted, 2 accepted, 1 failed: C3(1)", lines[0])
         self.assertIn("full output: .alx/last-claim-add.txt", out)
         transcript = (self.dir / ".alx" / "last-claim-add.txt").read_text(
             encoding="utf-8"

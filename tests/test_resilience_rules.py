@@ -253,7 +253,7 @@ class YearNumberCoverageTests(unittest.TestCase):
     def test_a_year_absent_from_the_extract_still_fails(self):
         findings = self.findings("1931年的日记真迹已公开。")
         self.assertTrue(findings)
-        self.assertIn("d:1931", findings[0].message)
+        self.assertIn("'1931年' is in the claim but not in S2", findings[0].message)
 
     def test_a_number_outside_the_year_range_is_not_a_year(self):
         self.assertFalse(
@@ -294,7 +294,7 @@ class YearMonthFragmentCoverageTests(unittest.TestCase):
                 self.claim(), valid_quality_ledger(), directory
             )
             self.assertTrue(findings)
-            self.assertIn("d:1945-08", findings[0].message)
+            self.assertIn("'1945-08' is in the claim but not in S2", findings[0].message)
 
 
 class YearInsideTheExtractCoverageTests(unittest.TestCase):
@@ -352,7 +352,7 @@ class ContentGateSeesThePageTests(unittest.TestCase):
             for error in validate_ledger.validate_references(
                 self.ledger_with_claim(), cache_dir
             )
-            if "quantity" in error and "1945-09-04" in error
+            if "is in the claim but not in" in error and "1945-09-04" in error
         ]
 
     def test_the_year_on_the_cached_page_covers_the_fragment(self):
@@ -538,8 +538,7 @@ class CjkNumeralQuantityTests(unittest.TestCase):
         item = self.findings("三位作者共同署名该文。")[0]
         self.assertEqual("warn", item.severity)
         self.assertEqual("A", item.klass)
-        self.assertIn("quantity '三' appears in claim but not in", item.message)
-        self.assertIn("claim n:3", item.message)
+        self.assertIn("'三' is in the claim but not in", item.message)
         self.assertEqual("alx find S2 三", item.fix)
         self.assertEqual("", item.remove)
         self.assertNotIn("Remove:", item.message)
@@ -547,13 +546,16 @@ class CjkNumeralQuantityTests(unittest.TestCase):
     def test_the_same_count_in_digits_stays_hard(self):
         item = self.findings("3位作者共同署名该文。")[0]
         self.assertEqual("hard", item.severity)
-        self.assertIn("claim n:3", item.message)
+        self.assertIn("'3' is in the claim but not in", item.message)
 
     def test_a_date_stays_hard(self):
         items = self.findings("1936年12月11日三位作者共同署名该文。")
         hard = [item for item in items if item.severity == "hard"]
         self.assertTrue(hard, items)
-        self.assertIn("d:1936-12-11", " ".join(item.message for item in hard))
+        self.assertIn(
+            "'1936-12-11' is in the claim but not in",
+            " ".join(item.message for item in hard),
+        )
 
 
 class UnclassifiedSourcePortfolioTests(AlxTestCase):

@@ -1693,6 +1693,7 @@ def cmd_find(args):
     source_ids = _find_sources(ledger, args.sources)
     caches = {}
     lines = []
+    emitted = {}
     for source_id in source_ids:
         entry = cached(ws, source_id)
         if entry is None:
@@ -1712,6 +1713,20 @@ def cmd_find(args):
                 if index > args.max:
                     break
                 window = sentence_window(text, start, starts[start], args.context)
+                spans = emitted.setdefault(source_id, [])
+                if any(lo <= start < hi for lo, hi in spans):
+                    hits += 1
+                    continue
+                pos = 0
+                while True:
+                    found = text.find(window, pos)
+                    if found < 0:
+                        found = start
+                        break
+                    if found <= start < found + len(window):
+                        break
+                    pos = found + 1
+                spans.append((found, found + len(window)))
                 hits += 1
                 # One line per hit: the paste line is the window, so printing
                 # the prose window as well doubled `find` output for nothing.
@@ -2336,7 +2351,10 @@ def cmd_ledger_merge(args):
         else:
             ledger[key] = value
     ws.save_ledger(ledger)
-    findings = adopt(_ledger_findings(ws, ledger))
+    findings = adopt(
+        _ledger_findings(ws, ledger),
+        claim_files=state.get("claim_files", {}),
+    )
     lines = [render_grouped(findings)] if findings else ["Ledger merged; no findings."]
     if blocked:
         lines.insert(
@@ -2956,6 +2974,22 @@ REVIEW_SCHEMAS = {
 }
 
 
+def _note_field_path(entry):
+    return str(entry).split(":", 1)[0].split()[0]
+
+
+def _uniq_note_paths(missing):
+    seen = set()
+    unique = []
+    for entry in missing:
+        path = _note_field_path(entry)
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(entry)
+    return unique
+
+
 def _prose_floor_missing(note, kind):
     return [
         f"{error} ({kind}-review schema)"
@@ -2998,7 +3032,7 @@ def _note_completeness(ws, state, ledger, kind):
                     f"category {item.get('category')})"
                 )
         missing.extend(_prose_floor_missing(note, kind))
-        return missing
+        return _uniq_note_paths(missing)
     scores = note.get("scores") or {}
     for name in CONTENT_SCORE_KEYS:
         entry = scores.get(name) or {}
@@ -3053,7 +3087,7 @@ def _note_completeness(ws, state, ledger, kind):
         )
     )
     missing.extend(_prose_floor_missing(note, kind))
-    return missing
+    return _uniq_note_paths(missing)
 
 
 def _paragraph_set(text, state):
@@ -3637,7 +3671,10 @@ def cmd_review_finish(args):
         missing.append("report_sha256 no longer matches the reviewed copy")
     if missing:
         for field in missing:
-            print(f"WARN review/{kind}: {field} missing")
+            if " schema)" in field:
+                print(f"WARN review/{kind}: {field}")
+            else:
+                print(f"WARN review/{kind}: {field} missing")
     record["finished"] = True
     ws.save_state(state)
     _emit(
@@ -4040,6 +4077,8 @@ def cmd_issue(args):
                 "notes": delivery_notes + warning_notes,
             },
         )
+    for note in delivery_notes:
+        lines.append(f"note: {note[:60]}")
     receipt = {
         "schema_version": 1,
         "issued_at": _now().isoformat(),
@@ -4224,6 +4263,19 @@ def _next_command(ws, state, ledger):
         return _next_step(True)
     if not (ws.receipts / "issue.json").exists():
         return f"`{remedy('issue')}`"
+    receipt = _read_json(ws.receipts / "issue.json")
+    fresh = receipt.get("report_sha256") == file_sha256(
+        ws.report
+    ) and receipt.get("ledger_sha256") == file_sha256(ws.ledger_path)
+    pdfs = list(ws.dir.glob("report-*.pdf"))
+    if pdfs and fresh:
+        names = [path.name for path in pdfs]
+        prefer = ("report-executive.pdf", "report-atlas.pdf")
+        ordered = [name for name in prefer if name in names]
+        ordered.extend(sorted(name for name in names if name not in ordered))
+        return f"deliver {', '.join(ordered)} and report.md"
+    if not fresh:
+        return f"`{remedy('check-fix')}` / `{remedy('issue')}`"
     return f"`{remedy('render')}`"
 
 

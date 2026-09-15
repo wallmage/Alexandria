@@ -49,6 +49,7 @@ jobs:
         shell: pwsh
         run: |
           $launcher = if ($IsWindows) { "$env:ALEXANDRIA_RUNTIME_DIR\bin\python.cmd" } else { "$env:ALEXANDRIA_RUNTIME_DIR/bin/python" }
+          Get-Content $launcher
           & $launcher scripts/alx.py --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload installation log

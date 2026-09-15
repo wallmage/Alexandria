@@ -70,8 +70,10 @@ class LauncherTests(unittest.TestCase):
                 posix.read_text(encoding="utf-8"),
             )
             self.assertTrue(os.access(posix, os.X_OK))
-            self.assertEqual(
-                '@"%~dp0..\\Library\\bin\\micromamba.exe" --no-rc run '
-                '--prefix "%~dp0..\\env" python %*\n',
-                (runtime / "bin" / "python.cmd").read_text(encoding="utf-8"),
+            windows = (runtime / "bin" / "python.cmd").read_bytes().decode("utf-8")
+            self.assertEqual(install_runtime.WINDOWS_LAUNCHER, windows)
+            self.assertIn(
+                '"%root%\\Library\\bin\\micromamba.exe" --no-rc run '
+                '--prefix "%root%\\env" python %*\r\n',
+                windows,
             )

@@ -153,10 +153,22 @@ def write_launchers(runtime):
         encoding="utf-8",
     )
     posix.chmod(0o755)
-    (launchers / "python.cmd").write_text(
-        '@"%~dp0..\\Library\\bin\\micromamba.exe" --no-rc run --prefix "%~dp0..\\env" python %*\n',
-        encoding="utf-8",
-    )
+    (launchers / "python.cmd").write_text(WINDOWS_LAUNCHER, encoding="utf-8")
+
+
+#: `%~fI` folds the `..` away so micromamba sees a plain prefix; a missing
+#: micromamba is named instead of a silent exit code.
+WINDOWS_LAUNCHER = (
+    "@echo off\r\n"
+    "setlocal\r\n"
+    'for %%I in ("%~dp0..") do set "root=%%~fI"\r\n'
+    'if not exist "%root%\\Library\\bin\\micromamba.exe" (\r\n'
+    '  echo alx launcher: micromamba.exe missing under "%root%\\Library\\bin" 1>&2\r\n'
+    "  exit /b 2\r\n"
+    ")\r\n"
+    '"%root%\\Library\\bin\\micromamba.exe" --no-rc run --prefix "%root%\\env" python %*\r\n'
+    "exit /b %ERRORLEVEL%\r\n"
+)
 
 
 def main():

@@ -221,6 +221,10 @@ REMEDY_TEMPLATES = {
     # `claim add` re-binds them, so the remedy is the two-step sequence.
     "refresh-rebind": "alx fetch --id {source_id} --refresh, then alx claim add {file}",
     "extend-quote": "extend the quote in {file}",
+    "paste-passage": (
+        "paste the closest passage as extract_or_location in {file}, "
+        "or alx find {source_id} KEYWORD"
+    ),
     "extend-report": "extend the report body in report.md",
     "delete-paragraph": "delete paragraph {paragraph} of report.md",
     "remove-link": "remove link {url} from report.md",
@@ -255,6 +259,10 @@ CLOSED_IMPERATIVES = (
         r"form \(.+\)$"
     ),
     re.compile(r"^extend the quote in \S+$"),
+    re.compile(
+        r"^paste the closest passage as extract_or_location in \S+, "
+        r"or alx find S\d+ KEYWORD$"
+    ),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^remove link \S+ from report\.md$"),
@@ -548,6 +556,15 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
     if family == "fidelity/mismatch":
+        if "Closest passage in" in str(item.message):
+            return (
+                remedy(
+                    "paste-passage",
+                    source_id=source_id or "S1",
+                    file=(claim_files or {}).get(claim_id) or "claims/*.json",
+                ),
+                remedy("claim-drop", claim_id=claim_id) if claim_id else "",
+            )
         return _quote_or_find(item, source_id, claim_id)
     if family == "ledger/extract-length":
         return (
@@ -797,7 +814,9 @@ def adopt(findings, *, online=False, paragraphs=0, claim_files=None):
         # rather than leaving the finding with a `Remove:` and no repair.
         rejected = bool(fix) and not honest_fix(item.family, fix)
         fix = "" if rejected else fix
-        if rejected or (not fix and not remove) or item.family in REMEDY_OVERRIDES:
+        # R30: a producer fix that fails `valid_remedy` must not leave the line
+        # with an empty `Fix:` just because a `Remove:` exists.
+        if rejected or not fix or item.family in REMEDY_OVERRIDES:
             fix, remove = _remedies(
                 item, paragraphs=paragraphs, claim_files=claim_files
             )
@@ -3226,19 +3245,8 @@ def _review_findings(ws, state, ledger):
                 _content_check(ws), ws, state, ledger
             )
         )
-    for kind in REVIEW_KINDS:
-        note_missing = _note_completeness(ws, state, ledger, kind)
-        record = state.get("reviews", {}).get(kind, {})
-        if record.get("finished") and note_missing:
-            findings.append(
-                finding(
-                    _review_family(kind, "stale"),
-                    f"reviews/{kind}.json is incomplete: "
-                    f"{'; '.join(note_missing)}.",
-                )
-            )
-            continue
-        findings.extend(freshness_findings(ws, state, ledger, kind))
+    # R30: a review is optional, so its staleness or incompleteness is never a
+    # finding — nothing here may send the model back to `review start`.
     return findings
 
 

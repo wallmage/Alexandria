@@ -1632,11 +1632,7 @@ class SkillRunbookTests(unittest.TestCase):
         text = (
             Path(alx.__file__).resolve().parents[1] / "SKILL.md"
         ).read_text(encoding="utf-8")
-        lines = [
-            line.strip().strip("`")
-            for line in text.splitlines()
-            if "scripts/alx.py" in line
-        ]
+        lines = re.findall(r"`([^`]*scripts/alx\.py[^`]*)`", text)
         self.assertGreaterEqual(len(lines), 10, "SKILL.md lost its command lines")
         for line in lines:
             command = line

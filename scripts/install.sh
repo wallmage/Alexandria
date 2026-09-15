@@ -43,7 +43,7 @@ for channel in $channels; do
 done
 [ "$installed" = 1 ] || { echo "Installation failed; see $runtime/install.log" >&3; exit 1; }
 if "$mamba" --no-rc run --prefix "$prefix" python "$skill_root/scripts/install_runtime.py" --runtime "$runtime"; then
-  echo "Installed and verified. Runtime: $skill_root/.runtime.json" >&3
+  echo "Installed and verified. Runtime: $runtime (launcher: $runtime/bin/python)" >&3
 else
   echo "Installation failed; see $runtime/install.log" >&3
   exit 1

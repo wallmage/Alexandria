@@ -53,24 +53,28 @@ jobs:
           $r = $env:ALEXANDRIA_RUNTIME_DIR
           $b = $r -replace '/', '\'
           $m = "$b\Library\bin\micromamba.exe"
-          Write-Output "--- 1 micromamba backslash prefix, --help"
-          & $m --no-rc run --prefix "$b\env" python scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          $manifest = Get-Content .runtime.json | ConvertFrom-Json
+          Write-Output "manifest: $($manifest.command -join ' | ')"
+          Write-Output "--- A exact verify command line again (no pipe)"
+          & $manifest.command[0] @($manifest.command[1..5]) scripts/install_runtime.py --runtime $env:ALEXANDRIA_RUNTIME_DIR --verify-only
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- 2 micromamba backslash prefix, no --help"
-          & $m --no-rc run --prefix "$b\env" python -c "import weasyprint; print('2 ok')" 2>&1 | Out-String | Write-Output
+          Write-Output "--- B same program+args, alx.py --help (no pipe)"
+          & $manifest.command[0] @($manifest.command[1..5]) scripts/alx.py --help
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- 3 micromamba forward-slash prefix, no --help"
-          & $m --no-rc run --prefix "$r\env" python -c "print('3 ok')" 2>&1 | Out-String | Write-Output
+          Write-Output "--- C micromamba --version"
+          & $m --version
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- 4 launcher via backslash path, no --help"
-          & "$b\bin\python.cmd" -c "import weasyprint; print('4 ok')" 2>&1 | Out-String | Write-Output
+          Write-Output "--- D micromamba run python -c (no pipe)"
+          & $m --no-rc run --prefix "$b\env" python -c "print('D ok')"
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- 5 launcher via forward-slash path, --help"
-          & "$r\bin\python.cmd" scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "--- E launcher (no pipe)"
+          & "$b\bin\python.cmd" -c "print('E ok')"
           Write-Output "exit=$LASTEXITCODE"
-          Write-Output "--- 6 micromamba run -- separator, --help"
-          & $m --no-rc run --prefix "$b\env" -- python scripts/alx.py --help 2>&1 | Out-String | Write-Output
+          Write-Output "--- F launcher via cmd /c (no pipe)"
+          cmd /c "`"$b\bin\python.cmd`" -c `"print('F ok')`""
           Write-Output "exit=$LASTEXITCODE"
+          Write-Output "--- G env"
+          Get-ChildItem env: | Where-Object { $_.Name -match 'MAMBA|CONDA|PYTHON|COMSPEC|PATHEXT' } | Out-String | Write-Output
       - name: Run alx through the one-path launcher SKILL.md uses
         shell: pwsh
         run: |

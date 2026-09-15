@@ -3570,14 +3570,9 @@ def cmd_review_start(args):
     ws.reviews.mkdir(parents=True, exist_ok=True)
     _write_json(ws.reviews / f"{kind}.json", _note_skeleton(ws, state, kind, ledger))
     ws.save_state(state)
-    protocol = (
-        "references/rewild-gate.md blind-review protocol"
-        if kind == "rewild"
-        else "references/content-quality.md §13 review protocol"
-    )
     lines.append(f"Review copy: {target}")
     lines.extend(_note_instructions(kind))
-    lines.append(f"Judge the report by {protocol}.")
+    lines.append("Judge the report on its own merits; fill only the skeleton's fields.")
     _emit(ws, state, f"review start {kind}", f"iteration {iteration}", lines)
     return 0
 

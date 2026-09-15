@@ -53,7 +53,6 @@ class RepositoryContractTests(unittest.TestCase):
         local_paths = set(
             re.findall(r"`((?:references|scripts)/[^` ]+\.(?:md|json|py))`", skill)
         )
-        self.assertTrue(local_paths)
         missing = [path for path in sorted(local_paths) if not (ROOT / path).is_file()]
         self.assertEqual([], missing)
 
@@ -86,11 +85,10 @@ class RepositoryContractTests(unittest.TestCase):
             skill,
         )
         self.assertIn(
-            "nothing ships that failed a fabrication check — `alx issue` drops it and says so",
+            "`alx` drops anything that fails its verbatim check and says so",
             skill,
         )
-        self.assertIn("without touching quoted text", skill)
-        self.assertIn("At remaining ≤ 15 min stop fixing: `alx issue`, `alx render`, deliver.", skill)
+        self.assertIn("At remaining ≤ 15 min stop fixing: run step 6 with what you have.", skill)
 
     def test_pdf_commands_resolve_bundled_paths_from_skill_root(self):
         production = (ROOT / "references" / "pdf-production.md").read_text(
@@ -111,7 +109,7 @@ class RepositoryContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("start researching at once", skill)
+        self.assertIn("start at once", skill)
         self.assertIn("never ask intake questions, never present templates", skill)
         self.assertIn("Do not ask the user to choose a template", templates)
         self.assertIn("Deliver two PDFs with identical content", templates)
@@ -134,9 +132,7 @@ class RepositoryContractTests(unittest.TestCase):
             "zh-HK": ROOT / "references" / "rewild" / "rewild-hk",
         }
 
-        self.assertIn("light humanizing per `references/rewild/rewild/SKILL.md`", skill)
         self.assertIn("scripts/alx.py", skill)
-        self.assertIn("review start rewild", skill)
         self.assertNotIn(
             "If the user explicitly asks to remove AI-like writing", skill
         )
@@ -186,10 +182,7 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertTrue(quality.is_file())
         self.assertTrue(schema_path.is_file())
-        self.assertIn("nothing ships that failed a fabrication check", skill)
         self.assertIn("scripts/alx.py", skill)
-        self.assertIn("review start content", skill)
-        self.assertIn("None of these is required and their absence is not a finding", skill)
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
         self.assertIn("tests/ci_render_matrix.py", workflow)

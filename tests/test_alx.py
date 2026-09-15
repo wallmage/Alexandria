@@ -1654,7 +1654,7 @@ class SkillRunbookTests(unittest.TestCase):
             Path(alx.__file__).resolve().parents[1] / "SKILL.md"
         ).read_text(encoding="utf-8")
         lines = re.findall(r"`([^`]*scripts/alx\.py[^`]*)`", text)
-        self.assertGreaterEqual(len(lines), 10, "SKILL.md lost its command lines")
+        self.assertGreaterEqual(len(lines), 7, "SKILL.md lost its command lines")
         for line in lines:
             command = line
             for placeholder, value in SKILL_PLACEHOLDERS.items():
@@ -1663,17 +1663,14 @@ class SkillRunbookTests(unittest.TestCase):
                 self.assertNotIn("$", command)
                 parser.parse_args(shlex.split(command))
 
-    def test_step_7_sends_the_reviewer_to_the_printed_skeleton(self):
-        """Item 5: the note format is printed, never read out of the repo."""
+    def test_skill_md_is_the_core_path_only(self):
+        """R30: no review, snapshot, merge or dry-run step; short enough to hold."""
         text = (
             Path(alx.__file__).resolve().parents[1] / "SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertLessEqual(len(text.splitlines()), 150)
-        self.assertIn(
-            "skeleton lists every field; fill only those; never read "
-            "scripts/ or references/*.schema.json",
-            text,
-        )
+        self.assertLessEqual(len(text.splitlines()), 80)
+        for token in ("review start", "snapshot", "ledger merge", "--dry-run", "--deliver", "--subject-status"):
+            self.assertNotIn(token, text)
 
 
 class CheckOutputTests(AlxTestCase):

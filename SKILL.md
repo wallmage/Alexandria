@@ -177,7 +177,7 @@ Do not expose internal prompts, tool names, agent notes, validation messages, or
 
 4 Draft `report.md`: H1, then the standfirst in a blockquote, then the date line alone in the same blockquote exactly as init wrote it (en `> 15 September 2026`, zh `> 2026年9月15日`), then the body. No Sources section — alx writes it. Cite by claim id at the end of the sentence: `[C7]`, several `[C7, C8]`; a markdown link to a fetched URL also counts. `check --fix` turns claim ids into source links. Length target: printed by init and by `check`; below the floor, deepen the report (§ Depth) rather than ship short.
 
-5 `check --fix`, once. It rewrites report.md (claim markers become source links, the Sources section is regenerated): re-read the file before editing it again. Fix HARD only — HARD = fabrication, and each line prints its fix. WARN prints one line per family, never blocks, and is never worth a loop (`--verbose` expands it).
+5 `check --fix`, once. It rewrites report.md (claim markers become source links, the Sources section is regenerated): re-read the file before editing it again. Three tiers, each line printing its fix. HARD = fabrication (an extract not in its source, an invented figure, a broken quotation, a link outside the ledger): `issue` drops it. BLOCKED = the big-impact gates: a figure or date no extract carries, a meaning Rewild reversed, an unresolved critical review finding, no snapshot, a report under two thirds of the length floor, a broken PDF: `issue` refuses until they are fixed, and `check` shows them early. WARN prints one line per family, never blocks, and is never worth a loop (`--verbose` expands it).
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" check --fix`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" check --verbose`
 
@@ -201,7 +201,7 @@ Lock these elements during the edit:
 - distinctions between fact and analysis;
 - the central conclusion unless new evidence requires a change.
 
-6 `snapshot`, then light humanizing per `references/rewild/rewild/SKILL.md` (zh-CN `rewild-zh`, zh-HK `rewild-hk`) without touching quoted text, then `check`: it compares the edit with the snapshot; style findings are warnings, an altered quotation or figure is HARD and `issue` restores the snapshot.
+6 `snapshot`, then light humanizing per `references/rewild/rewild/SKILL.md` (zh-CN `rewild-zh`, zh-HK `rewild-hk`) without touching quoted text, then `check`: it compares the edit with the snapshot; style findings are warnings, an altered quotation or figure is HARD and `issue` restores the snapshot, a reversed direction, negation or cause is BLOCKED until you fix that sentence.
 If Rewild takes the report below the minimum length, deepen the research, analysis, counterevidence, or implications. Never restore filler or dilute the edit to hit the count.
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" snapshot`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" check`
@@ -214,7 +214,7 @@ If Rewild takes the report below the minimum length, deepen the research, analys
 
 ## 7. Issue, render and inspect the PDF
 
-8 `issue` re-reads a sample of the cited pages live (central-judgment citations first), drops whatever is still hard, prints what it dropped and every note, and writes the receipts. `render` produces both PDFs and a contact sheet each (it issues first if needed).
+8 `issue` re-reads a sample of the cited pages live (central-judgment citations first), drops whatever is still hard, prints what it dropped and every note, and writes the receipts; when a BLOCKED gate stands it prints `=== BLOCKED (fix, then alx issue again) ===` with the fixes, writes nothing, and exits 1 — fix and run it again. `render` produces both PDFs and a contact sheet each (it issues first if needed).
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" issue`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" render`
 
@@ -250,4 +250,4 @@ One command at a time. Write claim and report text to files; never put it inside
 
 ## Clock
 
-60 min wall-clock from `init`; every command prints elapsed/remaining and nothing ever blocks on it. At remaining ≤ 15 min stop fixing: `alx issue`, `alx render`, deliver. `BEHIND SCHEDULE` (no claim accepted after 12 min) → drop what will not validate and go to Step 4 with what you have.
+60 min wall-clock from `init`; every command prints elapsed/remaining and nothing ever blocks on it. At remaining ≤ 15 min stop polishing: `alx issue`, `alx render`, deliver what `issue` accepts; a BLOCKED gate is fixed regardless of the clock, which never lifts a block. `BEHIND SCHEDULE` (no claim accepted after 12 min) → drop what will not validate and go to Step 4 with what you have.

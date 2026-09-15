@@ -3092,7 +3092,7 @@ def collect_findings(ledger, *, schema_path=None, cache_dir=None):
     return findings
 
 
-def _offline_probe_findings(ledger, cache_dir):
+def _offline_probe_findings(ledger, cache_dir, *, with_context=True):
     try:
         from source_fidelity import probe_findings, read_cache
     except ImportError:
@@ -3123,7 +3123,8 @@ def _offline_probe_findings(ledger, cache_dir):
             # of waiting for a successful live receipt.
             findings.extend(
                 probe_findings(
-                    claim, sources.get(source_id, {}), text, cache_meta=meta,
+                    claim, sources.get(source_id, {}), text,
+                    cache_meta=meta if with_context else None,
                     extract=extract,
                 )
             )
@@ -3373,7 +3374,11 @@ def claim_findings(claim, ledger, *, cache_dir=None):
     )
     if cache_dir:
         findings.extend(
-            _offline_probe_findings({"claims": [working], "sources": ledger.get("sources")}, cache_dir)
+            _offline_probe_findings(
+                {"claims": [working], "sources": ledger.get("sources")},
+                cache_dir,
+                with_context=False,
+            )
         )
     return findings
 

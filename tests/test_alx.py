@@ -143,6 +143,7 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^extend the quote in \S+$"),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
+    re.compile(r"^remove link \S+ from report\.md$"),
     re.compile(r"^\(edit prose; waivable by alx issue --deliver\)$"),
     re.compile(r"^add the source link to paragraph \d+ of report\.md$"),
     re.compile(
@@ -503,26 +504,28 @@ class FindShowTests(AlxTestCase):
         self.fetch("https://example.org/study")
         code, out = self.run_in("find", "S1", "1,204")
         self.assertEqual(0, code, out)
-        self.assertIn("S1 #1 · ", out)
+        # One line per hit: the paste line carries the window, nothing repeats.
+        self.assertIn("S1 #1 extract_or_location: ", out)
         self.assertIn("1,204 documents", out)
         self.assertNotIn("…", out)
+        self.assertNotIn("S1 #1 · ", out)
         for line in out.splitlines():
             if line.startswith("S1 #"):
-                self.assertLessEqual(len(line), 310, line)
+                self.assertLessEqual(len(line), 340, line)
 
     def test_find_takes_many_sources_and_many_keywords(self):
         self.init()
         self.fetch("https://example.org/study", "https://registry.example.net/note")
         code, out = self.run_in("find", "S1,S2", "1,204", "retention")
         self.assertEqual(0, code, out)
-        self.assertIn("S1 #1 · ", out)
-        self.assertIn("S2 #1 · ", out)
+        self.assertIn("S1 #1 extract_or_location: ", out)
+        self.assertIn("S2 #1 extract_or_location: ", out)
         # `retention` is only in S1, so it still reports one hit, not a miss.
         self.assertNotIn("no source contains retention", out)
         code, all_out = self.run_in("find", "all", "1,204")
         self.assertEqual(0, code, all_out)
-        self.assertIn("S1 #1 · ", all_out)
-        self.assertIn("S2 #1 · ", all_out)
+        self.assertIn("S1 #1 extract_or_location: ", all_out)
+        self.assertIn("S2 #1 extract_or_location: ", all_out)
 
     def test_find_reports_a_missing_cache_and_a_missing_keyword(self):
         self.init()
@@ -537,12 +540,14 @@ class FindShowTests(AlxTestCase):
         self.fetch("https://example.org/study")
         code, out = self.run_in("find", "S1", "1,204")
         self.assertEqual(0, code, out)
-        lines = out.splitlines()
-        hit = next(line for line in lines if line.startswith("S1 #1 · "))
-        paste = lines[lines.index(hit) + 1]
-        prefix = "    extract_or_location: "
-        self.assertTrue(paste.startswith(prefix), paste)
-        self.assertEqual(hit.split(" · ", 1)[1], json.loads(paste[len(prefix) :]))
+        prefix = "S1 #1 extract_or_location: "
+        paste = next(
+            line for line in out.splitlines() if line.startswith(prefix)
+        )
+        window = json.loads(paste[len(prefix) :])
+        self.assertIn("1,204", window)
+        # The whole hit is one line; `find` prints nothing else about it.
+        self.assertEqual(1, len([1 for line in out.splitlines() if "#1 " in line]))
 
     def test_show_prints_cache_window(self):
         self.init()
@@ -1084,20 +1089,29 @@ class ReviewTests(AlxTestCase):
         self.assertEqual(1, code)
         self.assertIn("scores", out)
 
-    def test_content_note_needs_a_disposition_per_mapped_claim(self):
+    def test_only_a_qualified_or_removed_claim_needs_a_support_note(self):
+        """Restates test_content_note_needs_a_disposition_per_mapped_claim.
+
+        A retained claim with no entry is supported by default; only the ones
+        the reviewer changed or rejected owe a note.
+        """
         self.bootstrap()
         self.run_in("check", "--fix")
         self.run_in("review", "start", "content")
         self.fill_note("content")
         path = self.dir / "reviews" / "content.json"
         note = json.loads(path.read_text(encoding="utf-8"))
+        note["claim_support"] = []
+        path.write_text(json.dumps(note, ensure_ascii=False), encoding="utf-8")
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(0, code, out)
         note["claim_support"] = [
-            dict(entry, disposition="") for entry in note["claim_support"]
+            {"claim_id": "C1", "paragraph": 1, "disposition": "qualified", "note": ""}
         ]
         path.write_text(json.dumps(note, ensure_ascii=False), encoding="utf-8")
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(1, code)
-        self.assertIn("claim_support[C1].disposition", out)
+        self.assertIn("claim_support[C1].note", out)
 
     def test_mechanical_delta_keeps_the_review_fresh(self):
         self.bootstrap()
@@ -2114,7 +2128,12 @@ class IntegrationHoleTests(AlxTestCase):
         self.assertNotIn("alx review start content --iter", line)
 
     # item 4 --------------------------------------------------------------
-    def test_review_start_prints_every_field_and_prefills_claim_support(self):
+    def test_review_start_prints_every_field_and_prefills_the_whole_form(self):
+        """Restates test_review_start_prints_every_field_and_prefills_claim_support.
+
+        The skeleton is the fixed form — every score and check key — and
+        `claim_support` starts empty instead of one entry per claim.
+        """
         self.bootstrap()
         self.run_in("check", "--fix")
         code, out = self.run_in("review", "start", "content")
@@ -2125,16 +2144,20 @@ class IntegrationHoleTests(AlxTestCase):
             "checks.<key>",
             "section_reviews[]",
             "completion_note",
-            "claim_support[].disposition: supported | qualified | removed",
+            "claim_support[]: may stay empty",
         ):
             self.assertIn(token, out)
         note = json.loads(
             (self.dir / "reviews" / "content.json").read_text(encoding="utf-8")
         )
+        self.assertEqual([], note["claim_support"])
+        self.assertEqual(sorted(alx.CONTENT_SCORE_KEYS), sorted(note["scores"]))
         self.assertEqual(
-            ["C1", "C2"], [entry["claim_id"] for entry in note["claim_support"]]
+            [{"score": None, "rationale": ""}] * len(alx.CONTENT_SCORE_KEYS),
+            list(note["scores"].values()),
         )
-        self.assertEqual({""}, {entry["disposition"] for entry in note["claim_support"]})
+        self.assertEqual(sorted(alx.CONTENT_CHECK_KEYS), sorted(note["checks"]))
+        self.assertEqual({False}, set(note["checks"].values()))
 
     def test_the_filled_skeleton_validates_against_the_schemas(self):
         self.bootstrap()
@@ -2183,10 +2206,11 @@ class IntegrationHoleTests(AlxTestCase):
             "checks.central_judgment_answers_question",
             "section_reviews",
             "completion_note",
-            "claim_support[C1].disposition",
         ):
             with self.subTest(path=path):
                 self.assertIn(path, out)
+        # The list is the fixed form, never one line per claim.
+        self.assertNotIn("claim_support[C1]", out)
 
     def test_a_producer_remedy_names_the_real_claim_file(self):
         rendered = alx.render_grouped(
@@ -2429,7 +2453,8 @@ class FixRoundTests(AlxTestCase):
         )
         _code, out = self.run_in("check")
         ambiguous = self.line_with(out, "ambiguous")
-        printed = re.search(r"Fix: (alx claim bind C1 --paragraph (\d+))", ambiguous)
+        # One line binds every unbound claim: `alx claim bind C1:3 C4:15`.
+        printed = re.search(r"Fix: (alx claim bind C1:(\d+)(?: C\d+:\d+)*)", ambiguous)
         self.assertIsNotNone(printed, ambiguous)
         code, out = self.run_in(*shlex.split(printed.group(1))[1:])
         self.assertEqual(0, code, out)
@@ -2937,34 +2962,29 @@ class RewildEffectiveSnapshotTests(AlxTestCase):
 class ParkedReviewNoteTests(AlxTestCase):
     """Item 4 leftovers: every invalid note path is named, nothing is guessed."""
 
-    def test_finish_names_the_empty_claim_support_note(self):
+    def test_the_missing_list_is_the_form_not_one_line_per_claim(self):
+        """Restates test_finish_names_the_empty_claim_support_note and
+        test_an_unbound_claim_is_prefilled_null_and_named_by_finish.
+
+        Neither an empty nor an unbound claim_support entry exists any more:
+        an untouched skeleton owes the fixed form and nothing else.
+        """
         self.bootstrap()
         self.run_in("check", "--fix")
         self.run_in("review", "start", "content")
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(1, code)
-        self.assertIn("claim_support[C1].note", out)
-
-    def test_an_unbound_claim_is_prefilled_null_and_named_by_finish(self):
-        self.bootstrap()
-        self.run_in("check", "--fix")
-        path = self.dir / "report.md"
-        text = path.read_text(encoding="utf-8")
-        bound = [
-            block
-            for block in text.split("\n\n")
-            if "[registry note]" in block
-        ]
-        self.assertEqual(1, len(bound), text)
-        path.write_text(text.replace(bound[0] + "\n\n", ""), encoding="utf-8")
-        self.run_in("review", "start", "content")
-        note = json.loads(
-            (self.dir / "reviews" / "content.json").read_text(encoding="utf-8")
+        self.assertNotIn("claim_support", out)
+        missing = alx._note_completeness(
+            alx.Workspace(self.dir), self.state(), self.ledger(), "content"
         )
-        entries = {entry["claim_id"]: entry["paragraph"] for entry in note["claim_support"]}
-        self.assertIsNone(entries["C2"])
-        _code, out = self.run_in("review", "finish", "content")
-        self.assertIn("claim_support.1.paragraph", out)
+        # status + score/rationale per score key + one per check key +
+        # section_reviews + completion_note: the form, whatever the claim count.
+        self.assertEqual(
+            3 + 2 * len(alx.CONTENT_SCORE_KEYS) + len(alx.CONTENT_CHECK_KEYS),
+            len(missing),
+            missing,
+        )
 
     def test_review_start_prints_the_rewild_guide(self):
         self.bootstrap()
@@ -3398,8 +3418,12 @@ class FileArgumentTests(AlxTestCase):
 
     def assert_refused(self, flag, code, out):
         self.assertEqual(2, code, out)
-        self.assertIn(f"{flag} expects a file path", out)
-        self.assertIn("(D10)", out)
+        # Restated for the message that names the resolved path and the cwd.
+        self.assertIn(f"{flag}: no file at ", out)
+        self.assertIn(f"(cwd {Path.cwd()})", out)
+        self.assertIn(
+            "paths are relative to the current directory or use --dir", out
+        )
         self.assertNotIn("Traceback", out)
 
     def test_init_refuses_prose_for_subject_and_reader(self):
@@ -4033,3 +4057,110 @@ class PortfolioVocabularyTests(AlxTestCase):
             ("--role", alx.SOURCE_ROLES),
         ):
             self.assertIn(f"{flag}: {', '.join(values)}", out)
+
+
+class FlowFixTests(AlxTestCase):
+    """The blocker audit's flow fixes: skeleton, foreign links, degrade, bind."""
+
+    FOREIGN = "https://elsewhere.example/page"
+
+    def issue_helper(self):
+        issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
+        for name in (
+            "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
+            "bootstrap", "draft_report", "ledger", "state",
+        ):
+            setattr(issue_tests, name, getattr(self, name))
+        return issue_tests
+
+    def link_a_foreign_url(self):
+        path = self.dir / "report.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace(
+                "so the counts above are",
+                f"so the counts [above]({self.FOREIGN}) are",
+            ),
+            encoding="utf-8",
+        )
+
+    # item 1 ---------------------------------------------------------------
+    def test_a_fresh_workspace_starts_with_a_valid_limitations_list(self):
+        code, out = self.init()
+        self.assertEqual(0, code, out)
+        self.assertEqual([], self.ledger()["synthesis"]["limitations"])
+        code, out = self.run_in("check")
+        self.assertNotIn("limitations", out)
+
+    # item 2 ---------------------------------------------------------------
+    def test_a_foreign_link_prints_a_remove_remedy(self):
+        self.bootstrap()
+        self.link_a_foreign_url()
+        _code, out = self.run_in("check")
+        self.assertIn("binding/link-not-in-ledger", out)
+        self.assertIn(f"Remove: `remove link {self.FOREIGN} from report.md`", out)
+
+    def test_deliver_strips_the_foreign_link_and_issues(self):
+        from contextlib import ExitStack
+
+        issue_tests = self.issue_helper()
+        issue_tests.prepared()
+        self.link_a_foreign_url()
+        with ExitStack() as stack:
+            issue_tests.stub_gates(stack)
+            code, out = self.run_in("issue")
+            self.assertEqual(1, code, out)
+            self.assertIn("binding/link-not-in-ledger", out)
+            code, out = self.run_in("issue", "--deliver")
+        self.assertEqual(0, code, out)
+        report = (self.dir / "report.md").read_text(encoding="utf-8")
+        self.assertNotIn(self.FOREIGN, report)
+        # The anchor text stays; only the URL goes.
+        self.assertIn("so the counts above are", report)
+        self.assertTrue((self.dir / "receipts" / "issue.json").exists())
+
+    # item 4 ---------------------------------------------------------------
+    def test_the_next_command_degrades_to_deliver(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.set_remaining(5)
+        code, out = self.run_in("status")
+        self.assertEqual(0, code, out)
+        self.assertIn("Next: `alx issue --deliver`", out)
+        self.assertNotIn("alx snapshot", out)
+        self.assertNotIn("alx review start", out)
+
+    # item 8 ---------------------------------------------------------------
+    def test_claim_bind_takes_repeated_pairs_and_the_flag_form(self):
+        self.bootstrap()
+        code, out = self.run_in("claim", "bind", "C1:1", "C2:2")
+        self.assertEqual(0, code, out)
+        bindings = self.state()["bindings"]
+        self.assertEqual(1, bindings["C1"])
+        self.assertEqual(2, bindings["C2"])
+        code, out = self.run_in("claim", "bind", "C1", "--paragraph", "3")
+        self.assertEqual(0, code, out)
+        self.assertEqual(3, self.state()["bindings"]["C1"])
+        code, out = self.run_in("claim", "bind", "C9:1")
+        self.assertEqual(1, code, out)
+        self.assertIn("C9 is not in the ledger", out)
+
+    # item 9 ---------------------------------------------------------------
+    def test_a_producer_extract_length_remedy_names_the_claim_file(self):
+        item = alx.Finding(
+            family="ledger/extract-length",
+            severity="warn",
+            klass="A",
+            ids=["C1"],
+            message="Extract is shorter than the threshold.",
+            fix="extend the quote in claims/<file>",
+            remove="",
+        )
+        named = alx.render_grouped(
+            alx.adopt([item], claim_files={"C1": "claims/batch.json"})
+        )
+        self.assertIn("extend the quote in claims/batch.json", named)
+        self.assertNotIn("claims/<file>", named)
+        bare = alx.render_grouped(alx.adopt([item]))
+        self.assertIn("extend the quote in claims/*.json", bare)
+        self.assertNotIn("claims/<file>", bare)

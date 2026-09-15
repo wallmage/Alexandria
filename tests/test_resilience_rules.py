@@ -507,8 +507,11 @@ class UnclassifiedSourcePortfolioTests(AlxTestCase):
             self.assertNotIn(family, hard)
 
     def test_every_classification_finding_is_a_warning(self):
+        """Restates test_every_classification_finding_is_class_a: R28 prints no
+        class suffix, so the tier is the whole label."""
         _code, out = self.workspace_without_classification()
         warn_block = out.split("=== WARN", 1)[1]
+        self.assertNotIn("waivable by --deliver", warn_block.split("=== STATUS")[0])
         self.assertIn("[ledger/portfolio] 1", warn_block)
         self.assertIn("[ledger/provenance] 2", warn_block)
         self.assertIn("[ledger/key-claim] 1", warn_block)

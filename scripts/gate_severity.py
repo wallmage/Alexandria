@@ -63,7 +63,9 @@ def group(findings):
     return grouped
 
 
-CLASS_LABELS = {"F": " (F)", "A": " (A, waivable by --deliver)"}
+#: R28: "Class A" is gone — a warning is printed with its fix and blocks
+#: nothing, so only the HARD tier carries a label, and only ever `F`.
+CLASS_LABELS = {"F": " (F)"}
 
 
 def render_grouped(findings, *, per_family=5, with_class=False):
@@ -73,10 +75,9 @@ def render_grouped(findings, *, per_family=5, with_class=False):
     lines = [f"=== HARD {len(hard)} (blocks issue) ==="]
 
     def label(members):
-        if not with_class:
+        if not with_class or not any(item.klass == "F" for item in members):
             return ""
-        classes = {item.klass for item in members}
-        return CLASS_LABELS["F" if "F" in classes else "A"]
+        return CLASS_LABELS["F"]
 
     def emit(items):
         for family, members in group(items).items():
@@ -97,11 +98,7 @@ def render_grouped(findings, *, per_family=5, with_class=False):
     emit(hard)
     lines.append(f"=== WARN {len(warn)} ===")
     emit(warn)
-    split = ""
-    if with_class:
-        class_f = len([item for item in hard if item.klass == "F"])
-        split = f" ({class_f} Class F, {len(hard) - class_f} Class A)"
-    lines.append(f"=== STATUS: {len(hard)} hard{split}, {len(warn)} warn ===")
+    lines.append(f"=== STATUS: {len(hard)} hard, {len(warn)} warn ===")
     return "\n".join(lines)
 
 

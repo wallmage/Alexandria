@@ -116,6 +116,16 @@ class FindingRecordTests(unittest.TestCase):
         self.assertIn("direction drifted.", rendered)
         self.assertEqual("[FAIL] direction drifted", as_text(foreign))
 
+    def test_a_warning_group_carries_no_class_suffix(self):
+        """R28: only the HARD tier is labelled, and the STATUS line is untiered."""
+        warn = self._finding(severity="warn", klass="A", family="ledger/coverage")
+        rendered = render_grouped([self._finding(), warn], with_class=True)
+        self.assertIn("[ledger/quantity] 1 (F)", rendered)
+        self.assertIn("[ledger/coverage] 1\n", rendered)
+        self.assertNotIn("waivable by --deliver", rendered)
+        self.assertNotIn("Class F", rendered)
+        self.assertIn("=== STATUS: 1 hard, 1 warn ===", rendered)
+
     def test_hard_errors_accept_finding_records(self):
         findings = [
             self._finding(),

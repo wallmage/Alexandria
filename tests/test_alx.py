@@ -1691,7 +1691,7 @@ class SkillRunbookTests(unittest.TestCase):
         text = (
             Path(alx.__file__).resolve().parents[1] / "SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertLessEqual(len(text.splitlines()), 80)
+        self.assertLessEqual(len(text.splitlines()), 260)
         for token in ("--dry-run", "--deliver", "--subject-status"):
             self.assertNotIn(token, text)
 

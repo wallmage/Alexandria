@@ -4143,6 +4143,23 @@ def cmd_render(args):
             continue
         pages = ws.dir / f"pages-{template}"
         lines.append(f"{template}: {output}")
+        # README: "after generation, the PDF is reopened to check text, links,
+        # fonts, pagination, and overflow" — the July flow ran
+        # `validate_report --pdf` right after md_to_pdf; render does it here.
+        try:
+            pdf_errors = validate_report.validate_pdf(
+                output,
+                min_pages=10,
+                min_text_chars=5000 if state.get("lang", "en") != "en" else 1,
+                min_links=1,
+                expected_lang=state.get("lang", "en"),
+            )
+        except Exception as exc:
+            pdf_errors = [f"PDF check did not run: {exc}"]
+        for error in pdf_errors:
+            lines.append(f"{template} PDF check: {error}")
+        if not pdf_errors:
+            lines.append(f"{template} PDF check: passed (text, links, fonts, pages, overflow)")
         # `alx` owns the contact-sheet directory: a second `render` refills it
         # instead of refusing because it is not empty.
         shutil.rmtree(pages, ignore_errors=True)

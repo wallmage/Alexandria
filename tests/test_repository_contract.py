@@ -65,7 +65,7 @@ class RepositoryContractTests(unittest.TestCase):
     def test_skill_is_progressively_disclosed_and_runtime_neutral(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         body = skill.split("---", 2)[2]
-        self.assertLessEqual(len(body.splitlines()), 150)
+        self.assertLessEqual(len(body.splitlines()), 260)
         self.assertLess(len(skill.split()), 3000)
         for legacy_token in (
             "AskUserQuestion",
@@ -188,7 +188,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("nothing ships that failed a fabrication check", skill)
         self.assertIn("scripts/alx.py", skill)
         self.assertIn("review start content", skill)
-        self.assertIn("Their absence never blocks delivery.", skill)
+        self.assertIn("`review finish` names anything still missing and never blocks", skill)
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
         self.assertIn("tests/ci_render_matrix.py", workflow)

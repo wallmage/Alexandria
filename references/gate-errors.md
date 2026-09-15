@@ -18,8 +18,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Ledger (`check` b / `validate_ledger`)
 
-### `ledger/quantity` — F
-- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year.
+### `ledger/quantity` — F/W
+- **rule:** claim quantity uncovered or contradicted by extracts. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R26 (W): a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) is a warn when the extracts do not carry it; digits, percentages, currency and dates stay hard.
 - **fix:** `alx find S<n> TOKEN` then extend quote, or reword claim to dated form.
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
@@ -66,20 +66,20 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx claim drop C<n> --apply` if the invalid object is a claim.
 - **example:** missing `schema_version`.
 
-### `ledger/key-claim` — F
-- **rule:** key/central claim rests on `unverified`/interested-only sources, or lacks `decision_relevance`/`what_would_change`. `unverified` counts as interested.
+### `ledger/key-claim` — F/W
+- **rule:** key/central claim rests on `unverified`/interested-only sources, or lacks `decision_relevance`/`what_would_change`. `unverified` counts as interested. R27 (W): when every source under the claim is still at the default `unverified`, nobody has classified them yet and the finding warns.
 - **fix:** `alx source set S<n> --provenance P`
 - **remove:** `alx claim drop C<n> --apply`
 - **example:** C5 is central; S1 and S2 are both `unverified`.
 
-### `ledger/provenance` — F
-- **rule:** provenance/roles/accountability combination is not admissible for the claim's use.
+### `ledger/provenance` — F/W
+- **rule:** provenance/roles/accountability combination is not admissible for the claim's use. R27 (W): a source still at the default `unverified`, and coverage resting only on such sources, warn instead.
 - **fix:** `alx source set S<n> --provenance P --role R`
 - **remove:** `alx fetch --id S<n> --refresh`
 - **example:** subject-controlled page classified `primary_independent`.
 
-### `ledger/portfolio` — F
-- **rule:** the source portfolio is not independent enough for the claim set (all sources interested, or one family only).
+### `ledger/portfolio` — W
+- **rule:** the source portfolio is not independent enough for the claim set (all sources interested, or one family only). R27: missing or default source classification is a warn, never hard; the message is unchanged, and triangulation still computes from whatever is set.
 - **fix:** `alx source set S<n> --provenance P`, or fetch an independent source. The message lists the allowed values, one line each:
   - `--provenance`: `primary_independent, primary_interested, secondary_independent, secondary_dependent, unverified`
   - `--type`: `accountable_record, peer_reviewed, preprint, official_documentation, dataset_or_test, reported_interview, news_report, opinion_or_forecast, marketing, anecdote`
@@ -132,17 +132,11 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx fetch --id S<n> --refresh`
 - **example:** S4 has no `published` and no reason.
 
-### `ledger/person` — F/W
-- **rule:** person-linked claim without a registered person, or `living_status: unknown`. R15 (W): a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix` and warns; the harm rules then run on the linked claim and stay hard. R20 (F): both protected-person messages name the person (`P3 Yang (living_status living)`), one prints the allowed roles verbatim (`neutral|harmful|sensitive_private_fact|response|resolution`) with the got-value, the other the assessment shape (`{"classification": <person_claim_role>, "rationale": >=N chars}`) with the computed floor and the actual length; the remedy names the claim's own input file.
-- **fix:** `alx ledger merge people.json` (auto-link warn: `alx check --fix`)
-- **remove:** `alx claim drop C<n> --apply`
-- **example:** C3 names P1 while P1 status is `unknown`.
-
-### `ledger/harm` — F
-- **rule:** living/recently_deceased/unknown person claim without a complete `human_harm_review`; the message lists the missing keys.
-- **fix:** `alx ledger merge people.json`, then re-add the claim with `human_harm_review`.
-- **remove:** `alx claim drop C<n> --apply`
-- **example:** missing `human_harm_review.right_of_reply`.
+### `ledger/person` — W
+- **rule:** R25: the only person rule left. A `person_ids` entry that names nobody in `ledger.people` warns; `living_status`, `person_claim_role`, `person_claim_assessment` and `human_harm_review` gate nothing (the fields stay optional in the schema and are ignored), and `ledger/harm` is no longer emitted. R15 auto-link stays, silently: a claim naming a registered person is linked by `claim add` / `check --fix` with no finding.
+- **fix:** `alx ledger merge people.json`
+- **remove:** n/a (Class A)
+- **example:** `C5: person_ids P9 not in ledger.people; run alx ledger merge people or drop the id`.
 
 ### `ledger/excluded-supports` — F
 - **rule:** a surviving claim's `supports` names a claim in `excluded_claims`.

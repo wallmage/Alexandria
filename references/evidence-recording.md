@@ -24,17 +24,10 @@ dates, versions, scores, directions, and statuses must be traceable to
 the fact was true. `supports` points downward only, to the evidence a claim rests
 on; cycles are rejected.
 
-For reports centered on people or sensitive personal claims, inventory known
-people through `people` and `person_ids`. Classify every person-linked claim with
-`person_claim_role` and a substantive `person_claim_assessment`; do not rely
-on supplied IDs alone to decide whether a claim is harmful. Harmful claims
-about a living, recently
-deceased, or unknown-status person require
-`human_harm_review`: exact legal stage, accountable corroboration (or a limited
-single-source exception), attribution, resolution search, right of reply, and
-privacy relevance. A response must reciprocally name the harmful claim in
-`responds_to_claim_ids` and use subject-origin evidence; a resolution must use
-`resolves_claim_ids`. Carry either in the same report paragraph.
+For reports centered on people, inventory known people through `people` and
+`person_ids`. A `person_ids` entry that names nobody in `people` warns; a claim
+naming a registered person is linked for you. Nothing else about a person gates
+a claim (R25).
 
 Mark changing claims such as price, availability, leadership, policy, and
 current product behavior as `time_sensitive`, and record a non-null `as_of`

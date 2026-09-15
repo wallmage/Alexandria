@@ -634,7 +634,12 @@ class ClaimTests(AlxTestCase):
         self.assertIn("C1 FAIL", out)
         self.assertEqual([], self.ledger()["claims"])
 
-    def test_person_claims_refused_while_status_unknown(self):
+    def test_person_claims_accepted_while_status_unknown(self):
+        """R25 restatement of test_person_claims_refused_while_status_unknown.
+
+        `living_status` gates nothing; an unregistered id is the only person
+        finding, and it warns.
+        """
         subject = self.root / "subject.txt"
         subject.write_text("Someone Notable\n", encoding="utf-8")
         self.run_alx(
@@ -652,13 +657,11 @@ class ClaimTests(AlxTestCase):
         self.fetch("https://example.org/study")
         claim = dict(CLAIM_ONE)
         claim["person_ids"] = ["P1"]
-        claim["person_claim_role"] = "neutral"
         batch = self.write_json("claims.json", [claim])
         code, out = self.run_in("claim", "add", batch)
-        self.assertEqual(1, code)
-        self.assertIn("living_status", out)
-        self.assertIn("alx ledger merge", out)
-        self.assertEqual([], self.ledger()["claims"])
+        self.assertEqual(0, code, out)
+        self.assertNotIn("living_status", out)
+        self.assertEqual(["C1"], [c["claim_id"] for c in self.ledger()["claims"]])
 
     def test_claim_drop_plan_then_apply_cascade(self):
         self.bootstrap()

@@ -1116,396 +1116,7 @@ class KeyClaimFoundationTests(unittest.TestCase):
         )
 
 
-class LivingPersonSafetyTests(unittest.TestCase):
-    def test_explicit_person_claim_role_triggers_review_beyond_keyword_lists(self):
-        data = living_harm_ledger()
-        claim = data["claims"][-1]
-        claim["claim"] = "The regulator reported that Alex Doe embezzled public funds."
-        claim["human_harm_review"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("protected-person harm claim requires" in error for error in errors),
-            errors,
-        )
-
-    def test_registered_person_name_is_auto_linked_with_a_warn(self):
-        data = living_harm_ledger()
-        claim = data["claims"][-1]
-        claim["claim"] = "Alex Doe embezzled public funds."
-        claim["person_ids"] = []
-        claim.pop("person_claim_role")
-        claim["human_harm_review"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("person_ids auto-linked" in error for error in errors),
-            errors,
-        )
-
-    def test_person_link_requires_an_explicit_claim_role(self):
-        # R20 restatement: the message now names the person and the vocabulary
-        # instead of asking for "an explicit person_claim_role classification".
-        data = living_harm_ledger()
-        data["claims"][-1].pop("person_claim_role")
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any(
-                "needs person_claim_role one of neutral|harmful|"
-                "sensitive_private_fact|response|resolution; got None" in error
-                for error in errors
-            ),
-            errors,
-        )
-
-    def test_neutral_classification_cannot_override_harmful_wording(self):
-        data = living_harm_ledger()
-        claim = data["claims"][-1]
-        claim["claim"] = "Alex Doe embezzled public funds."
-        claim["person_claim_role"] = "neutral"
-        claim["person_claim_assessment"] = {
-            "classification": "neutral",
-            "rationale": (
-                "This deliberately incorrect assessment attempts to label "
-                "an accusation of embezzlement as neutral background."
-            ),
-        }
-        claim["human_harm_review"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("harmful wording conflicts" in error for error in errors),
-            errors,
-        )
-
-    def test_person_claim_assessment_is_required_and_role_bound(self):
-        data = living_harm_ledger()
-        data["claims"][-1].pop("person_claim_assessment")
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("person_claim_assessment" in error for error in errors),
-            errors,
-        )
-
-    def test_unrelated_same_person_claim_cannot_count_as_a_response(self):
-        data = living_harm_ledger()
-        response = data["claims"][0]
-        response["claim"] = "Alex Doe founded a company."
-        response["person_ids"] = ["P1"]
-        response["person_claim_role"] = "neutral"
-        response["person_claim_assessment"] = {
-            "classification": "neutral",
-            "rationale": (
-                "This claim records an ordinary company-founding fact and "
-                "does not answer or resolve the alleged misconduct."
-            ),
-        }
-        review = data["claims"][-1]["human_harm_review"]
-        review["right_of_reply"] = {
-            "status": "documented",
-            "response_claim_ids": ["C1"],
-            "search_record": None,
-        }
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("must reciprocally respond" in error for error in errors),
-            errors,
-        )
-
-    def test_unrelated_same_person_claim_cannot_count_as_a_resolution(self):
-        data = living_harm_ledger()
-        resolution = data["claims"][0]
-        resolution["claim"] = "Alex Doe founded a company."
-        resolution["person_ids"] = ["P1"]
-        resolution["person_claim_role"] = "neutral"
-        resolution["person_claim_assessment"] = {
-            "classification": "neutral",
-            "rationale": (
-                "This claim records an ordinary company-founding fact and "
-                "does not answer or resolve the alleged misconduct."
-            ),
-        }
-        review = data["claims"][-1]["human_harm_review"]
-        review["resolution_status"] = "resolved"
-        review["resolution_claim_ids"] = ["C1"]
-        review["resolution_search"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("must reciprocally resolve" in error for error in errors),
-            errors,
-        )
-
-    def test_person_brief_pronoun_cannot_omit_the_primary_subject_link(self):
-        data = living_harm_ledger()
-        data["brief"] = {"archetype": "person"}
-        claim = data["claims"][-1]
-        claim["claim"] = (
-            "The regulator alleged that he committed procurement fraud."
-        )
-        claim["person_ids"] = []
-        claim["human_harm_review"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any(
-                "must link the protected primary subject P1" in error
-                for error in errors
-            ),
-            errors,
-        )
-
-    def test_legal_allegation_cannot_be_classified_as_nonlegal(self):
-        data = living_harm_ledger()
-        data["claims"][-1]["human_harm_review"]["legal_stage"] = "nonlegal"
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("cannot be classified as nonlegal" in error for error in errors),
-            errors,
-        )
-
-    def test_denied_allegation_is_not_support_for_an_allegation(self):
-        data = living_harm_ledger()
-        for evidence in data["claims"][-1]["source_evidence"]:
-            evidence["extract_or_location"] = (
-                "The source states that the regulator did not allege "
-                "procurement fraud by Alex Doe."
-            )
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("source evidence does not establish" in error for error in errors),
-            errors,
-        )
-
-    def test_withdrawal_evidence_cannot_remain_marked_unresolved(self):
-        data = living_harm_ledger()
-        data["claims"][-1]["source_evidence"][0][
-            "extract_or_location"
-        ] += " The regulator later withdrew the allegation."
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("unresolved harm conflicts" in error for error in errors),
-            errors,
-        )
-
-    def test_legal_allegation_cannot_skip_resolution_review(self):
-        data = living_harm_ledger()
-        review = data["claims"][-1]["human_harm_review"]
-        review["resolution_status"] = "not_applicable"
-        review["resolution_search"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("cannot mark resolution as not_applicable" in error for error in errors),
-            errors,
-        )
-
-    def test_unrelated_second_source_does_not_count_as_harm_corroboration(self):
-        data = living_harm_ledger()
-        data["claims"][-1]["source_evidence"][1][
-            "extract_or_location"
-        ] = "The weather report says the sky was clear."
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("two independent source families" in error for error in errors),
-            errors,
-        )
-
-    def test_harm_claim_must_state_the_declared_legal_stage(self):
-        data = living_harm_ledger()
-        data["claims"][-1]["claim"] = (
-            "The regulator reported that Alex Doe committed procurement fraud."
-        )
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("legal stage" in error.lower() for error in errors),
-            errors,
-        )
-
-    def test_right_of_reply_cannot_be_marked_not_applicable(self):
-        data = living_harm_ledger()
-        data["claims"][-1]["human_harm_review"]["right_of_reply"] = {
-            "status": "not_applicable",
-            "response_claim_ids": [],
-            "search_record": None,
-        }
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("cannot be not_applicable" in error for error in errors),
-            errors,
-        )
-
-    def test_right_of_reply_claim_must_belong_to_the_same_person(self):
-        data = living_harm_ledger()
-        data["claims"][-1]["human_harm_review"]["right_of_reply"] = {
-            "status": "documented",
-            "response_claim_ids": ["C1"],
-            "search_record": None,
-        }
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("same protected person" in error for error in errors),
-            errors,
-        )
-
-    def test_person_archetype_requires_a_registered_primary_subject(self):
-        data = json.loads(
-            (ROOT / "tests" / "fixtures" / "evidence-ledger.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        data["brief"]["archetype"] = "person"
-        data["people"] = []
-        schema = json.loads(
-            (ROOT / "references" / "evidence-ledger.schema.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        errors = validate_ledger.validate_schema(data, schema)
-        self.assertTrue(any("people" in error for error in errors), errors)
-
-    def test_duplicate_person_ids_cannot_disable_protection(self):
-        data = living_harm_ledger()
-        data["people"].append(
-            {
-                "person_id": "P1",
-                "name": "Historical Person",
-                "aliases": [],
-                "living_status": "deceased",
-                "public_role": "public",
-                "relationship": "adjacent",
-            }
-        )
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("Duplicate person ID" in error for error in errors),
-            errors,
-        )
-
-    def test_charged_battery_is_not_a_legal_harm_claim(self):
-        data = living_harm_ledger()
-        claim = data["claims"][-1]
-        claim["claim"] = "Alex Doe charged the battery before the field test."
-        claim["person_claim_role"] = "neutral"
-        claim["person_claim_assessment"] = {
-            "classification": "neutral",
-            "rationale": (
-                "The verb describes charging an electronic battery and not "
-                "a legal accusation or harmful personal claim."
-            ),
-        }
-        claim["human_harm_review"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertFalse(
-            any("human_harm_review" in error for error in errors),
-            errors,
-        )
-
-    def test_sensitive_fact_cannot_use_a_nonprivacy_review_category(self):
-        data = living_harm_ledger()
-        claim = data["claims"][-1]
-        claim["claim"] = (
-            "The regulator reported Alex Doe's private medical diagnosis."
-        )
-        claim["human_harm_review"]["category"] = "wrongdoing"
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("sensitive_private_fact" in error for error in errors),
-            errors,
-        )
-
-    def test_single_source_harm_cannot_feed_a_key_report_claim(self):
-        data = living_harm_ledger()
-        harm_claim = data["claims"][-1]
-        limitation = "Only one accountable source was available."
-        harm_claim["claim"] += " " + limitation
-        harm_claim["human_harm_review"]["source_floor"] = (
-            "single_source_limited"
-        )
-        harm_claim["human_harm_review"][
-            "sourcing_limitation_excerpt"
-        ] = limitation
-        harm_claim["triangulation"]["status"] = "limited"
-        data["claims"][0]["supports"] = ["C2"]
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("key report claim" in error.lower() for error in errors),
-            errors,
-        )
-
-    def test_named_protected_person_cannot_bypass_review_by_omitting_person_id(self):
-        data = living_harm_ledger()
-        data["claims"][-1]["person_ids"] = []
-        data["claims"][-1]["human_harm_review"] = None
-        errors = validate_ledger.validate_references(data)
-        # R15: the link is derived from the name, and the harm rules then run
-        # on the linked claim.
-        self.assertTrue(
-            any("protected-person harm claim requires" in error for error in errors),
-            errors,
-        )
-
-    def test_legal_stage_cannot_exceed_what_the_sources_establish(self):
-        data = living_harm_ledger()
-        claim = data["claims"][-1]
-        claim["claim"] = (
-            "The regulator said Alex Doe was convicted of procurement fraud."
-        )
-        claim["human_harm_review"]["legal_stage"] = "convicted"
-        claim["human_harm_review"]["attributed_to"] = "The regulator"
-        claim["source_evidence"] = [
-            {
-                "source_id": "S1",
-                "extract_or_location": (
-                    "The regulator charged Alex Doe with procurement fraud."
-                ),
-            },
-            {
-                "source_id": "S2",
-                "extract_or_location": (
-                    "The independent report confirms that charges were filed."
-                ),
-            },
-        ]
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("legal stage" in error.lower() for error in errors),
-            errors,
-        )
-
-    def test_known_resolution_must_travel_with_the_harmful_report_excerpt(self):
-        data = living_harm_ledger()
-        harm_claim = data["claims"][-1]
-        resolution_claim = data["claims"][0]
-        resolution_claim["claim"] = "The conviction was overturned."
-        resolution_claim["report_excerpts"] = [
-            "A later court overturned the conviction."
-        ]
-        harm_claim["include_in_report"] = True
-        harm_claim["report_excerpts"] = [
-            "The regulator alleged procurement fraud by Alex Doe."
-        ]
-        harm_claim["human_harm_review"]["resolution_status"] = "resolved"
-        harm_claim["human_harm_review"]["resolution_claim_ids"] = ["C1"]
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("same report excerpt" in error.lower() for error in errors),
-            errors,
-        )
-
-    def test_harmful_claim_about_a_living_person_requires_a_bound_review(self):
-        data = living_harm_ledger()
-        data["claims"][1]["human_harm_review"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("C2: protected-person harm claim requires" in error for error in errors),
-            errors,
-        )
-
-    def test_corroboration_needs_two_families_and_an_accountable_source(self):
-        data = living_harm_ledger()
-        data["sources"][1]["source_family"] = data["sources"][0]["source_family"]
-        data["sources"][0]["accountability_basis"] = "none"
-        data["sources"][0].pop("accountability_note")
-        errors = validate_ledger.validate_references(data)
-        joined = " ".join(errors)
-        self.assertIn("needs two independent source families", joined)
-        self.assertIn("needs an accountable source", joined)
-
+class AccountabilityNoteFloorTests(unittest.TestCase):
     def test_accountability_note_has_a_script_aware_prose_floor(self):
         """H7: schema floor 20 fits CJK; Latin notes still owe 40 characters."""
         data = living_harm_ledger()
@@ -1518,23 +1129,6 @@ class LivingPersonSafetyTests(unittest.TestCase):
         self.assertNotIn(
             "accountability_note", " ".join(validate_ledger.validate_references(data))
         )
-
-    def test_right_of_reply_cannot_be_omitted(self):
-        data = living_harm_ledger()
-        data["claims"][1]["human_harm_review"]["right_of_reply"] = None
-        errors = validate_ledger.validate_references(data)
-        self.assertTrue(
-            any("right of reply" in error for error in errors),
-            errors,
-        )
-
-    def test_complete_living_person_safety_record_passes(self):
-        errors = [
-            error
-            for error in validate_ledger.validate_references(living_harm_ledger())
-            if error.startswith("C2:")
-        ]
-        self.assertEqual([], errors)
 
 
 class EstimateTests(unittest.TestCase):
@@ -3470,7 +3064,11 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         self.assertIn("ledger/extract-length", families)
         self.assertIn("ledger/person", families)
 
-    def test_person_unknown_status_refuses_linked_claim(self):
+    def test_person_unknown_status_raises_no_person_finding(self):
+        """R25 restatement of test_person_unknown_status_refuses_linked_claim.
+
+        A registered person's `living_status` no longer gates any claim.
+        """
         data = valid_quality_ledger()
         data["people"] = [
             {
@@ -3483,15 +3081,9 @@ class ResilienceLedgerApiTests(unittest.TestCase):
             }
         ]
         data["claims"][0]["person_ids"] = ["P1"]
-        data["claims"][0]["person_claim_role"] = "neutral"
-        data["claims"][0]["person_claim_assessment"] = {
-            "classification": "neutral",
-            "rationale": "x" * 40,
-        }
         findings = validate_ledger.claim_findings(data["claims"][0], data)
-        self.assertTrue(
-            any("unknown" in item.message.lower() for item in findings),
-            findings,
+        self.assertEqual(
+            [], [item for item in findings if item.family == "ledger/person"]
         )
 
     def test_schema_accepts_aliases_excluded_claims_and_tooling(self):
@@ -3592,74 +3184,6 @@ class OfflineContextChangeTests(unittest.TestCase):
             families = [item.family for item in findings]
             self.assertIn("fidelity/context-changed", families)
             self.assertNotIn("fidelity/mismatch", families)
-
-
-class CjkRationaleMinimumTests(unittest.TestCase):
-    """Spec §7.1: rationale minimums are halved for CJK prose (40 -> 20).
-
-    The schema cannot be script-aware, so it carries the CJK floor of 20 and
-    `validate_ledger` keeps the 40-character floor for non-CJK prose.
-    """
-
-    ZH_29 = "本主張指控在世主要當事人涉及刑事不當行為，因此需完整審查。"
-    ZH_15 = "本主張指控刑事不當行為，需複核"
-    EN_30 = "Living subject alleged fraud x"
-
-    def _ledger(self, rationale):
-        data = living_harm_ledger()
-        data["claims"][-1]["person_claim_assessment"]["rationale"] = rationale
-        return data
-
-    def _schema(self):
-        return json.loads(
-            (ROOT / "references" / "evidence-ledger.schema.json").read_text(
-                encoding="utf-8"
-            )
-        )
-
-    def _person_errors(self, rationale):
-        return [
-            error
-            for error in validate_ledger.validate_references(self._ledger(rationale))
-            if "person_claim_assessment" in error
-        ]
-
-    def _schema_errors(self, rationale):
-        return [
-            error
-            for error in validate_ledger.validate_schema(
-                self._ledger(rationale), self._schema()
-            )
-            if "rationale" in error
-        ]
-
-    def test_chinese_rationale_of_29_characters_passes_schema_and_validator(self):
-        self.assertEqual(29, len(self.ZH_29))
-        self.assertEqual([], self._schema_errors(self.ZH_29))
-        self.assertEqual([], self._person_errors(self.ZH_29))
-
-    def test_chinese_rationale_of_15_characters_fails_both(self):
-        self.assertEqual(15, len(self.ZH_15))
-        self.assertTrue(self._schema_errors(self.ZH_15))
-        errors = self._person_errors(self.ZH_15)
-        # R20 restatement: the threshold and the actual are now printed as
-        # the assessment's own shape ("rationale": >=N chars) plus the got-value.
-        self.assertTrue(
-            any('"rationale": >=20 chars}; got' in error for error in errors),
-            errors,
-        )
-        self.assertTrue(any("15 chars" in error for error in errors), errors)
-
-    def test_english_rationale_of_30_characters_fails_the_validator(self):
-        self.assertEqual(30, len(self.EN_30))
-        self.assertEqual([], self._schema_errors(self.EN_30))
-        errors = self._person_errors(self.EN_30)
-        # R20 restatement: same wording change as the CJK case above.
-        self.assertTrue(
-            any('"rationale": >=40 chars}; got' in error for error in errors),
-            errors,
-        )
-        self.assertTrue(any("30 chars" in error for error in errors), errors)
 
 
 class SchemaRemedyTests(unittest.TestCase):
@@ -3785,15 +3309,17 @@ class ClaimRemedyTests(unittest.TestCase):
             if needle in item.message
         ]
 
-    def test_unlinked_person_remedy_is_the_mechanical_link(self):
-        data = living_harm_ledger()
-        claim = data["claims"][-1]
-        claim["claim"] = "Alex Doe embezzled public funds."
-        claim["person_ids"] = []
-        claim.pop("person_claim_role", None)
-        claim["human_harm_review"] = None
+    def test_unregistered_person_remedy_is_the_ledger_merge(self):
+        """R25 restatement of test_unlinked_person_remedy_is_the_mechanical_link.
+
+        The auto-link is silent now; the only person finding left is an id
+        that names nobody in `ledger.people`.
+        """
+        data = valid_quality_ledger()
+        data["claims"][0]["person_ids"] = ["P9"]
         self.assertEqual(
-            ["alx check --fix"], self._fixes(data, "person_ids auto-linked")
+            ["alx ledger merge people.json"],
+            self._fixes(data, "not in ledger.people"),
         )
 
     def test_two_extracts_from_one_source_raise_no_reference_finding(self):

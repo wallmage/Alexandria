@@ -275,7 +275,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Rewild (`check` e / `rewild_gate`)
 
 ### `fidelity/semantic` — W
-- **rule:** negation, direction, causal or association drift between snapshot and report, measured on citation-stripped, quote-masked prose with monotonic clause alignment.
+- **rule:** negation, direction, causal or association drift between snapshot and report, measured on citation-stripped checker prose with monotonic clause alignment. Narrow split-remnant artifacts may be excused heuristically and recorded in the receipt. When more than eight such exemptions accumulate, `alx check` adds one finding in this family: `N heuristic split-remnant exemptions exceed the limit of 8; a report with this much structural churn must be re-checked against the pre-Rewild source and re-drafted, not exempted.`
 - **fix:** `alx snapshot --restore`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** snapshot "did not exceed"; report "exceeded".
@@ -293,7 +293,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** 簡體 vocabulary in a zh-HK report.
 
 ### `rewild/ai-vocabulary` — W
-- **rule:** the checker's "AI vocabulary" section, length-scaled, counted on quote-masked prose.
+- **rule:** the checker's "AI vocabulary" section; pass when `len(hits) <= 1 and hits[0][1] <= 1`, counted on checker prose.
 - **fix:** edit prose (warning; never blocks)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** "delve" ×7 at 8,000 words.

@@ -3922,8 +3922,14 @@ class ClaimAddDryRunTests(AlxTestCase):
         worklog = (self.dir / "worklog.md").read_text(encoding="utf-8")
         code, out = self.run_in("claim", "add", "--dry-run", batch)
         self.assertEqual(1, code, out)
-        self.assertIn("C1 added", out)
+        self.assertIn("C1 would be added", out)
         self.assertIn("C3 FAIL", out)
+        self.assertTrue(
+            out.splitlines()[0].startswith("DRY RUN, nothing written:"),
+            out.splitlines()[0],
+        )
+        self.assertFalse((self.dir / ".alx" / "last-claim-add.txt").exists())
+        self.assertIn("next: alx claim add", out)
         self.assertEqual(ledger_bytes, (self.dir / "ledger.json").read_bytes())
         self.assertEqual(state_before, self.state())
         self.assertEqual(0, self.state()["counters"]["claims"])
@@ -3938,7 +3944,13 @@ class ClaimAddDryRunTests(AlxTestCase):
         code, live = self.run_in("claim", "add", batch)
         self.assertEqual(1, code, live)
         self.assertEqual(
-            [line for line in dry.splitlines() if line.startswith("C")],
+            [
+                line.replace("would be added", "added").replace(
+                    "would be replaced", "replaced"
+                )
+                for line in dry.splitlines()
+                if line.startswith("C")
+            ],
             [line for line in live.splitlines() if line.startswith("C")],
         )
         self.assertEqual({"C1", "C2"}, {c["claim_id"] for c in self.ledger()["claims"]})
@@ -4683,3 +4695,59 @@ class LiveRecheckNoteTests(AlxTestCase):
             "already verified offline against the cached pages by alx check)",
             issued["delivery_notes"],
         )
+
+
+class ClaimAddDryRunTranscriptTests(AlxTestCase):
+    """Field test 4: the rehearsal writes no transcript, the live run does."""
+
+    def test_a_live_run_after_a_dry_run_writes_the_transcript(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO])
+        self.run_in("claim", "add", "--dry-run", batch)
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertIn("full output: .alx/last-claim-add.txt", out)
+        transcript = (self.dir / ".alx" / "last-claim-add.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("C1 added", transcript)
+
+
+class LedgerMergeMissingClaimTests(AlxTestCase):
+    """Field test 4: a patch citing unadded claims says so in its first line."""
+
+    def patch_citing(self, *claim_ids):
+        return self.write_json(
+            "cov.json",
+            {
+                "coverage": [
+                    {**COVERAGE_PATCH["coverage"][0], "claim_ids": list(claim_ids)}
+                ]
+            },
+        )
+
+    def test_absent_claim_ids_lead_the_output(self):
+        self.bootstrap()
+        code, out = self.run_in("ledger", "merge", self.patch_citing("C1", "C9"))
+        self.assertEqual(
+            "1 claim ids not in the ledger (C9); run alx claim add first",
+            out.splitlines()[0],
+            out,
+        )
+        self.assertEqual(0, code, out)
+
+    def test_existing_claim_ids_print_no_such_line(self):
+        self.bootstrap()
+        code, out = self.run_in("ledger", "merge", self.patch_citing("C1", "C2"))
+        self.assertEqual(0, code, out)
+        self.assertNotIn("not in the ledger", out)
+
+    def test_malformed_patch_json_is_one_line(self):
+        self.bootstrap()
+        path = self.root / "patch_cov.json"
+        path.write_text('{"a":1}}', encoding="utf-8")
+        code, out = self.run_in("ledger", "merge", path)
+        self.assertEqual(1, code, out)
+        self.assertIn("is not valid JSON: Extra data at line 1 column 8", out)
+        self.assertNotIn("Traceback", out)

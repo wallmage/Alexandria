@@ -1843,6 +1843,8 @@ def cmd_claim_add(args):
         seen.add(claim["claim_id"])
         accepted += 1
         verb = "replaced" if replaced else "added"
+        if dry_run:
+            verb = f"would be {verb}"
         lines.append(
             f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
         )
@@ -1854,12 +1856,21 @@ def cmd_claim_add(args):
     tail = f"{len(failures)} failed"
     if failures:
         tail += ": " + " ".join(failures)
-    lines.insert(0, f"{len(items)} submitted, {accepted} accepted, {tail}")
-    # Field test 3: the whole diagnosis survives a `| tail -15` of the output.
-    transcript = ws.alx / "last-claim-add.txt"
-    transcript.parent.mkdir(parents=True, exist_ok=True)
-    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    lines.append("full output: .alx/last-claim-add.txt")
+    if dry_run:
+        # Field test 4: a rehearsal must not read as a committed run.
+        lines.insert(
+            0,
+            f"DRY RUN, nothing written: {len(items)} submitted, "
+            f"{accepted} would be accepted, {tail}",
+        )
+        lines.append(f"next: alx claim add {args.files[0]}")
+    else:
+        lines.insert(0, f"{len(items)} submitted, {accepted} accepted, {tail}")
+        # Field test 3: the whole diagnosis survives a `| tail -15` of the output.
+        transcript = ws.alx / "last-claim-add.txt"
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        lines.append("full output: .alx/last-claim-add.txt")
     _emit(
         ws,
         state,
@@ -2094,7 +2105,15 @@ def _deep_merge(target, patch):
 
 def cmd_ledger_merge(args):
     ws, state, ledger = _open(args)
-    patch = _read_json(args.patch)
+    try:
+        patch = _read_json(args.patch)
+    except json.JSONDecodeError as exc:
+        print(
+            f"{args.patch} is not valid JSON: {exc.msg} "
+            f"at line {exc.lineno} column {exc.colno}",
+            file=sys.stderr,
+        )
+        return 1
     forbidden = [key for key in ("claims", "sources") if key in patch]
     if forbidden:
         print(
@@ -2120,6 +2139,25 @@ def cmd_ledger_merge(args):
             0,
             f"WARN: ignored key(s) not merged by `ledger merge`: {', '.join(ignored)} "
             f"(mergeable: {', '.join(sorted(MERGEABLE_LEDGER_KEYS))}).",
+        )
+    # Field test 4: a patch citing claims that were never added has to say so
+    # in its first line; the per-reference WARNs scroll away.
+    known = {claim.get("claim_id") for claim in ledger.get("claims", [])}
+    referenced = [
+        claim_id
+        for item in ledger.get("coverage", [])
+        if isinstance(item, dict)
+        for claim_id in item.get("claim_ids", []) or []
+    ] + list(ledger.get("synthesis", {}).get("central_judgment_claim_ids", []) or [])
+    missing = list(dict.fromkeys(item for item in referenced if item not in known))
+    if missing:
+        shown = " ".join(missing[:8])
+        if len(missing) > 8:
+            shown += f" +{len(missing) - 8} more"
+        lines.insert(
+            0,
+            f"{len(missing)} claim ids not in the ledger ({shown}); "
+            "run alx claim add first",
         )
     _emit(ws, state, "ledger merge", ", ".join(patch), lines)
     return 1 if hard_findings(findings) else 0

@@ -121,7 +121,6 @@ def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
         emit(warn)
     else:
         emit_compact(warn)
-    lines.append(f"=== STATUS: {len(hard)} hard, {len(warn)} warn ===")
     return "\n".join(lines)
 
 

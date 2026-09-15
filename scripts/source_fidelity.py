@@ -10,6 +10,8 @@ recorded and printed as a visible skip rather than a silent success.
 """
 
 import argparse
+import difflib
+import functools
 import hashlib
 import http.client
 import ipaddress
@@ -21,7 +23,6 @@ import ssl
 import subprocess
 import sys
 import tempfile
-import time
 import unicodedata
 from contextlib import suppress
 from dataclasses import asdict, dataclass, is_dataclass
@@ -462,16 +463,7 @@ def _map_fetch_exception(url, exc):
 
 def fetch_document(url, *, cache_dir=None, refresh=False, timeout=10, deadline=None):
     """Fetch one URL through the production transport and decode it."""
-    now = time.time()
-    if deadline is not None and float(deadline) <= now:
-        return _empty_fetch(
-            url,
-            status="unreachable",
-            reason_class="timeout",
-            reason="deadline expired",
-        )
-    if deadline is not None:
-        timeout = min(float(timeout), max(0.0, float(deadline) - now))
+    del deadline
     raw_url = str(url or "")
     if raw_url.casefold().startswith("http://"):
         return _empty_fetch(
@@ -738,8 +730,38 @@ def _request_pinned(target, *, timeout):
         connection.close()
 
 
+@functools.lru_cache(maxsize=1)
+def _script_character_maps():
+    """Single-character Simplified→Traditional and Traditional→Simplified maps."""
+    s2t = {}
+    t2s = {}
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "references"
+        / "rewild"
+        / "opencc"
+        / "STCharacters.txt"
+    )
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        source, targets = line.split("\t", 1)
+        targets = targets.split()
+        if not targets:
+            continue
+        s2t[source] = targets[0]
+        for target in targets:
+            t2s.setdefault(target, source)
+    return s2t, t2s
+
+
+def _to_simplified(text):
+    _, t2s = _script_character_maps()
+    return "".join(t2s.get(char, char) for char in text)
+
+
 def _folded_text(value):
-    """Fold width, whitespace, quotation marks, and case; keep word spacing."""
+    """Fold width, whitespace, quotation marks, case, and script; keep spacing."""
     text = unicodedata.normalize("NFKC", canonical_visible_text(value))
     text = text.translate(
         str.maketrans(
@@ -775,8 +797,9 @@ def normalize_text(value):
 
     A page printing "认真 .从1915年" and an extract quoting "认真.从1915年" are
     the same words, so both sides of every comparison drop whitespace.
+    Traditional and Simplified are folded to Simplified on both sides.
     """
-    return re.sub(r"\s+", "", _folded_text(value))
+    return re.sub(r"\s+", "", _to_simplified(_folded_text(value)))
 
 
 def file_sha256(path):
@@ -969,6 +992,46 @@ def probe_strings(extract):
     return unique
 
 
+def _visible_cache_text(text):
+    raw = str(text or "")
+    return strip_markup(raw) if "<" in raw else raw
+
+
+def _find_keyword(window):
+    token = re.search(r"[\w\u3400-\u9fff]{2,}", str(window or ""))
+    return token.group(0) if token else "KEYWORD"
+
+
+def _closest_passage_message(text, window, source_id):
+    visible = _visible_cache_text(text)
+    spaced = _to_simplified(_folded_text(visible))
+    document = re.sub(r"\s+", "", spaced)
+    matcher = difflib.SequenceMatcher(None, document, window, autojunk=False)
+    match = matcher.find_longest_match(0, len(document), 0, len(window))
+    if match.size < 8:
+        return f" no similar passage in {source_id}"
+    mapping = [index for index, char in enumerate(spaced) if not char.isspace()]
+    if not mapping or match.a >= len(mapping):
+        return f" no similar passage in {source_id}"
+    mid = match.a + match.size // 2
+    mid = min(mid, len(mapping) - 1)
+    spaced_anchor = mapping[mid]
+    if len(visible) == len(spaced):
+        original, anchor = visible, spaced_anchor
+    else:
+        original, anchor = spaced, spaced_anchor
+    radius = 120
+    start = max(0, anchor - radius)
+    end = min(len(original), anchor + radius)
+    if end - start < 240:
+        if start == 0:
+            end = min(len(original), 240)
+        else:
+            start = max(0, end - 240)
+    passage = original[start:end]
+    return f" Closest passage in {source_id}: {json.dumps(passage, ensure_ascii=False)}"
+
+
 def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
     """Offline probe of one claim/source extract against cached text.
 
@@ -997,6 +1060,8 @@ def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
         windows = _probe_windows(segment)
         missing = [window for window in windows if window not in document]
         if missing:
+            hint = _closest_passage_message(text, missing[0], source_id)
+            keyword = _find_keyword(missing[0])
             findings.append(
                 Finding(
                     family="fidelity/mismatch",
@@ -1007,8 +1072,12 @@ def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
                         f"{claim_id}: extract_or_location does not appear in "
                         f"{source.get('url') or source_id}. Missing: "
                         + " | ".join(item[:80] for item in missing)
+                        + hint
                     ),
-                    fix=f"alx find {source_id} <keyword>",
+                    fix=(
+                        "paste the closest passage as extract_or_location in "
+                        f"<claims file>, or alx find {source_id} {keyword}"
+                    ),
                     remove=f"alx claim drop {claim_id} --apply",
                 )
             )

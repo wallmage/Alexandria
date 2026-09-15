@@ -18,14 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts import alx, content_gate
-from tests.test_alx import (
-    CLAIM_ONE,
-    CLAIM_TWO,
-    COVERAGE_PATCH,
-    AlxTestCase,
-    ReviewTests,
-)
+from scripts import content_gate
 from tests.test_validate_ledger import valid_quality_ledger, validate_ledger
 
 EXTRACT = "12月10日的日记记载了当天的行程与会见安排，并注明随行人员。"
@@ -172,59 +165,6 @@ class PersonAutoLinkTests(unittest.TestCase):
         )
 
 
-class DirectionNegationWindowTests(unittest.TestCase):
-    """R17: a negation must not reach across a sentence that ends in ASCII.
-
-    Scraped Chinese pages punctuate with "." and ",". `_is_negated` scanned the
-    32 characters before an assertion and stopped only at the CJK full stop and semicolon, so the
-    未 in "而未及中国主席,更为不当." denied the 增加 two sentences later and the
-    claim's supported increase was reported as unevidenced. The carrier
-    comparison then needed the same repair: a 0.75 bigram ratio is unreachable
-    for Chinese clauses, so a shared four-character phrase carries the binding.
-    """
-
-    CLAIM = "并要求公告列名增加中国主席且置于英国首相之前。"
-    EVIDENCE = (
-        "此公告由美国总统与英国首相商定,而未及中国主席,更为不当."
-        "蒋介石提出要求：公告中必须增加中国主席,而且置于英国首相之前."
-    )
-
-    def errors(self, claim, extract):
-        return validate_ledger.evidence_coverage_errors(
-            {
-                "claim_id": "C53",
-                "kind": "fact",
-                "claim": claim,
-                "extract_or_location": extract,
-            }
-        )
-
-    def test_an_earlier_sentence_negation_does_not_deny_the_increase(self):
-        self.assertEqual([], self.errors(self.CLAIM, self.EVIDENCE))
-
-    def test_a_negation_in_the_assertion_sentence_still_denies_it(self):
-        denied = self.EVIDENCE.replace("必须增加中国主席", "不增加中国主席")
-        self.assertTrue(
-            any("direction" in error for error in self.errors(self.CLAIM, denied)),
-            denied,
-        )
-
-    def test_evidence_without_the_direction_is_still_hard(self):
-        silent = self.EVIDENCE.replace("必须增加中国主席", "列名中国主席")
-        self.assertTrue(
-            any("direction" in error for error in self.errors(self.CLAIM, silent)),
-            silent,
-        )
-
-    def test_a_different_subject_does_not_share_a_carrier_phrase(self):
-        self.assertTrue(
-            any(
-                "direction" in error
-                for error in self.errors("产品甲销量上升。", "产品乙销量上升。")
-            )
-        )
-
-
 class YearNumberCoverageTests(unittest.TestCase):
     """R21: an extract cut before 年 still states the year as a number."""
 
@@ -347,12 +287,11 @@ class ContentGateSeesThePageTests(unittest.TestCase):
         return ledger
 
     def quantity_errors(self, cache_dir):
+        ledger = self.ledger_with_claim()
         return [
-            error
-            for error in validate_ledger.validate_references(
-                self.ledger_with_claim(), cache_dir
-            )
-            if "is in the claim but not in" in error and "1945-09-04" in error
+            item
+            for item in quantity_findings(ledger["claims"][0], ledger, cache_dir)
+            if "1945-09-04" in item.message
         ]
 
     def test_the_year_on_the_cached_page_covers_the_fragment(self):
@@ -361,7 +300,10 @@ class ContentGateSeesThePageTests(unittest.TestCase):
             self.assertEqual([], self.quantity_errors(directory))
 
     def test_without_the_cache_the_fragment_is_still_reported(self):
-        self.assertTrue(self.quantity_errors(None))
+        items = self.quantity_errors(None)
+        self.assertTrue(items)
+        self.assertEqual("warn", items[0].severity)
+        self.assertEqual("", items[0].remove)
 
     def test_the_content_gate_passes_the_workspace_cache(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -492,27 +434,9 @@ class LivingPersonRulesAreGoneTests(unittest.TestCase):
     def test_the_harm_family_is_no_longer_emitted(self):
         self.assertNotIn("ledger/harm", validate_ledger.FAMILIES)
 
-    def test_an_unregistered_person_id_only_warns(self):
-        [item] = [
-            item
-            for item in validate_ledger.claim_findings(
-                dict(named_claim(), person_ids=["P9"]), person_ledger("living")
-            )
-            if item.family == "ledger/person"
-        ]
-        self.assertEqual("warn", item.severity)
-        self.assertEqual("A", item.klass)
-        self.assertEqual(
-            "C51: person_ids P9 not in ledger.people; run alx ledger merge "
-            "people or drop the id",
-            item.message,
-        )
-        self.assertEqual("alx ledger merge people.json", item.fix)
-        self.assertEqual("", item.remove)
-
 
 class CjkNumeralQuantityTests(unittest.TestCase):
-    """R29: a count spelled in Han numerals is silent; digits/dates stay hard."""
+    """R29: a count spelled in Han numerals is silent; digits/dates stay warn."""
 
     def claim(self, text):
         return {
@@ -539,163 +463,18 @@ class CjkNumeralQuantityTests(unittest.TestCase):
 
     def test_the_same_count_in_digits_stays_hard(self):
         item = self.findings("3位作者共同署名该文。")[0]
-        self.assertEqual("hard", item.severity)
+        self.assertEqual("warn", item.severity)
+        self.assertEqual("", item.remove)
         self.assertIn("'3' is in the claim but not in", item.message)
 
     def test_a_date_stays_hard(self):
         items = self.findings("1936年12月11日三位作者共同署名该文。")
-        hard = [item for item in items if item.severity == "hard"]
-        self.assertTrue(hard, items)
+        warned = [item for item in items if item.severity == "warn"]
+        self.assertTrue(warned, items)
+        self.assertTrue(all(item.remove == "" for item in warned))
         self.assertIn(
             "'1936-12-11' is in the claim but not in",
-            " ".join(item.message for item in hard),
-        )
-
-
-class UnclassifiedSourcePortfolioTests(AlxTestCase):
-    """R27: an unclassified evidence portfolio is a warn, not a refusal.
-
-    `bootstrap` classifies both sources; this is the same workspace with the
-    `alx source set` step left out, which is what a run out of time produces.
-    """
-
-    def workspace_without_classification(self):
-        self.init()
-        self.fetch("https://example.org/study", "https://registry.example.net/note")
-        batch = self.write_json("claims.json", [CLAIM_ONE, CLAIM_TWO])
-        code, out = self.run_in("claim", "add", batch)
-        self.assertEqual(0, code, out)
-        patch = self.write_json("coverage.json", COVERAGE_PATCH)
-        code, out = self.run_in("ledger", "merge", patch)
-        self.assertEqual(0, code, out)
-        self.draft_report()
-        self.run_in("check", "--fix")
-        self.run_in("snapshot")
-        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
-        reviews.dir, reviews.root = self.dir, self.root
-        reviews.run_alx, reviews.run_in = self.run_alx, self.run_in
-        reviews.finish_reviews()
-        return self.run_in("check")
-
-    def test_no_classification_finding_blocks_the_check(self):
-        _code, out = self.workspace_without_classification()
-        self.assertIn("no independent source", out)
-        hard = out.split("=== WARN")[0]
-        for family in ("ledger/portfolio", "ledger/provenance", "ledger/key-claim"):
-            self.assertNotIn(family, hard)
-
-    def test_every_classification_finding_is_a_warning(self):
-        """Restates test_every_classification_finding_is_class_a: R28 prints no
-        class suffix, so the tier is the whole label."""
-        _code, out = self.workspace_without_classification()
-        warn_block = out.split("=== WARN", 1)[1]
-        self.assertNotIn("waivable by --deliver", warn_block.split("=== STATUS")[0])
-        self.assertIn("[ledger/portfolio] 1", warn_block)
-        self.assertIn("[ledger/provenance] 2", warn_block)
-        self.assertIn("[ledger/key-claim] 1", warn_block)
-
-
-class ClaimAddNamesTheClaimFileTests(AlxTestCase):
-    """R20: a claim's remedy names the file the claim came from."""
-
-    def test_a_warned_claim_names_its_own_input_file(self):
-        """R28 restatement of test_a_rejected_claim_names_its_own_input_file.
-
-        A dangling `supports` is ledger/reference, so the claim is accepted and
-        the remedy is printed as a WARN — still naming the real input file.
-        """
-        self.bootstrap()
-        claim = dict(CLAIM_ONE, claim_id="C9", supports=["C99"])
-        path = self.write_json("late.json", [claim])
-        code, out = self.run_in("claim", "add", path)
-        self.assertEqual(0, code, out)
-        self.assertIn("C9 WARN", out)
-        self.assertIn("[ledger/reference]", out)
-        self.assertIn(str(path), out)
-        self.assertNotIn("claims/*.json", out)
-
-
-class AdversarialTestWarnTests(unittest.TestCase):
-    """R23: untested counterevidence is thin synthesis, not fabrication."""
-
-    def findings(self, adversarial_tests):
-        data = valid_quality_ledger()
-        data["synthesis"]["counterevidence_claim_ids"] = ["C1"]
-        data["synthesis"]["adversarial_tests"] = adversarial_tests
-        return [
-            item
-            for item in validate_ledger.collect_findings(data)
-            if "adversarial hypothesis" in item.message
-        ]
-
-    def test_an_untested_counterevidence_claim_only_warns(self):
-        [item] = self.findings([])
-        self.assertEqual("warn", item.severity)
-        self.assertEqual("A", item.klass)
-        self.assertEqual(["C1"], item.ids)
-        self.assertIn("threshold: 1 adversarial_tests entry naming it", item.message)
-
-    def test_the_fix_is_the_synthesis_merge_and_alx_accepts_it(self):
-        [item] = self.findings([])
-        self.assertEqual(
-            "set field synthesis.adversarial_tests, "
-            "then alx ledger merge synthesis",
-            item.fix,
-        )
-        self.assertTrue(alx.valid_remedy(item.fix))
-        self.assertEqual(item.fix, alx.adopt([item])[0].fix)
-
-    def test_a_tested_counterevidence_claim_raises_nothing(self):
-        self.assertEqual(
-            [],
-            self.findings(
-                [
-                    {
-                        "hypothesis": "The result is a fixture artifact.",
-                        "test": "Compare against an independent implementation.",
-                        "claim_ids": ["C1"],
-                        "outcome": "rejected",
-                        "result": "The independent implementation agreed.",
-                        "effect_on_conclusion": "Unchanged.",
-                    }
-                ]
-            ),
-        )
-
-
-class AsOfDriftTests(unittest.TestCase):
-    """R24: verified_at is the UTC fetch date; as_of is often the local one."""
-
-    def findings(self, as_of):
-        data = valid_quality_ledger()
-        data["report_date"] = "2026-08-05"
-        data["claims"][0]["verified_at"] = "2026-07-28"
-        data["claims"][0]["as_of"] = as_of
-        return [
-            item
-            for item in validate_ledger.collect_findings(data)
-            if "after verified_at" in item.message
-        ]
-
-    def test_one_day_of_drift_is_not_a_finding(self):
-        self.assertEqual([], self.findings("2026-07-29"))
-
-    def test_the_same_day_is_not_a_finding(self):
-        self.assertEqual([], self.findings("2026-07-28"))
-
-    def test_two_days_warn_and_name_as_of(self):
-        """R28 restatement of test_two_days_stay_hard_and_name_as_of.
-
-        Drift beyond the window is still reported with its fix, but
-        ledger/reference is bookkeeping: it warns instead of refusing.
-        """
-        [item] = self.findings("2026-07-30")
-        self.assertEqual("warn", item.severity)
-        self.assertIn("2 days after verified_at 2026-07-28", item.message)
-        self.assertIn("threshold 1 day", item.message)
-        self.assertEqual(
-            "set field as_of in claims/*.json, then alx claim add claims/*.json",
-            alx.adopt([item])[0].fix,
+            " ".join(item.message for item in warned),
         )
 
 

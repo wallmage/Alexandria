@@ -1063,3 +1063,42 @@ class VerificationNoteMaskTests(unittest.TestCase):
             )
         )
         self.assertEqual([], self._run(self.NOTE))
+
+
+class SeverityTableTests(unittest.TestCase):
+    """R28: fabrication and evidence integrity block; everything else warns."""
+
+    def test_every_downgraded_family_is_warn_and_never_blocks(self):
+        from scripts.gate_severity import hard_errors
+        from scripts.rewild_gate import _finding
+
+        for family in (
+            "rewild/region",
+            "rewild/ai-vocabulary",
+            "rewild/style",
+            "rewild/length",
+            "rewild/checker",
+            "fidelity/semantic",
+            "review/rewild",
+        ):
+            with self.subTest(family=family):
+                item = _finding(family, "message")
+                self.assertEqual("warn", item.severity)
+                self.assertEqual("A", item.klass)
+                self.assertEqual("", item.remove)
+                self.assertEqual([], hard_errors([item]))
+
+    def test_fabrication_and_integrity_stay_hard(self):
+        from scripts.gate_severity import hard_errors
+        from scripts.rewild_gate import _finding
+
+        for family in (
+            "fidelity/rewild",
+            "fidelity/quotation-lost",
+            "integrity/control-chars",
+        ):
+            with self.subTest(family=family):
+                item = _finding(family, "message")
+                self.assertEqual("hard", item.severity)
+                self.assertEqual("F", item.klass)
+                self.assertEqual([item], hard_errors([item]))

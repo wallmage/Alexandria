@@ -1008,9 +1008,11 @@ def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
                 )
                 findings.append(
                     Finding(
+                        # R28: a changed context is a re-read prompt, not
+                        # fabrication; it is reported and never blocks.
                         family="fidelity/context-changed",
-                        severity="hard",
-                        klass="F",
+                        severity="warn",
+                        klass="A",
                         ids=[claim_id, source_id],
                         message=(
                             f"{source_id} context changed since research; re-read. "

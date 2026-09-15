@@ -381,9 +381,9 @@ Finding = gate_severity.Finding
 
 
 def render_grouped(findings, *, per_family=5):
-    """Spec §6.10: `alx` prints the class of every family it groups."""
+    """R28: the HARD/WARN tier is the whole story; no class label is printed."""
     return gate_severity.render_grouped(
-        findings, per_family=per_family, with_class=True
+        findings, per_family=per_family, with_class=False
     )
 
 
@@ -396,7 +396,25 @@ def finding_class(family, severity, *, online=False):
     return "A" if family in CLASS_A_FAMILIES else "F"
 
 
+#: Ruling R28: families `alx` emits that never block `issue`. They are printed
+#: with their fix and listed in the delivery notes.
+WARN_FAMILIES = frozenset(
+    {
+        "tooling/receipt",
+        "tooling/render",
+        "rewild/humanization",
+        "review/rewild",
+        "review/content-missing",
+        "review/content-stale",
+        "fidelity/unreachable",
+        "fidelity/undecodable",
+    }
+)
+
+
 def finding(family, message, *, severity="hard", ids=(), fix="", remove=""):
+    if family in WARN_FAMILIES:
+        severity = "warn"
     return Finding(
         family=family,
         severity=severity,
@@ -3514,7 +3532,9 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         _write_json(note_path, note)
     blocking = []
     rewild_receipt = ws.receipts / "rewild.json"
-    errors = rewild_gate.run_gate(
+    # R28: a gate returns its warnings next to its errors; only the hard tier
+    # withholds a receipt.
+    errors = gate_severity.hard_errors(rewild_gate.run_gate(
         ws.report,
         snapshot,
         report_lang=state.get("lang", "en"),
@@ -3523,7 +3543,7 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         force=True,
         timeout=_checker_timeout(),
         snapshot_sha256=file_sha256(original) if original is not None else None,
-    )
+    ))
     _note_checker_timeout(errors)
     if errors:
         blocking.extend(_refused_receipt(_rewild_findings(ws, state)))
@@ -3532,14 +3552,14 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         receipts["rewild"] = rewild_receipt
     content_receipt = ws.receipts / "content.json"
     fidelity_receipt = ws.receipts / "source-fidelity.json"
-    errors = content_gate.run_content_gate(
+    errors = gate_severity.hard_errors(content_gate.run_content_gate(
         ws.report,
         ws.ledger_path,
         ws.reviews / "content.json",
         content_receipt,
         source_fidelity_receipt_path=fidelity_receipt,
         force=True,
-    )
+    ))
     if errors:
         blocking.extend(_refused_receipt(_content_check(ws)))
         delivery_notes.append(f"content receipt not issued: {errors[0]}")
@@ -3573,8 +3593,10 @@ def cmd_issue(args):
         disclosures.append("humanization: none (issue created the snapshot)")
     findings = run_check(ws, state, ledger, fix=False)
     blocking = class_f_findings(findings)
+    dropped_for_delivery = False
     if blocking and args.deliver:
         state, ledger = _auto_remedies(ws, state, ledger, blocking, lines)
+        dropped_for_delivery = True
         findings = run_check(ws, state, ledger, fix=False)
         blocking = class_f_findings(findings)
     # J7: `alx status` must report what `issue` just saw, remedies included.
@@ -3582,43 +3604,44 @@ def cmd_issue(args):
     ws.save_state(state)
     if blocking:
         lines.append(render_grouped(blocking))
-        lines.append("issue refused: Class F findings are never waivable.")
+        lines.append("issue refused: hard findings block delivery.")
         _remove_verification_note(ws)
-        _emit(ws, state, "issue", f"{len(blocking)} class-F", lines)
+        _emit(ws, state, "issue", f"{len(blocking)} hard", lines)
         return 1
-    online_findings, ok = _online_phase(
+    online_findings, _ok = _online_phase(
         ws, state, ledger, args, lines, delivery_notes, disclosures
     )
     if online_findings and not args.deliver:
         lines.append(render_grouped(online_findings))
-        lines.append("issue refused: live fidelity found Class F findings.")
+        lines.append("issue refused: live fidelity found hard findings.")
         _remove_verification_note(ws)
-        _emit(ws, state, "issue", "online class-F", lines)
+        _emit(ws, state, "issue", "online hard", lines)
         return 1
     if online_findings:
         # Spec §6.9.1 + J5: the drops change the report and the ledger, so the
         # whole offline check runs again and whatever survives still refuses.
         state, ledger = _auto_remedies(ws, state, ledger, online_findings, lines)
+        dropped_for_delivery = True
         findings = run_check(ws, state, ledger, fix=False)
         blocking = class_f_findings(findings)
         _record_last_check(state, findings)
         ws.save_state(state)
         if blocking:
             lines.append(render_grouped(blocking))
-            lines.append("issue refused: Class F findings are never waivable.")
+            lines.append("issue refused: hard findings block delivery.")
             _remove_verification_note(ws)
-            _emit(ws, state, "issue", f"{len(blocking)} class-F", lines)
+            _emit(ws, state, "issue", f"{len(blocking)} hard", lines)
             return 1
         # J1: the receipt is owed by the ledger that is actually delivered, so
         # the live pass runs once more over the ledger minus the dropped claims.
-        online_findings, ok = _online_phase(
+        online_findings, _ok = _online_phase(
             ws, state, ledger, args, lines, delivery_notes, disclosures
         )
         if online_findings:
             lines.append(render_grouped(online_findings))
-            lines.append("issue refused: live fidelity found Class F findings.")
+            lines.append("issue refused: live fidelity found hard findings.")
             _remove_verification_note(ws)
-            _emit(ws, state, "issue", "online class-F", lines)
+            _emit(ws, state, "issue", "online hard", lines)
             return 1
     note_items = delivery_notes + disclosures
     if note_items:
@@ -3629,23 +3652,23 @@ def cmd_issue(args):
         # J5: a gate failure keeps its producer's class; Class F is never a
         # receipt-tooling note, with or without `--deliver`.
         lines.append(render_grouped(gate_blocking))
-        lines.append("issue refused: Class F findings are never waivable.")
+        lines.append("issue refused: hard findings block delivery.")
         _remove_verification_note(ws)
-        _emit(ws, state, "issue", f"{len(gate_blocking)} class-F", lines)
+        _emit(ws, state, "issue", f"{len(gate_blocking)} hard", lines)
         return 1
-    if delivery_notes and not args.deliver:
-        lines.append(render_grouped([_class_a_finding(note) for note in delivery_notes]))
-        lines.append(
-            "issue aborted before the receipt: rerun with `alx issue --deliver` to "
-            "deliver with recorded limitations."
-        )
-        _remove_verification_note(ws)
-        _emit(ws, state, "issue", "class-A abort", lines)
-        return 1
-    if delivery_notes:
+    # R28: every warning is recorded and none of them withholds the delivery.
+    warning_notes = [
+        f"{item.family}: {item.message}"
+        for item in findings
+        if item.severity == "warn"
+    ]
+    if delivery_notes or warning_notes:
         _write_json(
             ws.receipts / "delivery-notes.json",
-            {"written_at": _now().isoformat(), "notes": delivery_notes},
+            {
+                "written_at": _now().isoformat(),
+                "notes": delivery_notes + warning_notes,
+            },
         )
     receipt = {
         "schema_version": 1,
@@ -3673,17 +3696,13 @@ def cmd_issue(args):
     _write_json(ws.receipts / "issue.json", receipt)
     state["counters"]["issue"] = state["counters"].get("issue", 0) + 1
     ws.save_state(state)
+    if args.deliver and not dropped_for_delivery:
+        # R28: with no hard finding to remove, `--deliver` is an alias of
+        # `issue`; the warnings it used to waive are notes now.
+        lines.append("warnings recorded in delivery notes")
     lines.append(f"receipts/issue.json written; next: `{remedy('render')}`.")
     _emit(ws, state, "issue", "issued", lines)
-    return 0 if ok or args.deliver else 1
-
-
-def _class_a_finding(message):
-    return finding(
-        "tooling/receipt",
-        message,
-        fix=remedy("issue-deliver"),
-    )
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -3758,7 +3777,19 @@ def cmd_render(args):
             if path.exists():
                 kwargs[name] = str(path)
         kwargs["issue_receipt"] = str(receipt_path)
-        md_to_pdf.render_pdf(str(ws.report), str(output), **kwargs)
+        try:
+            md_to_pdf.render_pdf(str(ws.report), str(output), **kwargs)
+        except Exception as exc:
+            # R28: `render` produces what it can; a gate receipt `issue` could
+            # not write is a recorded warning, not a refusal.
+            note = f"{template} not rendered: {exc}"
+            _record_render_note(ws, note)
+            lines.append(
+                render_grouped(
+                    [finding("tooling/render", f"{note}.", fix=remedy("issue"))]
+                )
+            )
+            continue
         pages = ws.dir / f"pages-{template}"
         lines.append(f"{template}: {output}")
         try:

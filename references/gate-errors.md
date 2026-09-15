@@ -2,7 +2,7 @@
 
 Family → severity → rule → fix → remove → example. One section per family the code emits, grouped by the module that emits it.
 
-Severity is two-valued (ruling R28). **F = HARD**: fabrication or evidence integrity only — it blocks `alx issue`, and `alx issue --deliver` applies its Remove remedy (drop the claim or the paragraph) and then issues. **W = WARN**: printed with its fix, listed in the delivery notes, and never a block on `issue`, `render` or `claim add`. Class A no longer exists; `alx issue --deliver` is accepted as an alias of `alx issue` when nothing is hard.
+Severity is three-valued (ruling R33). **F = HARD-drop**: at `issue` the offending claim, paragraph or edit is removed or restored so it never ships; delivery continues; the removal is printed and noted. **B = HARD-refuse**: `issue` (or `render`) stops with exit 1 and the fix list; nothing is written until fixed; used only for whole-report defects that no drop can cure. HARD-refuse prints `=== BLOCKED (fix, then alx issue again) ===` and blocks `issue` and `render`. **W = WARN**: printed with a fix; never changes the deliverable. WARN is listed in the delivery notes and never blocks `issue`, `render` or `claim add`. Class A no longer exists; `alx issue --deliver` is accepted as an alias of `alx issue` when nothing is hard.
 
 Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
@@ -20,10 +20,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Ledger (`check` b / `validate_ledger`)
 
-### `ledger/quantity` — W
-- **rule:** advisory because the verbatim extract is the fabrication gate and the numeric scan is a heuristic. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R29: a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) carries no obligation and raises no finding; a digit, percentage, currency or date is covered when its form appears in the claim's extracts or anywhere in the cached page, title or `published` of any source the claim cites; a Han ordinal or year count on the page (第十三年, 十三周年) covers the digits 13. Message: `C9: '1945-09-02' is in the claim but not in S8 (extracts or cached page). Fix: alx find S8 1945-09-02, or reword the claim.`
-- **fix:** `alx find S<n> TOKEN, or reword the claim`
-- **remove:** n/a (warning; never blocks `issue`)
+### `ledger/quantity` — B
+- **rule:** an Arabic-digit figure, percentage, currency or date in a claim that no extract or cached page of its sources carries. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R29: a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) carries no obligation and raises no finding; a digit, percentage, currency or date is covered when its form appears in the claim's extracts or anywhere in the cached page, title or `published` of any source the claim cites; a Han ordinal or year count on the page (第十三年, 十三周年) covers the digits 13. Han numerals stay silent (R26/C26). Message: `C9: '1945-09-02' is in the claim but not in S8 (extracts or cached page). Fix: alx find S8 1945-09-02, or reword the claim.`
+- **fix:** `alx find S<n> <figure>` then correct the claim or extract, or `alx claim drop C<n>`
+- **remove:** n/a (HARD-refuse; nothing is written)
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
 
 ### `ledger/status` — W
@@ -33,7 +33,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** claim says "all since patched"; extract has figures only.
 
 ### `ledger/direction` — W
-- **rule:** increased/decreased (and numeric/legal carriers) must appear in extracts. Bare `under|below|settled` without a carrier is not a trigger. R17: the negation window stops at ASCII `.`/`;` as well as `。`/`；`, so a 未/不 in an earlier sentence of a scraped Chinese page no longer denies the evidence; and two CJK carriers bind on a shared four-character phrase, since the 0.75 bigram ratio is unreachable for Chinese clauses.
+- **rule:** increased/decreased (and numeric/legal carriers) must appear in extracts. Bare `under|below|settled` without a carrier is not a trigger. R17: the negation window stops at ASCII `.`/`;` as well as `。`/`；`, so a 未/不 in an earlier sentence of a scraped Chinese page no longer denies the evidence; and two CJK carriers bind on a shared four-character phrase, since the 0.75 bigram ratio is unreachable for Chinese clauses. It warns because the lexical detector misfires often (`higher|rose|growth`); it is the first candidate for a better detector.
 - **fix:** quote the directional sentence or drop the clause.
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** "increased 12%" vs extract "12% in 2024".
@@ -178,10 +178,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** `alx snapshot --restore` (restores the snapshot minus the mechanically dropped paragraphs)
 - **example:** 「原始日記」 dropped during humanize.
 
-### `integrity/encoding` — F
-- **rule:** `report.md` is not decodable UTF-8.
+### `integrity/encoding` — B
+- **rule:** `report.md` is not decodable UTF-8. The report is not valid UTF-8 and no snapshot restores a valid one (already HARD; the restore stays the first remedy, the refuse is the fallback).
 - **fix:** `alx snapshot --restore`
-- **remove:** `alx snapshot --restore`
+- **remove:** `alx snapshot --restore`; HARD-refuse if no snapshot restores a valid UTF-8 report (nothing is written)
 - **example:** GBK bytes written into report.md.
 
 ### `integrity/structure` — W
@@ -196,10 +196,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.
 
-### `integrity/length` — W
-- **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. Both ends are warnings (R28); SKILL.md keeps the target.
-- **fix:** extend the report body in report.md (below the floor), or delete a paragraph (above the ceiling).
-- **remove:** n/a (warning; never blocks `issue`)
+### `integrity/length` — B/W
+- **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, the Sources section and the machine-written Verification note excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. HARD-refuse when below two thirds of the floor (en < 5,000 words; zh-CN/zh-HK < 3,333 non-whitespace chars). Between two thirds and the floor stays WARN. The ceiling stays WARN; SKILL.md keeps the target.
+- **fix:** deepen (research, counterevidence, implications), never pad; or delete a paragraph (above the ceiling).
+- **remove:** n/a (HARD-refuse below two thirds of the floor; nothing is written. WARN half never blocks `issue`)
 - **example:** 16,400 words; ceiling 15,000.
 
 ## Binding (`check` c / `validate_report`, `alx`)
@@ -274,10 +274,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ## Rewild (`check` e / `rewild_gate`)
 
-### `fidelity/semantic` — W
-- **rule:** negation, direction, causal or association drift between snapshot and report, measured on citation-stripped checker prose with monotonic clause alignment. Narrow split-remnant artifacts may be excused heuristically and recorded in the receipt. When more than eight such exemptions accumulate, `alx check` adds one finding in this family: `N heuristic split-remnant exemptions exceed the limit of 8; a report with this much structural churn must be re-checked against the pre-Rewild source and re-drafted, not exempted.`
-- **fix:** `alx snapshot --restore`
-- **remove:** n/a (warning; never blocks `issue`)
+### `fidelity/semantic` — B/W
+- **rule:** Rewild reversed a direction, negation or causal link between the snapshot and the report. Negation, direction, causal or association drift between snapshot and report, measured on citation-stripped checker prose with monotonic clause alignment. Narrow split-remnant artifacts may be excused heuristically and recorded in the receipt. When more than eight such exemptions accumulate, `alx check` adds one finding in this family: `N heuristic split-remnant exemptions exceed the limit of 8; a report with this much structural churn must be re-checked against the pre-Rewild source and re-drafted, not exempted.`
+- **fix:** rewrite the report clause to match the snapshot clause (direction, negation or causal link); or `alx snapshot --restore`
+- **remove:** n/a (HARD-refuse for a reversal; nothing is written. WARN half never blocks `issue`)
 - **example:** snapshot "did not exceed"; report "exceeded".
 
 ### `fidelity/rewild` — F
@@ -349,10 +349,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `status` is not `completed`.
 - **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → add the source link to paragraph `<n>` of report.md. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
 
-### `content/critical-finding` — W
-- **rule:** a critical review finding is not dispositioned `resolved`.
-- **fix:** `alx review start content --iter`
-- **remove:** n/a (warning; never blocks `issue`)
+### `content/critical-finding` — B
+- **rule:** the content review lists a critical finding with no fix recorded. A critical review finding is not dispositioned `resolved`.
+- **fix:** fix the report and record the disposition in reviews/content.json, then `alx review finish content`
+- **remove:** n/a (HARD-refuse; nothing is written)
 - **example:** findings[2] disposition `open`.
 
 ### `content/disclosure` — W
@@ -380,6 +380,26 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx render`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** poppler timeout on page 41.
+
+## Issue / render (flow)
+
+### no snapshot at `issue`
+- **rule:** the Rewild step never started. A snapshot that exists with an unchanged report stays a WARN.
+- **fix:** `alx snapshot`, humanize per the bundled Rewild skill, `alx check`, then `alx issue`
+- **remove:** n/a (HARD-refuse; nothing is written)
+- **example:** `alx issue` with no snapshot in the workspace.
+
+### report far below the length floor
+- **rule:** `integrity/length` below two thirds of the floor (en < 5,000 words; zh-CN/zh-HK < 3,333 non-whitespace chars). Between two thirds and the floor stays WARN.
+- **fix:** deepen (research, counterevidence, implications), never pad
+- **remove:** n/a (HARD-refuse; nothing is written)
+- **example:** English report at 4,200 words.
+
+### broken PDF at `render`
+- **rule:** no PDF file produced by any template, or a produced PDF whose extractable text is under 500 characters (image-only or empty file). Below 5,000 but ≥500 stays the WARN line. `render` returns 1 and says which template failed and why.
+- **fix:** `alx render` after the template that failed is repaired
+- **remove:** n/a (HARD-refuse; nothing is written)
+- **example:** image-only PDF with 80 extractable characters.
 
 ## Removed families
 

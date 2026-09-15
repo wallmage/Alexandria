@@ -389,8 +389,21 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertNotIn("--allow-unverified", protocol)
         self.assertIn("alx snapshot", rewild)
         self.assertIn("alx review start rewild", rewild)
+        self.assertIn(
+            "Semantic reversals (direction, negation, causality) block `alx issue`",
+            rewild,
+        )
+        self.assertIn("Fabricated figures restore the snapshot", rewild)
         self.assertIn("alx review start content", quality)
         self.assertIn("alx issue", quality)
+        self.assertIn(
+            "A missing or stale content review is a warning and never blocks `alx issue`.",
+            quality,
+        )
+        self.assertIn(
+            "An unresolved critical finding blocks `alx issue` until its fix is recorded",
+            quality,
+        )
 
 
 if __name__ == "__main__":

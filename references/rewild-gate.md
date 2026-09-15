@@ -74,6 +74,8 @@ recorded in the receipt.
 Direction reversals, added causal claims, and causal substitutions can never be
 acknowledged. Each note covers one clause pair, and at most eight are accepted.
 Needing more means the draft should be rewritten, not annotated.
+Semantic reversals (direction, negation, causality) block `alx issue`.
+Fabricated figures restore the snapshot (as today).
 
 The gate separately caps automatic split-remnant exemptions at eight. More
 structural churn than that must be re-checked against the source and re-drafted

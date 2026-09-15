@@ -47,35 +47,59 @@ class GateErrorsDocTests(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         for marker in ("- **rule:**", "- **fix:**", "- **remove:**", "- **example:**"):
             self.assertIn(marker, text)
-        self.assertRegex(text, r"### `[^`]+` — [FAW]\b")
+        self.assertRegex(text, r"### `[^`]+` — [FBW]\b")
 
-    def test_doc_severities_match_the_r29_table(self):
-        """R29: F only for verbatim/numeric fidelity; every other family W."""
+    def test_doc_severities_match_the_r33_table(self):
+        """R33: F = HARD-drop, B = HARD-refuse, W = WARN."""
         text = (ROOT / "references" / "gate-errors.md").read_text(encoding="utf-8")
         letters = {
             name: letter
-            for name, letter in re.findall(r"### `([^`]+)`[^\n]*? — ([FW])(?:/[FW])?\b", text)
+            for name, letter in re.findall(
+                r"### `([^`]+)`[^\n]*? — ([FBW])(?:/[FBW])?\b", text
+            )
         }
-        hard = {
+        hard_drop = {
             "runtime/missing",
             "ledger/derived", "ledger/claim-input", "ledger/reference",
-            "integrity/control-chars", "integrity/replacement-char", "integrity/encoding",
+            "integrity/control-chars", "integrity/replacement-char",
             "integrity/quotation-lost", "binding/link-not-in-ledger",
             "binding/leftover-prose", "fidelity/mismatch", "fidelity/cache-missing",
             "fidelity/cache-detached", "fidelity/rewild",
         }
+        hard_refuse = {
+            "ledger/quantity",
+            "fidelity/semantic",
+            "content/critical-finding",
+            "integrity/encoding",
+            "integrity/length",
+        }
         for name, letter in sorted(letters.items()):
             with self.subTest(family=name):
-                self.assertEqual("F" if name in hard else "W", letter)
-        for downgraded in (
-            "ledger/key-claim", "ledger/person", "ledger/portfolio", "integrity/length",
-            "binding/claim-paragraph", "fidelity/context-changed", "fidelity/semantic",
+                if name in hard_drop:
+                    self.assertEqual("F", letter)
+                elif name in hard_refuse:
+                    self.assertEqual("B", letter)
+                else:
+                    self.assertEqual("W", letter)
+        for warn_only in (
+            "ledger/key-claim", "ledger/person", "ledger/portfolio",
+            "binding/claim-paragraph", "fidelity/context-changed",
             "rewild/region", "ledger/status", "ledger/direction", "ledger/schema",
             "rewild/style", "content/score", "tooling/receipt",
-            "ledger/quantity",
         ):
-            with self.subTest(family=downgraded):
-                self.assertEqual("W", letters[downgraded])
+            with self.subTest(family=warn_only):
+                self.assertEqual("W", letters[warn_only])
+        self.assertIn("HARD-drop", text)
+        self.assertIn("HARD-refuse", text)
+        self.assertIn("never changes the deliverable", text)
+        self.assertIn("=== BLOCKED (fix, then alx issue again) ===", text)
+        self.assertIn("no snapshot at `issue`", text)
+        self.assertIn("alx snapshot", text)
+        self.assertIn("en < 5,000 words", text)
+        self.assertIn("zh-CN/zh-HK < 3,333", text)
+        self.assertIn("under 500 characters", text)
+        self.assertIn("higher|rose|growth", text)
+        self.assertIn("first candidate for a better detector", text)
         self.assertIn("never blocks `issue`", text)
         self.assertNotIn("Class A only via", text)
         self.assertNotIn("### `ledger/harm`", text)

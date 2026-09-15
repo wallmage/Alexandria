@@ -45,6 +45,12 @@ jobs:
           $arguments = $runtime.command[1..($runtime.command.Count - 1)]
           & $program @arguments scripts/install_runtime.py --runtime $env:ALEXANDRIA_RUNTIME_DIR --verify-only
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run alx through the one-path launcher SKILL.md uses
+        shell: pwsh
+        run: |
+          $launcher = if ($IsWindows) { "$env:ALEXANDRIA_RUNTIME_DIR\bin\python.cmd" } else { "$env:ALEXANDRIA_RUNTIME_DIR/bin/python" }
+          & $launcher scripts/alx.py --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload installation log
         if: always()
         uses: actions/upload-artifact@v7

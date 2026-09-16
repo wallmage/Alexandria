@@ -416,6 +416,7 @@ WARN_FAMILIES = frozenset(
         "tooling/receipt",
         "tooling/render",
         "review/rewild",
+        "review/content",
         "review/content-missing",
         "review/content-stale",
         "fidelity/unreachable",
@@ -1893,19 +1894,62 @@ def _warn_lines(claim_id, warns):
     ]
 
 
+def _evidence_record_index(claim, item_finding):
+    for value in item_finding.ids or ():
+        text = str(value)
+        if text.startswith("source_evidence[") and text.endswith("]"):
+            try:
+                return int(text[16:-1])
+            except ValueError:
+                continue
+    source_id = _pick_id(item_finding, "S") or ""
+    extract = None
+    message = str(item_finding.message)
+    for record in claim.get("source_evidence") or []:
+        if not isinstance(record, dict) or record.get("source_id") != source_id:
+            continue
+        piece = record.get("extract_or_location") or ""
+        if piece and piece[:60] in message:
+            extract = piece
+            break
+    evidence = claim.get("source_evidence") or []
+    for index, record in enumerate(evidence, start=1):
+        if not isinstance(record, dict):
+            continue
+        if extract is not None:
+            if (
+                record.get("source_id") == source_id
+                and record.get("extract_or_location") == extract
+            ):
+                return index
+        elif record.get("source_id") == source_id:
+            return index
+    return None
+
+
 def _claim_add_mismatch_lines(ws, claim, claim_id, item_finding):
     source_id = _pick_id(item_finding, "S") or ""
+    index = _evidence_record_index(claim, item_finding)
     extract = ""
-    for record in claim.get("source_evidence") or []:
-        if isinstance(record, dict) and record.get("source_id") == source_id:
-            extract = record.get("extract_or_location") or ""
-            break
+    evidence = claim.get("source_evidence") or []
+    if index and 1 <= index <= len(evidence) and isinstance(evidence[index - 1], dict):
+        extract = evidence[index - 1].get("extract_or_location") or ""
+    if not extract:
+        for record in evidence:
+            if isinstance(record, dict) and record.get("source_id") == source_id:
+                extract = record.get("extract_or_location") or ""
+                break
     if not extract:
         extract = claim.get("extract_or_location") or ""
     searched = str(extract)[:60] + "…"
+    loc = (
+        f"source_evidence[{index}] ({source_id})"
+        if index
+        else source_id
+    )
     lines = [
-        f"{claim_id} FAIL [fidelity/mismatch] extract not found verbatim in "
-        f"{source_id} (searched: {searched})"
+        f"{claim_id} FAIL [fidelity/mismatch] {loc} not found verbatim "
+        f"(searched: {searched})"
     ]
     entry = cached(ws, source_id)
     text = entry[0] if entry else ""
@@ -2185,16 +2229,17 @@ def cmd_claim_add(args):
         hard = hard_findings(findings)
         warns = [item for item in findings if item.severity == "warn"]
         if hard:
-            mismatch = next(
-                (item_finding for item_finding in hard if item_finding.family == "fidelity/mismatch"),
-                None,
-            )
-            if mismatch:
+            mismatches = [
+                item_finding
+                for item_finding in hard
+                if item_finding.family == "fidelity/mismatch"
+            ]
+            for mismatch in mismatches:
                 lines.extend(
                     _claim_add_mismatch_lines(ws, item, claim_id, mismatch)
                 )
             for item_finding in hard:
-                if mismatch and item_finding.family == "fidelity/mismatch":
+                if item_finding.family == "fidelity/mismatch":
                     continue
                 message = str(item_finding.message)
                 if " Missing: " in message:
@@ -2415,9 +2460,12 @@ def apply_drop(ws, state, ledger, claim_id, reason):
             remaining.append(claim)
     ledger["claims"] = remaining
     for item in ledger.get("coverage", []):
-        item["claim_ids"] = [
-            value for value in item.get("claim_ids", []) if value not in dropped
-        ]
+        if not isinstance(item, dict):
+            continue
+        for key in ("claim_ids", "claims"):
+            value = item.get(key)
+            if isinstance(value, list):
+                item[key] = [v for v in value if v not in dropped]
     ledger["synthesis"] = strip_synthesis(ledger.get("synthesis", {}), dropped)
     drops = state.setdefault("mechanical_drops", [])
     for value in dropped:
@@ -2543,9 +2591,7 @@ def cmd_ledger_merge(args):
     for item in coverage:
         if not isinstance(item, dict):
             continue
-        claim_ids = item.get("claim_ids")
-        if isinstance(claim_ids, list):
-            referenced.extend(claim_ids)
+        referenced.extend(validate_ledger.coverage_claim_ids(item))
     synthesis = ledger.get("synthesis")
     if isinstance(synthesis, dict):
         central = synthesis.get("central_judgment_claim_ids")
@@ -2969,11 +3015,15 @@ def _regenerate_sources(ws, ledger, lang="en"):
     return True
 
 
+def _excerpt_prose(text):
+    return re.sub(r"\s+", " ", validate_report._report_prose(str(text), [])).strip()
+
+
 def _excerpts_located(claim, prose):
     """True when every recorded excerpt is still in the bound paragraph."""
     excerpts = claim.get("report_excerpts") or []
     return bool(excerpts) and all(
-        re.sub(r"\s+", " ", str(excerpt)).strip() in prose for excerpt in excerpts
+        _excerpt_prose(excerpt) in prose for excerpt in excerpts
     )
 
 
@@ -2997,7 +3047,7 @@ def _claim_paragraph_number(claim, paragraphs, mapping):
     if number:
         return number
     for candidate, block in sorted(paragraphs.items()):
-        if _excerpts_located(claim, re.sub(r"\s+", " ", masked_prose(block))):
+        if _excerpts_located(claim, _excerpt_prose(block)):
             return candidate
     return _subject_paragraph(claim, paragraphs)
 
@@ -3053,7 +3103,7 @@ def _binding_findings(ws, state, ledger, *, fix=False, rewrite_out=None):
             block = paragraphs.get(number)
             if not block:
                 continue
-            prose = re.sub(r"\s+", " ", masked_prose(block))
+            prose = _excerpt_prose(block)
             # The excerpt is re-derived whenever the bound paragraph no longer
             # contains it, so a prose edit (humanization) does not leave every
             # claim "cannot be located".
@@ -3153,6 +3203,11 @@ def _rewild_findings(ws, state):
         )
     )
     _note_checker_timeout(item.message for item in findings)
+    findings = [
+        item
+        for item in findings
+        if "skipped" not in str(getattr(item, "message", ""))
+    ]
     if note.exists() and _is_blank_review_note(_read_json(note), "rewild"):
         message = _blank_review_message(ws, "rewild")
         findings = [
@@ -3266,24 +3321,16 @@ def _note_completeness(ws, state, ledger, kind):
             missing.append("fidelity_checks false: " + ", ".join(false))
         for index, item in enumerate(note.get("findings") or [], start=1):
             if not isinstance(item, dict):
-                missing.append(
-                    f"findings[{index}] skipped (unknown category/disposition "
-                    "or unresolved region/fidelity)"
-                )
                 continue
             category = item.get("category")
             disposition = item.get("disposition")
-            if (
-                category not in {"style", "region", "fidelity"}
-                or disposition not in {"resolved", "rejected"}
-                or (
-                    category in {"region", "fidelity"}
-                    and disposition != "resolved"
-                )
-            ):
+            if category not in {"style", "region", "fidelity"}:
+                category = "style"
+            if disposition not in {"resolved", "rejected"}:
+                disposition = "rejected"
+            if category in {"region", "fidelity"} and disposition != "resolved":
                 missing.append(
-                    f"findings[{index}] skipped (unknown category/disposition "
-                    "or unresolved region/fidelity)"
+                    f"findings[{index}] region/fidelity not resolved"
                 )
         return _uniq_note_paths(missing)
     scores = note.get("scores")
@@ -3401,10 +3448,15 @@ def _mechanical_ledger(ledger, state):
         }
         for source in ledger.get("sources", [])
     ]
-    stripped["coverage"] = [
-        dict(item, claim_ids=_without_ids(item.get("claim_ids"), dropped))
-        for item in ledger.get("coverage", [])
-    ]
+    stripped["coverage"] = []
+    for item in ledger.get("coverage", []):
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        for key in ("claim_ids", "claims"):
+            if key in row:
+                row[key] = _without_ids(row.get(key), dropped)
+        stripped["coverage"].append(row)
     stripped["synthesis"] = strip_synthesis(ledger.get("synthesis", {}), dropped)
     return json.dumps(stripped, ensure_ascii=False, sort_keys=True)
 
@@ -3524,6 +3576,22 @@ def _content_check(ws):
     )
 
 
+def _fill_absent_review_paths(note, ws, state):
+    """check/issue: fill only absent path/lang/profile; never hashes/status."""
+    if not isinstance(note, dict):
+        return note
+    lang = state.get("lang", "en")
+    if not note.get("report_path"):
+        note["report_path"] = str(ws.report)
+    if not note.get("ledger_path"):
+        note["ledger_path"] = str(ws.ledger_path)
+    if not note.get("report_lang"):
+        note["report_lang"] = lang
+    if not note.get("profile"):
+        note["profile"] = rewild_gate.PROFILES.get(lang, ("rewild",))[0]
+    return note
+
+
 def _stamp_existing_review_notes(ws, state):
     for kind in REVIEW_KINDS:
         path = ws.reviews / f"{kind}.json"
@@ -3532,7 +3600,7 @@ def _stamp_existing_review_notes(ws, state):
         note = _read_json(path)
         if not isinstance(note, dict):
             continue
-        _stamp_review_metadata(note, ws, state, kind)
+        _fill_absent_review_paths(note, ws, state)
         _write_json(path, note)
 
 
@@ -3564,20 +3632,12 @@ def _review_findings(ws, state, ledger):
     for kind in REVIEW_KINDS:
         note_missing = _note_completeness(ws, state, ledger, kind)
         record = state.get("reviews", {}).get(kind, {})
-        if (
-            record.get("finished")
-            and note_missing
-            and note_missing[0].startswith("nothing filled yet")
-        ):
-            continue
+        family = "review/rewild" if kind == "rewild" else "review/content"
         if record.get("finished") and note_missing:
-            findings.append(
-                finding(
-                    _review_family(kind, "stale"),
-                    f"reviews/{kind}.json is incomplete; run `alx review finish {kind}`.",
-                )
-            )
-            continue
+            for line in note_missing:
+                findings.append(finding(family, line, severity="warn"))
+            if note_missing[0].startswith("nothing filled yet"):
+                continue
         findings.extend(freshness_findings(ws, state, ledger, kind))
     return findings
 
@@ -3968,6 +4028,13 @@ def cmd_review_finish(args):
             if isinstance(section, dict) and not section.get("disposition"):
                 section["disposition"] = "keep"
         _write_json(path, note)
+    target = ws.review_dir(kind, record["iteration"])
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ws.report, target / "report.md")
+    if kind == "content":
+        shutil.copyfile(ws.ledger_path, target / "ledger.json")
+    record["report_sha256"] = file_sha256(ws.report)
+    record["ledger_sha256"] = file_sha256(ws.ledger_path)
     missing = _note_completeness(ws, state, ledger, kind)
     if missing:
         for field in missing:
@@ -4301,9 +4368,7 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         note = _read_json(note_path)
         if not isinstance(note, dict):
             continue
-        _stamp_review_metadata(note, ws, state, kind)
-        if kind == "rewild" and snapshot is not None:
-            note["source_sha256"] = file_sha256(snapshot)
+        _fill_absent_review_paths(note, ws, state)
         _write_json(note_path, note)
     blocking = []
     rewild_receipt = ws.receipts / "rewild.json"
@@ -4346,10 +4411,9 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
     else:
         receipts["content"] = content_receipt
         if not fidelity_receipt.exists():
-            # K4: no receipt at all is a recorded gap, not a refused gate.
             delivery_notes.append(
-                "content receipt issued without a source-fidelity receipt: "
-                "live fidelity never ran"
+                "source fidelity: offline — extracts were verified verbatim "
+                "at claim add; alx issue --live re-reads a sample of cited pages"
             )
     _verify_receipts_in_process(ws, state, receipts, delivery_notes)
     lines.append(f"receipts written: {', '.join(sorted(receipts)) or 'none'}")

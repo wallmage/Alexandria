@@ -1446,7 +1446,7 @@ class LedgerReferenceTests(unittest.TestCase):
         data["synthesis"]["central_judgment_claim_ids"] = []
         errors = validate_ledger.validate_references(data)
         self.assertTrue(
-            any("Key report claim C1 is missing from the central synthesis" in error for error in errors),
+            any("1 key report claims are not in synthesis.central_judgment_claim_ids: C1" in error for error in errors),
             errors,
         )
 
@@ -1662,7 +1662,7 @@ class ChineseQuantityScanTests(unittest.TestCase):
         obligations = validate_ledger.quantitative_obligations(
             "報告日期為" "2026" "年" "7" "月" "28" "日。"
         )
-        self.assertEqual(["2026-07-28"], [display for display, _ in obligations])
+        self.assertEqual(["2026年7月28日"], [display for display, _ in obligations])
         self.assertEqual(
             [],
             validate_ledger.evidence_coverage_errors(
@@ -3573,8 +3573,8 @@ class PageLevelCoverageTests(unittest.TestCase):
         self.assertEqual("", item.remove)
         self.assertNotIn("Remove:", item.message)
         self.assertEqual(
-            "C90: '1945-10' is in the claim but not in S2 (extracts or cached "
-            "page). Fix: alx find S2 1945-10, or reword the claim.",
+            "C90: '1945年10月' is in the claim but not in S2 (extracts or cached "
+            "page). Fix: alx find S2 1945年10月, or reword the claim.",
             item.message,
         )
 

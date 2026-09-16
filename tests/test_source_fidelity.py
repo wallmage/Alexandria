@@ -1275,6 +1275,38 @@ class ProbeResilienceTests(unittest.TestCase):
         )
         self.assertIn("xyz", findings[0].message)
 
+    def test_probe_findings_second_record_mismatch_names_index(self):
+        findings = source_fidelity.probe_findings(
+            {
+                "claim_id": "C16",
+                "source_evidence": [
+                    {
+                        "source_id": "S1",
+                        "extract_or_location": (
+                            "The archive released 1,204 documents in March 2026, "
+                            "and the registry confirmed the count."
+                        ),
+                    },
+                    {
+                        "source_id": "S1",
+                        "extract_or_location": (
+                            "西安事變後,蔣介石明確地把基督教作為自己的信仰的事實"
+                        ),
+                    },
+                ],
+            },
+            {"source_id": "S1"},
+            (
+                "The archive released 1,204 documents in March 2026, "
+                "and the registry confirmed the count."
+            ),
+        )
+        mismatches = [
+            item for item in findings if item.family == "fidelity/mismatch"
+        ]
+        self.assertEqual(1, len(mismatches), findings)
+        self.assertIn("source_evidence[2]", mismatches[0].ids)
+
     def test_cjk_ascii_punct_folded_for_probe(self):
         probes = source_fidelity.probe_strings("他说，今天很好。")
         text = source_fidelity.normalize_text("他说,今天很好.")

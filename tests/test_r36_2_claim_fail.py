@@ -28,7 +28,7 @@ class ClaimAddFailPrintTests(AlxTestCase):
         )
         self.assertEqual(summary, lines[0])
         fail = (
-            "C3 FAIL [fidelity/mismatch] extract not found verbatim in S1 "
+            "C3 FAIL [fidelity/mismatch] source_evidence[1] (S1) not found verbatim "
             "(searched: The archive released 9,999 documents.…)"
         )
         self.assertIn(fail, lines)

@@ -84,12 +84,12 @@ class DateYearCoverageTests(unittest.TestCase):
                 dated_claim(), valid_quality_ledger(), directory
             )
             self.assertTrue(findings)
-            self.assertIn("1936-12-10", findings[0].message)
+            self.assertIn("1936年12月10日", findings[0].message)
 
     def test_without_a_cache_the_rule_is_unchanged(self):
         findings = quantity_findings(dated_claim(), valid_quality_ledger())
         self.assertTrue(findings)
-        self.assertIn("1936-12-10", findings[0].message)
+        self.assertIn("1936年12月10日", findings[0].message)
 
 
 def person_ledger(living_status):
@@ -294,7 +294,7 @@ class YearMonthFragmentCoverageTests(unittest.TestCase):
                 self.claim(), valid_quality_ledger(), directory
             )
             self.assertTrue(findings)
-            self.assertIn("'1945-08' is in the claim but not in S2", findings[0].message)
+            self.assertIn("'1945年8月' is in the claim but not in S2", findings[0].message)
 
 
 class YearInsideTheExtractCoverageTests(unittest.TestCase):
@@ -352,7 +352,7 @@ class ContentGateSeesThePageTests(unittest.TestCase):
             for error in validate_ledger.validate_references(
                 self.ledger_with_claim(), cache_dir
             )
-            if "is in the claim but not in" in error and "1945-09-04" in error
+            if "is in the claim but not in" in error and "1945年9月4日" in error
         ]
 
     def test_the_year_on_the_cached_page_covers_the_fragment(self):
@@ -554,7 +554,7 @@ class CjkNumeralQuantityTests(unittest.TestCase):
         self.assertTrue(warned, items)
         self.assertTrue(all(item.remove == "" for item in warned), items)
         self.assertIn(
-            "'1936-12-11' is in the claim but not in",
+            "'1936年12月11日' is in the claim but not in",
             " ".join(item.message for item in warned),
         )
 

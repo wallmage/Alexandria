@@ -970,7 +970,7 @@ def validate_report_against_ledger(text, ledger):
         if not isinstance(excerpts, list) or not excerpts:
             continue
         for excerpt in excerpts:
-            normalized = re.sub(r"\s+", " ", str(excerpt)).strip()
+            normalized = re.sub(r"\s+", " ", _report_prose(str(excerpt), [])).strip()
             matching_paragraphs = [
                 paragraph
                 for paragraph in paragraphs

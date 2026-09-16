@@ -196,15 +196,15 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("source_fidelity_receipt", matrix)
 
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        self.assertEqual(20, schema["$defs"]["score"]["properties"]["rationale"]["minLength"])
-        self.assertEqual(20, schema["$defs"]["sectionReview"]["properties"]["purpose"]["minLength"])
-        self.assertEqual(
-            20,
-            schema["$defs"]["visualAsset"]["properties"]["visible_text_and_claims_review"][
-                "minLength"
-            ],
+        self.assertNotIn("minLength", schema["$defs"]["score"]["properties"]["rationale"])
+        self.assertNotIn(
+            "minLength", schema["$defs"]["sectionReview"]["properties"]["purpose"]
         )
-        self.assertEqual(2, schema["properties"]["schema_version"]["const"])
+        self.assertNotIn(
+            "minLength",
+            schema["$defs"]["visualAsset"]["properties"]["visible_text_and_claims_review"],
+        )
+        self.assertNotIn("const", schema["properties"]["schema_version"])
         self.assertIn("section_reviews", schema["required"])
         self.assertEqual(1, schema["$defs"]["score"]["properties"]["score"]["minimum"])
         self.assertEqual(

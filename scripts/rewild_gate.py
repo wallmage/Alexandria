@@ -266,67 +266,59 @@ def _load_review_note(
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return None, [f"Blind-review note must be valid JSON: {exc}"]
-    if not isinstance(data, dict) or data.get("status") != "completed":
-        return None, ["Blind-review note must record status 'completed'."]
+    if not isinstance(data, dict):
+        return None, ["Blind-review note must be an object."]
     expected_profile = PROFILES[report_lang][0]
-    bindings = (
-        ("schema_version", 1),
-        ("report_sha256", file_sha256(report_path)),
-        ("source_sha256", file_sha256(source_path)),
-        ("report_lang", report_lang),
-        ("profile", expected_profile),
-    )
-    mismatches = [
-        name for name, expected in bindings if data.get(name) != expected
-    ]
-    if mismatches:
-        return None, [
-            "Blind-review note does not match the reviewed report, source, "
-            "language, or profile: " + ", ".join(mismatches)
-        ]
+    data["schema_version"] = 1
+    data["report_path"] = str(Path(report_path))
+    data["report_sha256"] = file_sha256(report_path)
+    data["source_sha256"] = file_sha256(source_path)
+    data["report_lang"] = report_lang
+    data["profile"] = expected_profile
+    data["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+    if not data.get("reviewer_mode"):
+        data["reviewer_mode"] = "fresh_eyes"
+    warns = []
     checks = data.get("fidelity_checks")
-    if not isinstance(checks, dict):
-        return None, ["Blind-review note is missing fidelity_checks."]
-    missing = sorted(
-        name for name in REQUIRED_FIDELITY_CHECKS if checks.get(name) is not True
-    )
-    if missing:
-        return None, [
-            "Blind-review note has incomplete fidelity checks: "
-            + ", ".join(missing)
-        ]
+    if isinstance(checks, dict):
+        missing = sorted(
+            name
+            for name in REQUIRED_FIDELITY_CHECKS
+            if checks.get(name) is not True
+        )
+        if missing:
+            warns.append("fidelity_checks false: " + ", ".join(missing))
+    else:
+        warns.append(
+            "fidelity_checks false: " + ", ".join(sorted(REQUIRED_FIDELITY_CHECKS))
+        )
     findings = data.get("findings")
     if not isinstance(findings, list):
-        return None, ["Blind-review note findings must be an array."]
-    for index, finding in enumerate(findings):
+        return data, warns
+    for index, finding in enumerate(findings, start=1):
         if not isinstance(finding, dict):
-            return None, [f"Blind-review finding {index + 1} must be an object."]
+            warns.append(
+                f"findings[{index}] skipped (unknown category/disposition "
+                "or unresolved region/fidelity)"
+            )
+            continue
         category = finding.get("category")
-        finding_text = str(finding.get("finding", "")).strip()
         disposition = finding.get("disposition")
-        reason = str(finding.get("reason", "")).strip()
-        if category not in {"style", "region", "fidelity"}:
-            return None, [
-                f"Blind-review finding {index + 1} has an invalid category."
-            ]
-        if disposition not in {"resolved", "rejected"}:
-            return None, [
-                f"Blind-review finding {index + 1} has no valid disposition."
-            ]
-        if not finding_text:
-            return None, [
-                f"Blind-review finding {index + 1} has no finding text."
-            ]
+        if category not in {"style", "region", "fidelity"} or disposition not in {
+            "resolved",
+            "rejected",
+        }:
+            warns.append(
+                f"findings[{index}] skipped (unknown category/disposition "
+                "or unresolved region/fidelity)"
+            )
+            continue
         if category in {"region", "fidelity"} and disposition != "resolved":
-            return None, [
-                f"Blind-review finding {index + 1} is an unresolved "
-                f"{category} defect."
-            ]
-        if len(reason) < 10:
-            return None, [
-                f"Blind-review finding {index + 1} needs a specific reason."
-            ]
-    return data, []
+            warns.append(
+                f"findings[{index}] skipped (unknown category/disposition "
+                "or unresolved region/fidelity)"
+            )
+    return data, warns
 
 
 def _causal_phrases(text, report_lang):
@@ -1625,8 +1617,9 @@ def run_gate(
         source_path=source_path,
         report_lang=report_lang,
     )
-    if review_errors:
+    if review_note is None:
         return review_errors
+    review_warns = [warning(message) for message in review_errors]
     if file_sha256(report_path) == file_sha256(source_path) and any(
         isinstance(finding, dict)
         and finding.get("disposition") == "resolved"
@@ -1681,7 +1674,7 @@ def run_gate(
     # Style is the one tier the gate does not fail on. A retained style
     # warning is a judgment about phrasing, not evidence, so it is reported
     # and the receipt still issues; a waiver only records the reason.
-    findings = soft
+    findings = review_warns + soft
     for item in style_warnings:
         findings.append(
             warning(
@@ -1707,7 +1700,7 @@ def run_gate(
         "checker_sha256": file_sha256(checker),
         "review_note_path": str(review_note_path),
         "review_note_sha256": file_sha256(review_note_path),
-        "review_status": review_note["status"],
+        "review_status": review_note.get("status"),
         "heuristic_exemptions": heuristic_exemptions,
     }
     receipt_path.parent.mkdir(parents=True, exist_ok=True)

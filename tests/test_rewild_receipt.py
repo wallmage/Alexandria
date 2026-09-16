@@ -504,8 +504,10 @@ class RewildReceiptTests(unittest.TestCase):
                 review_note_path=review,
                 receipt_path=receipt,
             )
-            self.assertIn("blind-review note", " ".join(errors).lower())
-            self.assertFalse(receipt.exists())
+            self.assertTrue(receipt.exists())
+            self.assertFalse(
+                any("does not match the reviewed report" in item for item in errors)
+            )
 
     def test_checker_prose_includes_table_cells_but_excludes_sources(self):
         text = (

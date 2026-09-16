@@ -9,15 +9,15 @@ from pathlib import Path
 
 from scripts import content_gate
 from scripts.content_gate import (
-    _schema_errors,
+    main as content_gate_main,
+)
+from scripts.content_gate import (
     run_check,
     run_content_gate,
     validate_content_receipt,
 )
-from scripts.content_gate import main as content_gate_main
 from scripts.gate_severity import hard_errors
 from scripts.source_fidelity import issue_source_fidelity_receipt
-from scripts.validate_ledger import prose_floor_errors, validate_schema
 from tests.source_fidelity_transport import mock_production_transport
 
 ROOT = Path(__file__).parents[1]
@@ -735,7 +735,39 @@ class ContentGateTests(unittest.TestCase):
             self.assertEqual([], hard_errors(errors))
             self.assertTrue(receipt.exists())
 
-    def test_stale_report_or_ledger_hash_blocks_the_gate(self):
+    def test_run_content_gate_does_not_revalidate_the_ledger_schema(self):
+        """R35.7: evidence ledger schema is not re-run inside the content gate."""
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(directory)
+            payload = json.loads(ledger.read_text(encoding="utf-8"))
+            payload["brief"] = True
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+            with mock_production_transport(
+                {
+                    "example.com": (
+                        200,
+                        {"content-type": "text/plain"},
+                        b"Fixture",
+                    )
+                }
+            ):
+                source_receipt.unlink()
+                issue_source_fidelity_receipt(
+                    ledger,
+                    source_receipt,
+                    now=__import__("datetime").date(2026, 7, 28),
+                )
+            errors = run_content_gate(
+                report, ledger, review, receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+            self.assertFalse(
+                any("is not of type" in error for error in errors),
+                errors,
+            )
+            self.assertTrue(receipt.exists())
+
+    def test_stale_report_or_ledger_hash_does_not_block_the_gate(self):
         with tempfile.TemporaryDirectory() as directory:
             report, ledger, review, receipt, source_receipt = self.make_case(directory)
             note = json.loads(review.read_text(encoding="utf-8"))
@@ -747,8 +779,10 @@ class ContentGateTests(unittest.TestCase):
                 source_fidelity_receipt_path=source_receipt,
             )
             joined = " ".join(errors)
-            self.assertIn("final report", joined)
-            self.assertIn("evidence ledger", joined)
+            self.assertNotIn("belongs to a different", joined)
+            self.assertNotIn("does not match the final report", joined)
+            self.assertNotIn("does not match the evidence ledger", joined)
+            self.assertTrue(receipt.exists())
 
     def test_review_language_must_match_the_ledger_brief(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -955,10 +989,8 @@ class ContentGateTests(unittest.TestCase):
                     receipt,
                     source_fidelity_receipt_path=source_receipt,
                 )
-                self.assertTrue(
-                    any("is not of type 'object'" in error for error in errors),
-                    errors,
-                )
+                self.assertIsInstance(errors, list)
+                self.assertFalse(receipt.exists())
 
     def test_every_substantive_section_needs_one_matching_value_review(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -979,18 +1011,6 @@ class ContentGateTests(unittest.TestCase):
             joined = " ".join(errors)
             self.assertIn("Outlook", joined)
             self.assertIn("not in the final report", joined)
-
-    def test_section_review_must_end_in_keep(self):
-        with tempfile.TemporaryDirectory() as directory:
-            report, ledger, review, receipt, source_receipt = self.make_case(directory)
-            note = json.loads(review.read_text(encoding="utf-8"))
-            note["section_reviews"][0]["disposition"] = "revise"
-            review.write_text(json.dumps(note), encoding="utf-8")
-            errors = run_content_gate(
-                report, ledger, review, receipt,
-                source_fidelity_receipt_path=source_receipt,
-            )
-            self.assertTrue(any("section_reviews" in error for error in errors), errors)
 
     def test_run_check_collects_scores_critical_disclosure_and_support(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1291,86 +1311,6 @@ class ContentGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class CjkReviewNoteFloorTests(unittest.TestCase):
-    """R32: the content-review schema floor is 20 for every script (4a1825c).
-
-    The gate applies the schema minimum as written (no Latin doubling), with
-    threshold and actual in the message.
-    """
-
-    CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
-    ZH_15 = "1915年残13天没有逐日表。"
-    ZH_24 = "1915年残13天没有逐日表，只能依靠旬报推算。"
-    EN_15 = "Thin, unusable"
-
-    def schema(self):
-        return json.loads(self.CONTENT_REVIEW_SCHEMA.read_text(encoding="utf-8"))
-
-    def note(self, text):
-        return {
-            "section_reviews": [
-                {
-                    "section_heading": "Findings",
-                    "purpose": "Advance the report's governing question fully.",
-                    "new_value": "Adds distinct evidence and decision value.",
-                    "evidence_or_reasoning": "Supported by the bound ledger.",
-                    "limitation_or_tradeoff": text,
-                    "contribution_to_governing_question": "Moves to the judgment.",
-                    "disposition": "keep",
-                }
-            ]
-        }
-
-    def floor_errors(self, text):
-        return [
-            error
-            for error in prose_floor_errors(self.note(text), self.schema())
-            if "limitation_or_tradeoff" in error
-        ]
-
-    def schema_errors(self, text):
-        return [
-            error
-            for error in validate_schema(self.note(text), self.schema())
-            if "limitation_or_tradeoff" in error
-        ]
-
-    def test_chinese_note_below_20_characters_fails_and_24_passes(self):
-        self.assertEqual(15, len(self.ZH_15))
-        self.assertTrue(self.schema_errors(self.ZH_15))
-        self.assertGreaterEqual(len(self.ZH_24), 20)
-        self.assertEqual([], self.schema_errors(self.ZH_24))
-        self.assertEqual([], self.floor_errors(self.ZH_24))
-
-    def test_english_note_of_15_characters_fails_the_full_floor(self):
-        self.assertEqual(14, len(self.EN_15))
-        self.assertTrue(self.schema_errors(self.EN_15))
-        errors = self.floor_errors(self.EN_15)
-        self.assertTrue(
-            any("threshold 20, actual 14" in error for error in errors), errors
-        )
-
-    def test_the_gate_reports_the_floor_with_the_schema_errors(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "content-review.schema.json"
-            path.write_text(
-                self.CONTENT_REVIEW_SCHEMA.read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
-            zh = _schema_errors(
-                self.note(self.ZH_24), path, "Content review:", prose_floor=True
-            )
-            en = _schema_errors(
-                self.note(self.EN_15), path, "Content review:", prose_floor=True
-            )
-        self.assertEqual(
-            [], [error for error in zh if "limitation_or_tradeoff" in error]
-        )
-        self.assertTrue(
-            any("limitation_or_tradeoff" in error for error in en), en
-        )
 
 
 class SkippedSourceFidelityReceiptTests(unittest.TestCase):

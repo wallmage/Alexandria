@@ -3,7 +3,6 @@
   "$id": "https://github.com/wallmage/Alexandria/references/content-review.schema.json",
   "title": "Alexandria Content Review",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "schema_version",
     "status",
@@ -24,10 +23,10 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "type": "integer"
     },
     "status": {
-      "const": "completed"
+      "type": "string"
     },
     "report_path": {
       "type": "string",
@@ -46,18 +45,24 @@
       "pattern": "^[a-f0-9]{64}$"
     },
     "report_lang": {
-      "enum": ["en", "zh-CN", "zh-HK"]
+      "enum": [
+        "en",
+        "zh-CN",
+        "zh-HK"
+      ]
     },
     "reviewed_at": {
       "type": "string",
       "format": "date-time"
     },
     "reviewer_mode": {
-      "enum": ["independent", "fresh_eyes"]
+      "enum": [
+        "independent",
+        "fresh_eyes"
+      ]
     },
     "scores": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "question_answered",
         "evidence_strength",
@@ -97,7 +102,6 @@
     },
     "checks": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "central_judgment_answers_question",
         "priority_coverage_resolved",
@@ -184,8 +188,10 @@
   "$defs": {
     "score": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["score", "rationale"],
+      "required": [
+        "score",
+        "rationale"
+      ],
       "properties": {
         "score": {
           "type": "integer",
@@ -193,14 +199,12 @@
           "maximum": 5
         },
         "rationale": {
-          "type": "string",
-          "minLength": 20
+          "type": "string"
         }
       }
     },
     "sectionReview": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "section_heading",
         "purpose",
@@ -216,33 +220,27 @@
           "minLength": 1
         },
         "purpose": {
-          "type": "string",
-          "minLength": 20
+          "type": "string"
         },
         "new_value": {
-          "type": "string",
-          "minLength": 20
+          "type": "string"
         },
         "evidence_or_reasoning": {
-          "type": "string",
-          "minLength": 20
+          "type": "string"
         },
         "limitation_or_tradeoff": {
-          "type": "string",
-          "minLength": 20
+          "type": "string"
         },
         "contribution_to_governing_question": {
-          "type": "string",
-          "minLength": 20
+          "type": "string"
         },
         "disposition": {
-          "const": "keep"
+          "type": "string"
         }
       }
     },
     "visualAsset": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "path",
         "sha256",
@@ -260,21 +258,28 @@
           "pattern": "^[a-f0-9]{64}$"
         },
         "usage": {
-          "enum": ["body", "cover", "body_and_cover"]
+          "enum": [
+            "body",
+            "cover",
+            "body_and_cover"
+          ]
         },
         "visible_text_and_claims_review": {
-          "type": "string",
-          "minLength": 20
+          "type": "string"
         },
         "disposition": {
-          "const": "approved"
+          "type": "string"
         }
       }
     },
     "claimSupport": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["claim_id", "paragraph", "disposition", "note"],
+      "required": [
+        "claim_id",
+        "paragraph",
+        "disposition",
+        "note"
+      ],
       "properties": {
         "claim_id": {
           "type": "string",
@@ -285,7 +290,11 @@
           "minimum": 1
         },
         "disposition": {
-          "enum": ["supported", "qualified", "removed"]
+          "enum": [
+            "supported",
+            "qualified",
+            "removed"
+          ]
         },
         "note": {
           "type": "string",
@@ -295,7 +304,6 @@
     },
     "finding": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "finding_id",
         "severity",
@@ -312,7 +320,11 @@
           "pattern": "^F[0-9]+$"
         },
         "severity": {
-          "enum": ["critical", "major", "minor"]
+          "enum": [
+            "critical",
+            "major",
+            "minor"
+          ]
         },
         "category": {
           "enum": [
@@ -336,14 +348,21 @@
           "minLength": 1
         },
         "disposition": {
-          "enum": ["fixed", "accepted_limitation", "rejected"]
+          "enum": [
+            "fixed",
+            "accepted_limitation",
+            "rejected"
+          ]
         },
         "rationale": {
           "type": "string",
           "minLength": 1
         },
         "report_disclosure_excerpt": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

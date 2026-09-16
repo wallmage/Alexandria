@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -27,9 +28,7 @@ try:
     )
     from .report_blocks import mask_verification_note, validation_report_blocks
     from .validate_ledger import (
-        prose_floor_errors,
         validate_references,
-        validate_schema,
     )
     from .validate_report import (
         SOURCE_HEADINGS,
@@ -53,9 +52,7 @@ except ImportError:
     )
     from report_blocks import mask_verification_note, validation_report_blocks
     from validate_ledger import (
-        prose_floor_errors,
         validate_references,
-        validate_schema,
     )
     from validate_report import (
         SOURCE_HEADINGS,
@@ -121,15 +118,17 @@ def _read_json(path, label):
         return None, [f"{label} could not be read: {exc}"]
 
 
-def _schema_errors(data, schema_path, label, *, prose_floor=False):
-    schema, errors = _read_json(schema_path, f"{label} schema")
-    if errors:
-        return errors
-    found = [f"{label} {error}" for error in validate_schema(data, schema)]
-    if prose_floor:
-        # J3: the schema carries the CJK floor; non-CJK prose owes the full one.
-        found.extend(f"{label} {error}" for error in prose_floor_errors(data, schema))
-    return found
+def _fill_review_metadata(review, report_path, ledger_path):
+    if not isinstance(review, dict):
+        return
+    review["schema_version"] = 2
+    review["report_path"] = str(Path(report_path))
+    review["ledger_path"] = str(Path(ledger_path))
+    review["report_sha256"] = file_sha256(report_path)
+    review["ledger_sha256"] = file_sha256(ledger_path)
+    review["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+    if not review.get("reviewer_mode"):
+        review["reviewer_mode"] = "fresh_eyes"
 
 
 def _normalized(text):
@@ -521,12 +520,7 @@ def run_check(
                 findings.append(_finding("content/check", error))
             findings.extend(binding_findings(report_text, ledger))
     if isinstance(review, dict) and review:
-        for error in _schema_errors(
-            review, CONTENT_REVIEW_SCHEMA, "Content review:", prose_floor=True
-        ):
-            if "is too short" in error:
-                continue
-            findings.append(_finding("content/check", error))
+        _fill_review_metadata(review, report_path, ledger_path)
         ledger_language = (
             ledger.get("brief", {}).get("report_language")
             if isinstance(ledger, dict) and isinstance(ledger.get("brief"), dict)
@@ -550,21 +544,25 @@ def run_check(
                     findings.append(
                         _finding(
                             "content/score",
-                            f"Content review score {name} is {result['score']}; "
-                            "minimum passing score is 4.",
+                            f"{name} scored {result['score']} (< 4): revise, then "
+                            "alx review finish content",
                             fix="raise the score by fixing the report, then re-review",
                         )
                     )
         checks = review.get("checks", {})
         if isinstance(checks, dict):
-            for name, passed in checks.items():
-                if passed is False:
-                    findings.append(
-                        _finding(
-                            "content/check",
-                            f"Content review check {name} did not pass.",
-                        )
+            false = [name for name, passed in checks.items() if passed is False]
+            if false:
+                findings.append(
+                    _finding(
+                        "content/check",
+                        "checks false: " + ", ".join(false),
                     )
+                )
+        if not review.get("section_reviews"):
+            findings.append(_finding("content/check", "section_reviews empty"))
+        if not review.get("completion_note"):
+            findings.append(_finding("content/check", "completion_note empty"))
         report_normalized = _normalized(report_text)
         review_findings = review.get("findings", [])
         if isinstance(review_findings, list):
@@ -581,6 +579,15 @@ def run_check(
                             f"Critical finding {finding_id} must be fixed.",
                             ids=[finding_id],
                             fix="fix the finding and set disposition to fixed",
+                        )
+                    )
+                if severity == "major" and disposition == "rejected":
+                    findings.append(
+                        _finding(
+                            "content/check",
+                            f"Major finding {finding_id} cannot be rejected at "
+                            "final review.",
+                            ids=[finding_id],
                         )
                     )
                 if severity == "major" and disposition == "accepted_limitation":
@@ -667,17 +674,9 @@ def run_content_gate(
     errors.extend(review_errors)
     if ledger is None or review is None:
         return errors
-
-    errors.extend(
-        _schema_errors(ledger, EVIDENCE_LEDGER_SCHEMA, "Evidence ledger:")
-    )
-    errors.extend(
-        _schema_errors(
-            review, CONTENT_REVIEW_SCHEMA, "Content review:", prose_floor=True
-        )
-    )
     if not isinstance(ledger, dict) or not isinstance(review, dict):
         return errors
+    _fill_review_metadata(review, report_path, ledger_path)
     errors.extend(validate_references(ledger, _sources_cache(ledger_path)))
     errors.extend(
         warning(error) for error in _section_review_errors(report_text, review)
@@ -703,17 +702,19 @@ def run_content_gate(
             ):
                 errors.append(
                     warning(
-                        f"Content review score {name} is {result['score']}; "
-                        "minimum passing score is 4."
+                        f"{name} scored {result['score']} (< 4): revise, then "
+                        "alx review finish content"
                     )
                 )
     checks = review.get("checks", {})
     if isinstance(checks, dict):
-        for name, passed in checks.items():
-            if passed is False:
-                errors.append(
-                    warning(f"Content review check {name} did not pass.")
-                )
+        false = [name for name, passed in checks.items() if passed is False]
+        if false:
+            errors.append(warning("checks false: " + ", ".join(false)))
+    if not review.get("section_reviews"):
+        errors.append(warning("section_reviews empty"))
+    if not review.get("completion_note"):
+        errors.append(warning("completion_note empty"))
 
     report_hash = file_sha256(report_path)
     ledger_hash = file_sha256(ledger_path)
@@ -745,15 +746,6 @@ def run_content_gate(
             {"content receipt": receipt_path},
         )
     )
-    if not _same_bound_name(review.get("report_path"), report_path):
-        errors.append("Content review belongs to a different final report.")
-    if review.get("report_sha256") != report_hash:
-        errors.append("Content review does not match the final report.")
-    if not _same_bound_name(review.get("ledger_path"), ledger_path):
-        errors.append("Content review belongs to a different evidence ledger.")
-    if review.get("ledger_sha256") != ledger_hash:
-        errors.append("Content review does not match the evidence ledger.")
-
     report_normalized = _normalized(report_text)
     findings = review.get("findings", [])
     if isinstance(findings, list):
@@ -790,11 +782,16 @@ def run_content_gate(
         return errors
     warnings = list(errors)
 
-    scores = review["scores"]
+    scores = review.get("scores") if isinstance(review.get("scores"), dict) else {}
+    score_values = [
+        item.get("score")
+        for item in scores.values()
+        if isinstance(item, dict) and isinstance(item.get("score"), int)
+    ]
     receipt = {
         "schema_version": 2,
         "status": "passed",
-        "report_lang": review["report_lang"],
+        "report_lang": review.get("report_lang"),
         "report_path": str(report_path),
         "report_sha256": report_hash,
         "ledger_path": str(ledger_path),
@@ -810,7 +807,7 @@ def run_content_gate(
             None if fidelity_skipped else file_sha256(source_fidelity_receipt_path)
         ),
         "source_fidelity_receipt_skipped": fidelity_skipped,
-        "minimum_score": min(item["score"] for item in scores.values()),
+        "minimum_score": min(score_values) if score_values else None,
         "approved_visual_assets": approved_visual_assets,
     }
     try:

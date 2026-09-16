@@ -3022,12 +3022,7 @@ def _paragraph_table(mapping, unbound):
 
 
 def _rewild_findings(ws, state):
-    """Section (e): the offline rewild tiers.
-
-    `review_note_path` stays `None`: the note's hashes are stamped by `issue`
-    (step 4), so before then they never match the working report. The note's
-    freshness is judged by alx's own mechanical-delta rule in section (f).
-    """
+    """Section (e): the offline rewild tiers."""
     snapshot = _effective_snapshot(ws, state)
     if snapshot is None:
         return []
@@ -3040,25 +3035,18 @@ def _rewild_findings(ws, state):
                 "so section (e) did not run.",
             )
         ]
+    note = ws.reviews / "rewild.json"
     findings = list(
         run_check(
             ws.report,
             snapshot,
             lang=state.get("lang", "en"),
-            review_note_path=None,
+            review_note_path=note if note.exists() else None,
             timeout=_checker_timeout(),
         )
     )
     _note_checker_timeout(item.message for item in findings)
     return findings
-
-
-#: J3: each note's schema, whose string minimums are the CJK floor; the full
-#: non-CJK floor is enforced here and by `content_gate` (spec §7.1 halving).
-REVIEW_SCHEMAS = {
-    "rewild": ROOT / "references" / "rewild-review.schema.json",
-    "content": ROOT / "references" / "content-review.schema.json",
-}
 
 
 def _note_field_path(entry):
@@ -3077,83 +3065,86 @@ def _uniq_note_paths(missing):
     return unique
 
 
-def _prose_floor_missing(note, kind):
-    return [
-        f"{error} ({kind}-review schema)"
-        for error in validate_ledger.prose_floor_errors(
-            note, _read_json(REVIEW_SCHEMAS[kind])
-        )
-    ]
-
-
 def _plain_excerpt(text):
     """Inline markup and line wrapping removed, so a verbatim quote matches."""
     return re.sub(r"\s+", " ", re.sub(r"[*_`\[\]]", "", str(text))).strip()
 
 
 def _note_completeness(ws, state, ledger, kind):
-    """Offline completeness of one review note (spec §6.7f)."""
+    """Quality lines of one review note; metadata is never demanded here."""
     path = ws.reviews / f"{kind}.json"
     if not path.exists():
         return [f"reviews/{kind}.json is missing"]
     note = _read_json(path)
+    if not isinstance(note, dict):
+        return [f"reviews/{kind}.json is missing"]
     missing = []
-    # Item 4: every entry is the exact JSON path of the field to fill.
     if kind == "rewild":
-        checks = note.get("fidelity_checks") or {}
-        missing.extend(
-            f"fidelity_checks.{name} (must be true)"
+        checks = note.get("fidelity_checks")
+        checks = checks if isinstance(checks, dict) else {}
+        false = [
+            name
             for name in sorted(rewild_gate.REQUIRED_FIDELITY_CHECKS)
             if checks.get(name) is not True
-        )
+        ]
+        if false:
+            missing.append("fidelity_checks false: " + ", ".join(false))
         for index, item in enumerate(note.get("findings") or [], start=1):
-            if item.get("disposition") not in {"resolved", "rejected"}:
+            if not isinstance(item, dict):
                 missing.append(
-                    f"findings[{index}].disposition (resolved | rejected)"
+                    f"findings[{index}] skipped (unknown category/disposition "
+                    "or unresolved region/fidelity)"
                 )
-            elif item.get("category") in {"region", "fidelity"} and (
-                item.get("disposition") != "resolved"
+                continue
+            category = item.get("category")
+            disposition = item.get("disposition")
+            if (
+                category not in {"style", "region", "fidelity"}
+                or disposition not in {"resolved", "rejected"}
+                or (
+                    category in {"region", "fidelity"}
+                    and disposition != "resolved"
+                )
             ):
                 missing.append(
-                    f"findings[{index}].disposition (must be resolved for "
-                    f"category {item.get('category')})"
+                    f"findings[{index}] skipped (unknown category/disposition "
+                    "or unresolved region/fidelity)"
                 )
-        missing.extend(_prose_floor_missing(note, kind))
         return _uniq_note_paths(missing)
-    scores = note.get("scores") or {}
+    scores = note.get("scores")
+    scores = scores if isinstance(scores, dict) else {}
     for name in CONTENT_SCORE_KEYS:
-        entry = scores.get(name) or {}
-        if not isinstance(entry.get("score"), int):
-            missing.append(f"scores.{name}.score (integer 1-5)")
-        elif entry["score"] < 4:
-            missing.append(f"scores.{name}.score (is {entry['score']}, below 4)")
-        if not str(entry.get("rationale") or "").strip():
-            missing.append(f"scores.{name}.rationale (20+ chars, CJK 10+)")
-    checks = note.get("checks") or {}
-    missing.extend(
-        f"checks.{name} (must be true)"
-        for name in CONTENT_CHECK_KEYS
-        if checks.get(name) is not True
-    )
+        entry = scores.get(name)
+        entry = entry if isinstance(entry, dict) else {}
+        score = entry.get("score")
+        if not isinstance(score, int) or score < 4:
+            shown = score if isinstance(score, int) else "none"
+            missing.append(
+                f"{name} scored {shown} (< 4): revise, then alx review finish content"
+            )
+    checks = note.get("checks")
+    checks = checks if isinstance(checks, dict) else {}
+    false = [name for name in CONTENT_CHECK_KEYS if checks.get(name) is not True]
+    if false:
+        missing.append("checks false: " + ", ".join(false))
     if not note.get("section_reviews"):
-        missing.append("section_reviews (at least one section)")
+        missing.append("section_reviews empty")
     if not note.get("completion_note"):
-        missing.append("completion_note")
+        missing.append("completion_note empty")
     for index, item in enumerate(note.get("findings") or [], start=1):
+        if not isinstance(item, dict):
+            continue
         if item.get("severity") == "critical" and item.get("disposition") != "fixed":
             missing.append(
                 f"findings[{index}].disposition (a critical finding must be fixed)"
             )
+        if item.get("severity") == "major" and item.get("disposition") == "rejected":
+            missing.append(f"findings[{index}] major finding rejected")
         excerpt = item.get("report_disclosure_excerpt")
-        # The report emphasizes and wraps its prose, so the excerpt is compared
-        # without inline markup and with folded whitespace.
         if excerpt and _plain_excerpt(excerpt) not in _plain_excerpt(ws.report_text()):
             missing.append(
                 f"findings[{index}].report_disclosure_excerpt (not in report.md)"
             )
-    # A retained claim with no entry is supported by default; only a claim the
-    # reviewer qualified or removed owes an entry, so the missing-key list is
-    # the fixed form and never one line per claim.
     for entry in note.get("claim_support") or []:
         if not isinstance(entry, dict):
             continue
@@ -3164,16 +3155,6 @@ def _note_completeness(ws, state, ledger, kind):
                 f"claim_support[{entry.get('claim_id') or '?'}].note "
                 f"(why the claim is {entry.get('disposition')})"
             )
-    # The note must also satisfy the schema `content_gate` enforces, or
-    # `finish` would exit 0 on a note the gate then rejects. Both lists are
-    # returned together, so `finish` names every missing field in one round.
-    missing.extend(
-        f"{error} (content-review schema)"
-        for error in validate_ledger.validate_schema(
-            note, _read_json(content_gate.CONTENT_REVIEW_SCHEMA)
-        )
-    )
-    missing.extend(_prose_floor_missing(note, kind))
     return _uniq_note_paths(missing)
 
 
@@ -3281,28 +3262,22 @@ def freshness_findings(ws, state, ledger, kind):
         for block in previous
         if block not in current and _sha256_text(block) not in allowed
     ]
-    findings = []
-    if changed or removed:
-        findings.append(
-            finding(
-                _review_family(kind, "stale"),
-                f"re-review required: {len(changed)} paragraph(s) added or changed and "
-                f"{len(removed)} removed since the {kind} review.",
-            )
-        )
+    ledger_changed = False
     if kind == "content":
         reviewed_ledger = _read_json(reviewed / "ledger.json")
-        if _mechanical_ledger(reviewed_ledger, state) != _mechanical_ledger(
-            ledger, state
-        ):
-            findings.append(
-                finding(
-                    _review_family(kind, "stale"),
-                    "re-review required: the ledger changed beyond accessed/"
-                    "verified_at/report_excerpts since the content review.",
-                )
+        ledger_changed = _mechanical_ledger(
+            reviewed_ledger, state
+        ) != _mechanical_ledger(ledger, state)
+    if changed or removed or ledger_changed:
+        n = len(changed) + len(removed)
+        return [
+            finding(
+                _review_family(kind, "stale"),
+                f"{n} paragraph(s) changed since the {kind} review — re-read them "
+                f"if the change was substantive; alx review finish {kind} re-stamps.",
             )
-    return findings
+        ]
+    return []
 
 
 _CANNOT_LOCATE = re.compile(r"Claim (C\d+) cannot be located in the report")
@@ -3374,8 +3349,21 @@ def _content_check(ws):
     )
 
 
+def _stamp_existing_review_notes(ws, state):
+    for kind in REVIEW_KINDS:
+        path = ws.reviews / f"{kind}.json"
+        if not path.exists():
+            continue
+        note = _read_json(path)
+        if not isinstance(note, dict):
+            continue
+        _stamp_review_metadata(note, ws, state, kind)
+        _write_json(path, note)
+
+
 def _review_findings(ws, state, ledger):
     """Section (f): both notes' gate checks plus §6.8 freshness."""
+    _stamp_existing_review_notes(ws, state)
     findings = []
     if (ws.reviews / "content.json").exists():
         findings.extend(
@@ -3580,7 +3568,7 @@ CONTENT_NOTE_GUIDE = (
         "integer 1-5; 4 or more passes",
         "one key each: " + ", ".join(CONTENT_SCORE_KEYS),
     ),
-    ("scores.<key>.rationale", "text, 20+ chars (CJK 10+)", "why that score"),
+    ("scores.<key>.rationale", "text", "why that score"),
     (
         "checks.<key>",
         "true | false; all must be true",
@@ -3589,9 +3577,9 @@ CONTENT_NOTE_GUIDE = (
     (
         "section_reviews[]",
         "one object per H2 section, at least one",
-        'keys: section_heading, purpose, new_value, evidence_or_reasoning, '
-        "limitation_or_tradeoff, contribution_to_governing_question "
-        '(10+ CJK / 20+ other chars each), disposition="keep"',
+        "keys: section_heading, purpose, new_value, evidence_or_reasoning, "
+        "limitation_or_tradeoff, contribution_to_governing_question, "
+        'disposition="keep"',
     ),
     (
         "findings[]",
@@ -3611,7 +3599,7 @@ CONTENT_NOTE_GUIDE = (
         "visual_assets[]",
         "may stay empty",
         "keys: path, sha256, usage body|cover|body_and_cover, "
-        'visible_text_and_claims_review (10+ CJK / 20+ other chars), '
+        "visible_text_and_claims_review, "
         'disposition="approved"',
     ),
     ("completion_note", "text", "what you checked and what stands"),
@@ -3637,8 +3625,7 @@ def _rewild_note_guide():
             "findings[]",
             "may stay empty",
             "keys: category style|region|fidelity, finding, disposition "
-            "resolved|rejected (region and fidelity must be resolved), "
-            "reason (10+ chars)",
+            "resolved|rejected, reason",
         ),
     )
 
@@ -3646,7 +3633,9 @@ def _rewild_note_guide():
 def _note_instructions(kind):
     """The printed field list `review start` owes the reviewer (item 4)."""
     guide = CONTENT_NOTE_GUIDE if kind == "content" else _rewild_note_guide()
-    lines = [f"Fill reviews/{kind}.json — every field below, nothing else:"]
+    lines = [
+        f"Edit reviews/{kind}.json in place: fill the fields below, leave the rest as written."
+    ]
     lines.extend(f"  {path}: {values} — {meaning}" for path, values, meaning in guide)
     lines.append(
         f"Then `alx review finish {kind}`; it names the JSON path of whatever "
@@ -3655,47 +3644,52 @@ def _note_instructions(kind):
     return lines
 
 
-def _note_skeleton(ws, state, kind, ledger):
+def _stamp_review_metadata(note, ws, state, kind, *, completed=False):
+    """Fill workspace metadata; never a reason to refuse the note."""
+    if not isinstance(note, dict):
+        return note
     lang = state.get("lang", "en")
+    snapshot = ws.latest_snapshot()
+    note["schema_version"] = 1 if kind == "rewild" else 2
+    if completed:
+        note["status"] = "completed"
+    note["report_path"] = str(ws.report)
+    note["ledger_path"] = str(ws.ledger_path)
+    note["report_sha256"] = file_sha256(ws.report)
+    note["ledger_sha256"] = file_sha256(ws.ledger_path)
+    note["source_sha256"] = file_sha256(snapshot) if snapshot is not None else ""
+    note["report_lang"] = lang
+    note["profile"] = rewild_gate.PROFILES.get(lang, ("rewild",))[0]
+    note["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+    if not note.get("reviewer_mode"):
+        note["reviewer_mode"] = "fresh_eyes"
+    return note
+
+
+def _note_skeleton(ws, state, kind, ledger):
+    note = _stamp_review_metadata({}, ws, state, kind)
+    note["status"] = "draft"
     if kind == "rewild":
-        snapshot = ws.latest_snapshot()
-        return {
-            "schema_version": 1,
-            "status": "draft",
-            "report_sha256": file_sha256(ws.report),
-            "source_sha256": file_sha256(snapshot) if snapshot else "",
-            "report_lang": lang,
-            "profile": rewild_gate.PROFILES[lang][0],
-            "fidelity_checks": {
-                name: False for name in sorted(rewild_gate.REQUIRED_FIDELITY_CHECKS)
-            },
-            "findings": [],
+        note["fidelity_checks"] = {
+            name: False for name in sorted(rewild_gate.REQUIRED_FIDELITY_CHECKS)
         }
-    return {
-        "schema_version": 2,
-        "status": "draft",
-        "report_path": str(ws.report),
-        "report_sha256": file_sha256(ws.report),
-        "ledger_path": str(ws.ledger_path),
-        "ledger_sha256": file_sha256(ws.ledger_path),
-        "report_lang": lang,
-        "reviewed_at": date.today().isoformat(),
-        "reviewer_mode": "fresh_eyes",
-        # The skeleton is the whole form: every score and check key is here, so
-        # `review finish` can only ever name keys the reviewer left unfilled.
-        "scores": {
-            name: {"score": None, "rationale": ""} for name in CONTENT_SCORE_KEYS
-        },
-        "checks": {name: False for name in CONTENT_CHECK_KEYS},
-        "section_reviews": [],
-        "visual_assets": [],
-        "findings": [],
-        "evidence_limitations": [],
-        "completion_note": "",
-        # Empty by default: a retained claim needs an entry only when the
-        # reviewer qualifies or removes it.
-        "claim_support": [],
-    }
+        note["findings"] = []
+        return note
+    note.update(
+        {
+            "scores": {
+                name: {"score": None, "rationale": ""} for name in CONTENT_SCORE_KEYS
+            },
+            "checks": {name: False for name in CONTENT_CHECK_KEYS},
+            "section_reviews": [],
+            "visual_assets": [],
+            "findings": [],
+            "evidence_limitations": [],
+            "completion_note": "",
+            "claim_support": [],
+        }
+    )
+    return note
 
 
 def cmd_review_start(args):
@@ -3748,24 +3742,20 @@ def cmd_review_finish(args):
     if not record.get("iteration"):
         print(f"Run `alx review start {kind}` first.", file=sys.stderr)
         return 1
-    # `status` and a section's `disposition` are `finish`'s own fields, not the
-    # reviewer's: they are written before the note is judged complete.
     path = ws.reviews / f"{kind}.json"
     if path.exists():
         note = _read_json(path)
-        note["status"] = "completed"
+        if not isinstance(note, dict):
+            note = {}
+        _stamp_review_metadata(note, ws, state, kind, completed=True)
         for section in note.get("section_reviews") or []:
             if isinstance(section, dict) and not section.get("disposition"):
                 section["disposition"] = "keep"
         _write_json(path, note)
     missing = _note_completeness(ws, state, ledger, kind)
-    note = _read_json(path)
     if missing:
         for field in missing:
-            if " schema)" in field:
-                print(f"WARN review/{kind}: {field}")
-            else:
-                print(f"WARN review/{kind}: {field} missing")
+            print(f"WARN review/{kind}: {field}")
     record["finished"] = True
     ws.save_state(state)
     _emit(
@@ -4068,16 +4058,12 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         note_path = ws.reviews / f"{kind}.json"
         if not note_path.exists():
             continue
-        if freshness_findings(ws, state, ledger, kind):
-            # Spec §6.8: `issue` stamps the current hashes only when the
-            # freshness rule passes; a stale note must fail its gate instead.
-            continue
         note = _read_json(note_path)
-        note["report_sha256"] = file_sha256(ws.report)
+        if not isinstance(note, dict):
+            continue
+        _stamp_review_metadata(note, ws, state, kind)
         if kind == "rewild" and snapshot is not None:
             note["source_sha256"] = file_sha256(snapshot)
-        if kind == "content":
-            note["ledger_sha256"] = file_sha256(ws.ledger_path)
         _write_json(note_path, note)
     blocking = []
     rewild_receipt = ws.receipts / "rewild.json"

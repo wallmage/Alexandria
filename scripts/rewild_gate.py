@@ -295,30 +295,26 @@ def _load_review_note(
     findings = data.get("findings")
     if not isinstance(findings, list):
         return data, warns
-    for index, finding in enumerate(findings, start=1):
+    for finding in findings:
         if not isinstance(finding, dict):
-            warns.append(
-                f"findings[{index}] skipped (unknown category/disposition "
-                "or unresolved region/fidelity)"
-            )
             continue
-        category = finding.get("category")
-        disposition = finding.get("disposition")
-        if category not in {"style", "region", "fidelity"} or disposition not in {
-            "resolved",
-            "rejected",
-        }:
-            warns.append(
-                f"findings[{index}] skipped (unknown category/disposition "
-                "or unresolved region/fidelity)"
-            )
-            continue
-        if category in {"region", "fidelity"} and disposition != "resolved":
-            warns.append(
-                f"findings[{index}] skipped (unknown category/disposition "
-                "or unresolved region/fidelity)"
-            )
+        if finding.get("category") not in {"style", "region", "fidelity"}:
+            finding["category"] = "style"
+        if finding.get("disposition") not in {"resolved", "rejected"}:
+            finding["disposition"] = "rejected"
     return data, warns
+
+
+def _review_has_style_finding(review_note):
+    if not isinstance(review_note, dict):
+        return False
+    findings = review_note.get("findings")
+    if not isinstance(findings, list):
+        return False
+    return any(
+        isinstance(item, dict) and item.get("category") == "style"
+        for item in findings
+    )
 
 
 def _causal_phrases(text, report_lang):
@@ -1458,8 +1454,9 @@ def run_check(
                     fix="alx check",
                 )
             )
+    review_note = None
     if review_note_path is not None:
-        _, review_errors = _load_review_note(
+        review_note, review_errors = _load_review_note(
             review_note_path,
             report_path=report_path,
             source_path=source_path,
@@ -1532,16 +1529,17 @@ def run_check(
             for item in hard_warnings
         )
     )
-    findings.extend(
-        _finding(
-            "rewild/style",
-            f"Unresolved style warning: {item.get('section')}: "
-            f"{item.get('message')}",
-            severity="warn",
+    if not _review_has_style_finding(review_note):
+        findings.extend(
+            _finding(
+                "rewild/style",
+                f"Unresolved style warning: {item.get('section')}: "
+                f"{item.get('message')}",
+                severity="warn",
+            )
+            for item in result.get("warnings", [])
+            if item not in hard_warnings
         )
-        for item in result.get("warnings", [])
-        if item not in hard_warnings
-    )
     return findings
 
 
@@ -1671,17 +1669,18 @@ def run_gate(
     style_warnings = [
         warning for warning in warnings if warning not in hard_warnings
     ]
-    # Style is the one tier the gate does not fail on. A retained style
-    # warning is a judgment about phrasing, not evidence, so it is reported
-    # and the receipt still issues; a waiver only records the reason.
+    # Style is the one tier the gate does not fail on. A style finding in
+    # the review note is the reviewer's ruling; otherwise the checker
+    # lines are reported and the receipt still issues.
     findings = review_warns + soft
-    for item in style_warnings:
-        findings.append(
-            warning(
-                "Unresolved style warning: "
-                f"{item.get('section')}: {item.get('message')}"
+    if not _review_has_style_finding(review_note):
+        for item in style_warnings:
+            findings.append(
+                warning(
+                    "Unresolved style warning: "
+                    f"{item.get('section')}: {item.get('message')}"
+                )
             )
-        )
 
     receipt = {
         "schema_version": 1,

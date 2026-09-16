@@ -64,7 +64,8 @@ not require `--iter`.
 
 `alx review start rewild` writes `reviews/rewild.json` with metadata filled.
 Edit it in place. Fill `fidelity_checks` (four booleans) and `findings[]`
-(`category` style|region|fidelity, `finding`, `disposition` resolved|rejected,
+(`category` style|region|fidelity — other words are accepted as style;
+`finding`; `disposition` resolved|rejected — other words are accepted as rejected;
 `reason`). Then `alx review finish rewild`.
 
 ```json

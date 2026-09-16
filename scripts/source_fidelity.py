@@ -729,28 +729,25 @@ def _request_pinned(target, *, timeout):
         connection.close()
 
 
-@functools.lru_cache(maxsize=1)
-def _script_character_maps():
-    """Single-character Simplified→Traditional and Traditional→Simplified maps."""
-    s2t = {}
-    t2s = {}
-    path = (
-        Path(__file__).resolve().parent.parent
-        / "references"
-        / "rewild"
-        / "opencc"
-        / "STCharacters.txt"
-    )
-    for line in path.read_text(encoding="utf-8").splitlines():
+def _opencc_first_targets(path):
+    mapping = {}
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
         if not line or line.startswith("#"):
             continue
         source, targets = line.split("\t", 1)
         targets = targets.split()
         if not targets:
             continue
-        s2t[source] = targets[0]
-        for target in targets:
-            t2s.setdefault(target, source)
+        mapping[source] = targets[0]
+    return mapping
+
+
+@functools.lru_cache(maxsize=1)
+def _script_character_maps():
+    """s2t from STCharacters; t2s from TSCharacters (first target per line)."""
+    root = Path(__file__).resolve().parent.parent / "references" / "rewild" / "opencc"
+    s2t = _opencc_first_targets(root / "STCharacters.txt")
+    t2s = _opencc_first_targets(root / "TSCharacters.txt")
     return s2t, t2s
 
 

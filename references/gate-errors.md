@@ -13,8 +13,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Ledger (`check` b / `validate_ledger`)
 
 ### `ledger/quantity` — W
-- **rule:** an Arabic-digit figure, percentage, currency or date in a claim that no extract or cached page of its sources carries. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R29: a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) carries no obligation and raises no finding; a digit, percentage, currency or date is covered when its form appears in the claim's extracts or anywhere in the cached page, title or `published` of any source the claim cites; a Han ordinal or year count on the page (第十三年, 十三周年) covers the digits 13. Han numerals stay silent (R26/C26). Message: `C9: '1945-09-02' is in the claim but not in S8 (extracts or cached page). Fix: alx find S8 1945-09-02, or reword the claim.`
-- **fix:** `alx find S<n> <figure>` then correct the claim or extract, or `alx claim drop C<n>`
+- **rule:** an Arabic-digit figure, percentage, currency or date in a claim that no extract or cached page of its sources carries. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R29: a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) carries no obligation and raises no finding; a digit, percentage, currency or date is covered when its form appears in the claim's extracts or anywhere in the cached page, title or `published` of any source the claim cites; a Han ordinal or year count on the page (第十三年, 十三周年) covers the digits 13. Han numerals stay silent (R26/C26). Display and Fix use the claim's surface text; the search covers every cited source (`source_evidence` ∪ `source_ids`). Message: `C3: '1919年10月2日' is in the claim but not in S13 or S1. Fix: alx find S18 1919年10月2日`.
+- **fix:** `alx find S<n> <surface form>` then correct the claim or extract, or `alx claim drop C<n>`
 - **remove:** n/a (warning; `issue` repeats it under `=== REMINDERS (not fixed yet; warnings, never block) ===` and still issues)
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
 
@@ -133,7 +133,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** C4 supports C2, and C2 was dropped.
 
 ### `ledger/coverage` — W
-- **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims); a coverage item that is not an object, an unknown `status`, or `claim_ids` that is not a list (`ledger merge` prints these too; the value is stored as given).
+- **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims); a coverage item that is not an object, an unknown `status`, or `claim_ids` that is not a list (`ledger merge` prints these too; the value is stored as given). Readers accept `claim_ids` or `claims` (list of strings). Merge warns once per item with neither key: `WARN coverage[3] '<area>': no claim_ids — check reads claim_ids: ["C1", …]`.
 - **fix:** `alx ledger merge coverage.json` (`--fix` repairs no coverage linkage)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** area `supported` with an empty `claim_ids`.
@@ -291,7 +291,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** "delve" ×7 at 8,000 words.
 
 ### `rewild/style` — W
-- **rule:** every other checker section — Rhythm, Openers, Serial enumeration, Paragraphs, Paragraph closers, Punctuation.
+- **rule:** every other checker section — Rhythm, Openers, Serial enumeration, Paragraphs, Paragraph closers, Punctuation. Printed only when the rewild note has no style finding. One or more style findings (any disposition) means the reviewer ruled on style.
 - **fix:** edit prose (warning; never blocks)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** 9 consecutive sentences open with the subject.
@@ -311,7 +311,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Reviews (`check` f / `content_gate`, `rewild_gate`, `alx`)
 
 ### `review/rewild` — W
-- **rule:** `N paragraph(s) changed since the rewild review — re-read them if the change was substantive; alx review finish rewild re-stamps.`
+- **rule:** `N paragraph(s) changed since the rewild review — re-read them if the change was substantive; alx review finish rewild re-stamps.` Unknown or missing category is treated as style; unknown or missing disposition as rejected. Findings are kept. A finished note's quality lines print here the same way `review finish` printed them.
 - **fix:** `alx review finish rewild`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** 2 paragraph(s) changed since the rewild review.
@@ -362,7 +362,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Tooling (`issue` / `render`)
 
 ### `tooling/receipt` — W
-- **rule:** a receipt could not be issued or verified — rewild, content, source-fidelity, or `validate_report --fast --final-once`. `render` still runs on whatever `issue` produced.
+- **rule:** a receipt could not be issued or verified — rewild, content, source-fidelity, or `validate_report --fast --final-once`. `render` still runs on whatever `issue` produced. Offline delivery note: `source fidelity: offline — extracts were verified verbatim at claim add; alx issue --live re-reads a sample of cited pages`.
 - **fix:** `alx issue`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** source-fidelity receipt not issued: network unavailable.
@@ -398,6 +398,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. Han-numeral quantities raise no `ledger/quantity` finding.
 
 R35 deletions: review-note metadata bindings (hash/path/profile/schema_version) — `issue` stamps them; content-review prose floors; evidence-ledger schema on `brief`/`people`/`coverage`/`synthesis`; PDF page-count minimum at `alx render`; live re-read by default at `issue`.
+
+R37 deletions: the review-note exam that discarded unknown category or disposition findings; Unresolved style lines after a style finding is recorded.
 
 ## Aliases
 

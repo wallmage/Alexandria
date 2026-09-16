@@ -273,6 +273,11 @@ CLOSED_IMPERATIVES = (
         r"^write \[C\d+\] at the end of the sentence that states claim C\d+ "
         r"in report\.md, then alx check --fix$"
     ),
+    re.compile(
+        r"^cite the nearest ledger URL instead \(alx check --fix rewrites it when "
+        r"only www\. or the domain suffix differs\); a page you did not fetch must "
+        r"be fetched first$"
+    ),
 )
 
 #: Class A families for the findings `alx` itself emits (spec §6.10); every
@@ -650,7 +655,10 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
         url = match.group(0) if match else ""
         if not url:
             return "", ""
-        return remedy("fetch-url", url=url), remedy("remove-link", url=url)
+        return (
+            validate_report.LINK_NOT_IN_LEDGER_FIX,
+            remedy("remove-link", url=url),
+        )
     if family in {"binding/claim-paragraph", "binding/paragraph"}:
         candidate = re.search(r"candidates: (\d+)", item.message)
         paragraph = int(candidate.group(1)) if candidate else 1
@@ -810,7 +818,12 @@ def adopted_class(item, *, online=False):
 #: by a family_justification, never by re-declaring provenance; J4: a refresh
 #: alone never clears a changed context, only the refresh plus `claim add`).
 REMEDY_OVERRIDES = frozenset(
-    {"ledger/https", "ledger/host-conflict", "fidelity/context-changed"}
+    {
+        "ledger/https",
+        "ledger/host-conflict",
+        "fidelity/context-changed",
+        "binding/link-not-in-ledger",
+    }
 )
 
 _EMBEDDED_REMEDY = re.compile(r"\s*(?:Fix|Remove):\s*`?[^`.\n]+`?\.?\s*$")
@@ -1880,6 +1893,36 @@ def _warn_lines(claim_id, warns):
     ]
 
 
+def _claim_add_mismatch_lines(ws, claim, claim_id, item_finding):
+    source_id = _pick_id(item_finding, "S") or ""
+    extract = ""
+    for record in claim.get("source_evidence") or []:
+        if isinstance(record, dict) and record.get("source_id") == source_id:
+            extract = record.get("extract_or_location") or ""
+            break
+    if not extract:
+        extract = claim.get("extract_or_location") or ""
+    searched = str(extract)[:60] + "…"
+    lines = [
+        f"{claim_id} FAIL [fidelity/mismatch] extract not found verbatim in "
+        f"{source_id} (searched: {searched})"
+    ]
+    entry = cached(ws, source_id)
+    text = entry[0] if entry else ""
+    passage = source_fidelity.closest_passage(text, extract)
+    if passage is None:
+        keyword = source_fidelity._find_keyword(extract)
+        lines.append(
+            f"  no similar passage in {source_id} — alx find {source_id} {keyword}"
+        )
+    else:
+        lines.append(
+            f"  {source_id} extract_or_location: "
+            + json.dumps(passage, ensure_ascii=False)
+        )
+    return lines
+
+
 def _batch_findings(ws, ledger, item, seen_ids):
     """Only what `alx` owns: batch uniqueness and cache presence (spec §6.4)."""
     findings = []
@@ -2141,15 +2184,25 @@ def cmd_claim_add(args):
         # R13: warn-tier findings are advice; only hard ones refuse the upsert.
         hard = hard_findings(findings)
         warns = [item for item in findings if item.severity == "warn"]
-        for item_finding in hard:
-            lines.append(
-                f"{claim_id} {'WARN' if item_finding.severity == 'warn' else 'FAIL'}"
-                f" [{item_finding.family}] {item_finding.message}"
-                f" — fix: {item_finding.fix}"
-            )
         if hard:
-            lines.extend(_warn_lines(claim_id, warns))
-            failures.append(f"{claim_id}({len(hard)})")
+            mismatch = next(
+                (item_finding for item_finding in hard if item_finding.family == "fidelity/mismatch"),
+                None,
+            )
+            if mismatch:
+                lines.extend(
+                    _claim_add_mismatch_lines(ws, item, claim_id, mismatch)
+                )
+            for item_finding in hard:
+                if mismatch and item_finding.family == "fidelity/mismatch":
+                    continue
+                message = str(item_finding.message)
+                if " Missing: " in message:
+                    message = message.split(" Missing: ", 1)[0]
+                lines.append(
+                    f"{claim_id} FAIL [{item_finding.family}] {message}"
+                )
+            failures.append(claim_id)
             continue
         claim = expand_claim_input(ws, item, ledger)
         claims = ledger.setdefault("claims", [])
@@ -2186,9 +2239,14 @@ def cmd_claim_add(args):
     ws.save_ledger(ledger)
     state["counters"]["claims"] = len(ledger["claims"])
     ws.save_state(state)
-    tail = f"{len(failures)} failed"
     if failures:
-        tail += ": " + " ".join(failures)
+        tail = (
+            f"{len(failures)} failed: {' '.join(failures)} — paste each "
+            "extract_or_location line above into a new claims file and "
+            "alx claim add it"
+        )
+    else:
+        tail = "0 failed"
     lines.insert(0, f"{len(items)} submitted, {accepted} accepted, {tail}")
     # Field test 3: the whole diagnosis survives a `| tail -15` of the output.
     transcript = ws.alx / "last-claim-add.txt"
@@ -2758,6 +2816,30 @@ def _convert_claim_markers(ws, ledger, text):
     return converted
 
 
+def _rewrite_same_page_links(ws, ledger, text):
+    """R36.1: rewrite report links that differ only by www. or public suffix."""
+    allowed = validate_report._ledger_url_set(ledger)
+    pending = []
+    for url, start, end in validate_report._markdown_url_entries(text):
+        hit = validate_report.same_page_ledger_source(url, ledger)
+        if not hit:
+            continue
+        new, source_id = hit
+        if validate_report.normalize_url(url) == validate_report.normalize_url(new):
+            continue
+        if validate_report.normalize_url(url) in allowed:
+            continue
+        pending.append((start, end, url, new, source_id))
+    lines = []
+    for start, end, url, new, source_id in reversed(pending):
+        text = text[:start] + new + text[end:]
+        lines.append(f"link rewritten: {url} → {new} ({source_id})")
+    lines.reverse()
+    if pending:
+        ws.report.write_text(text, encoding="utf-8")
+    return text, lines
+
+
 def _bind_markers(ws, state, ledger, text):
     """Record the marker bindings, then turn the markers into source links.
 
@@ -2955,13 +3037,16 @@ def _binding_remedy(item, unbound):
     )
 
 
-def _binding_findings(ws, state, ledger, *, fix=False):
+def _binding_findings(ws, state, ledger, *, fix=False, rewrite_out=None):
     """Section (c): T4's binding rules, excerpt binding and leftover prose."""
     text = ws.report_text()
     mapping, unbound = paragraph_mapping(ws, state, ledger, text)
     paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
     if fix:
         text = _bind_markers(ws, state, ledger, text)
+        text, rewrites = _rewrite_same_page_links(ws, ledger, text)
+        if rewrite_out is not None:
+            rewrite_out.extend(rewrites)
         paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
         for claim in ledger.get("claims", []):
             number = mapping.get(claim.get("claim_id"))
@@ -3068,6 +3153,14 @@ def _rewild_findings(ws, state):
         )
     )
     _note_checker_timeout(item.message for item in findings)
+    if note.exists() and _is_blank_review_note(_read_json(note), "rewild"):
+        message = _blank_review_message(ws, "rewild")
+        findings = [
+            item
+            for item in findings
+            if getattr(item, "family", "") != "review/rewild"
+        ]
+        findings.append(finding("review/rewild", message, severity="warn"))
     return findings
 
 
@@ -3092,6 +3185,64 @@ def _plain_excerpt(text):
     return re.sub(r"\s+", " ", re.sub(r"[*_`\[\]]", "", str(text))).strip()
 
 
+_SECTION_REVIEW_TEXT_KEYS = (
+    "purpose",
+    "new_value",
+    "evidence_or_reasoning",
+    "limitation_or_tradeoff",
+    "contribution_to_governing_question",
+)
+
+
+def _blank_review_message(ws, kind):
+    path = (ws.reviews / f"{kind}.json").resolve()
+    return (
+        f"nothing filled yet — edit {path} (scores, checks, section_reviews, "
+        f"completion_note) and run alx review finish {kind} again"
+    )
+
+
+def _is_blank_review_note(note, kind):
+    if not isinstance(note, dict):
+        return True
+    if kind == "rewild":
+        checks = note.get("fidelity_checks")
+        checks = checks if isinstance(checks, dict) else {}
+        return not any(value is True for value in checks.values())
+    scores = note.get("scores")
+    scores = scores if isinstance(scores, dict) else {}
+    for entry in scores.values():
+        entry = entry if isinstance(entry, dict) else {}
+        if isinstance(entry.get("score"), int):
+            return False
+    checks = note.get("checks")
+    checks = checks if isinstance(checks, dict) else {}
+    if any(value is True for value in checks.values()):
+        return False
+    if str(note.get("completion_note") or "").strip():
+        return False
+    for section in note.get("section_reviews") or []:
+        if not isinstance(section, dict):
+            continue
+        for key in _SECTION_REVIEW_TEXT_KEYS:
+            if str(section.get(key) or "").strip():
+                return False
+    return True
+
+
+def _is_review_quality_line(message):
+    text = str(message)
+    if " scored " in text and "(< 4)" in text:
+        return True
+    if text.startswith("checks false:"):
+        return True
+    if text in {"section_reviews empty", "completion_note empty"}:
+        return True
+    return text.startswith("Section review") or text.startswith(
+        "Duplicate section review"
+    )
+
+
 def _note_completeness(ws, state, ledger, kind):
     """Quality lines of one review note; metadata is never demanded here."""
     path = ws.reviews / f"{kind}.json"
@@ -3100,6 +3251,8 @@ def _note_completeness(ws, state, ledger, kind):
     note = _read_json(path)
     if not isinstance(note, dict):
         return [f"reviews/{kind}.json is missing"]
+    if _is_blank_review_note(note, kind):
+        return [_blank_review_message(ws, kind)]
     missing = []
     if kind == "rewild":
         checks = note.get("fidelity_checks")
@@ -3387,15 +3540,36 @@ def _review_findings(ws, state, ledger):
     """Section (f): both notes' gate checks plus §6.8 freshness."""
     _stamp_existing_review_notes(ws, state)
     findings = []
-    if (ws.reviews / "content.json").exists():
-        findings.extend(
-            _content_binding_remedies(
-                _content_check(ws), ws, state, ledger
+    content_path = ws.reviews / "content.json"
+    if content_path.exists():
+        gate = _content_check(ws)
+        note = _read_json(content_path)
+        if _is_blank_review_note(note, "content"):
+            gate = [
+                item
+                for item in gate
+                if not (
+                    getattr(item, "family", "") in {"content/score", "content/check"}
+                    and _is_review_quality_line(getattr(item, "message", ""))
+                )
+            ]
+            gate.append(
+                finding(
+                    "content/check",
+                    _blank_review_message(ws, "content"),
+                    severity="warn",
+                )
             )
-        )
+        findings.extend(_content_binding_remedies(gate, ws, state, ledger))
     for kind in REVIEW_KINDS:
         note_missing = _note_completeness(ws, state, ledger, kind)
         record = state.get("reviews", {}).get(kind, {})
+        if (
+            record.get("finished")
+            and note_missing
+            and note_missing[0].startswith("nothing filled yet")
+        ):
+            continue
         if record.get("finished") and note_missing:
             findings.append(
                 finding(
@@ -3476,7 +3650,7 @@ def _fix_date_line(ws, state, ledger):
         ws.report.write_text(updated, encoding="utf-8")
 
 
-def run_check(ws, state, ledger, *, fix=False, mapping_out=None):
+def run_check(ws, state, ledger, *, fix=False, mapping_out=None, rewrite_out=None):
     """Sections (a)-(f) of spec §6.7; every evaluator runs offline, every time."""
     if fix:
         mechanical_fixes(ws, state, ledger)
@@ -3489,7 +3663,9 @@ def run_check(ws, state, ledger, *, fix=False, mapping_out=None):
             findings, paragraphs=0, claim_files=state.get("claim_files", {})
         )
     findings.extend(_ledger_findings(ws, ledger))
-    binding, mapping = _binding_findings(ws, state, ledger, fix=fix)
+    binding, mapping = _binding_findings(
+        ws, state, ledger, fix=fix, rewrite_out=rewrite_out
+    )
     if mapping_out is not None:
         mapping_out.update(mapping)
     findings.extend(binding)
@@ -3545,10 +3721,13 @@ def cmd_check(args):
     ws, state, ledger = _open(args)
     state["counters"]["check"] = state["counters"].get("check", 0) + 1
     mapping = {}
-    findings = run_check(ws, state, ledger, fix=args.fix, mapping_out=mapping)
+    rewrites = []
+    findings = run_check(
+        ws, state, ledger, fix=args.fix, mapping_out=mapping, rewrite_out=rewrites
+    )
     ledger = ws.load_ledger()
     rows = sorted(mapping.items(), key=lambda row: _claim_order(row[0]))
-    lines = [_length_line(ws, state)]
+    lines = list(rewrites) + [_length_line(ws, state)]
     lines.append(
         f"claim->paragraph ({len(rows)} claims):" if rows else "claim->paragraph: none"
     )
@@ -3703,7 +3882,18 @@ def _note_skeleton(ws, state, kind, ledger):
                 name: {"score": None, "rationale": ""} for name in CONTENT_SCORE_KEYS
             },
             "checks": {name: False for name in CONTENT_CHECK_KEYS},
-            "section_reviews": [],
+            "section_reviews": [
+                {
+                    "section_heading": heading,
+                    "purpose": "",
+                    "new_value": "",
+                    "evidence_or_reasoning": "",
+                    "limitation_or_tradeoff": "",
+                    "contribution_to_governing_question": "",
+                    "disposition": "keep",
+                }
+                for heading, _offset in validate_report._h2_sections(ws.report_text())
+            ],
             "visual_assets": [],
             "findings": [],
             "evidence_limitations": [],
@@ -3750,9 +3940,13 @@ def cmd_review_start(args):
         if kind == "rewild"
         else "references/content-quality.md §13 review protocol"
     )
-    lines.append(f"Review copy: {target}")
+    lines.append(f"Report copy for the blind read: {target}")
     lines.extend(_note_instructions(kind))
     lines.append(f"Judge the report by {protocol}.")
+    lines.insert(
+        0,
+        f"Note to fill: {(ws.reviews / f'{kind}.json').resolve()} (edit in place)",
+    )
     _emit(ws, state, f"review start {kind}", f"iteration {iteration}", lines)
     return 0
 

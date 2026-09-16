@@ -1001,17 +1001,18 @@ def _find_keyword(window):
     return token.group(0) if token else "KEYWORD"
 
 
-def _closest_passage_message(text, window, source_id):
+def closest_passage(text, window):
+    """Return original-cache window (≤240 chars) or None if LCS < 8."""
     visible = _visible_cache_text(text)
     spaced = _to_simplified(_folded_text(visible))
     document = re.sub(r"\s+", "", spaced)
     matcher = difflib.SequenceMatcher(None, document, window, autojunk=False)
     match = matcher.find_longest_match(0, len(document), 0, len(window))
     if match.size < 8:
-        return f" no similar passage in {source_id}"
+        return None
     mapping = [index for index, char in enumerate(spaced) if not char.isspace()]
     if not mapping or match.a >= len(mapping):
-        return f" no similar passage in {source_id}"
+        return None
     mid = match.a + match.size // 2
     mid = min(mid, len(mapping) - 1)
     spaced_anchor = mapping[mid]
@@ -1027,7 +1028,13 @@ def _closest_passage_message(text, window, source_id):
             end = min(len(original), 240)
         else:
             start = max(0, end - 240)
-    passage = original[start:end]
+    return original[start:end]
+
+
+def _closest_passage_message(text, window, source_id):
+    passage = closest_passage(text, window)
+    if passage is None:
+        return f" no similar passage in {source_id}"
     return f" Closest passage in {source_id}: {json.dumps(passage, ensure_ascii=False)}"
 
 

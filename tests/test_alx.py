@@ -176,6 +176,11 @@ CLOSED_IMPERATIVES = (
         r"in report\.md, then alx check --fix$"
     ),
     re.compile(r"^deepen \(research, counterevidence, implications\), never pad$"),
+    re.compile(
+        r"^cite the nearest ledger URL instead \(alx check --fix rewrites it when "
+        r"only www\. or the domain suffix differs\); a page you did not fetch must "
+        r"be fetched first$"
+    ),
 )
 
 
@@ -1214,7 +1219,7 @@ class ReviewTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(0, code, out)
         self.assertIn("WARN review/content:", out)
-        self.assertIn("scored", out)
+        self.assertIn("nothing filled yet — edit", out)
         self.assertTrue(self.state()["reviews"]["content"]["finished"])
 
     def test_only_a_qualified_or_removed_claim_needs_a_support_note(self):
@@ -2438,14 +2443,17 @@ class IntegrationHoleTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(0, code, out)
         self.assertTrue(self.state()["reviews"]["content"]["finished"])
-        for token in (
-            "question_answered scored none (< 4): revise, then alx review finish content",
-            "checks false:",
-            "section_reviews empty",
-            "completion_note empty",
-        ):
-            with self.subTest(token=token):
-                self.assertIn(f"WARN review/content: {token}", out)
+        note_path = (self.dir / "reviews" / "content.json").resolve()
+        warn_lines = [
+            line for line in out.splitlines() if line.startswith("WARN review/content:")
+        ]
+        self.assertEqual(1, len(warn_lines), out)
+        self.assertEqual(
+            f"WARN review/content: nothing filled yet — edit {note_path} "
+            "(scores, checks, section_reviews, completion_note) and run "
+            "alx review finish content again",
+            warn_lines[0],
+        )
         # The list is the fixed form, never one line per claim.
         self.assertNotIn("claim_support[C1]", out)
 
@@ -3238,14 +3246,10 @@ class ParkedReviewNoteTests(AlxTestCase):
         missing = alx._note_completeness(
             alx.Workspace(self.dir), self.state(), self.ledger(), "content"
         )
-        # one score line per key + one checks line + section_reviews +
-        # completion_note: the form, whatever the claim count.
+        # blank skeleton: one line, not one path per score/check.
         own = [item for item in missing if "(content-review schema)" not in item]
-        self.assertEqual(
-            2 + len(alx.CONTENT_SCORE_KEYS) + 1,
-            len(own),
-            own,
-        )
+        self.assertEqual(1, len(own), own)
+        self.assertTrue(own[0].startswith("nothing filled yet — edit"), own)
         self.assertNotIn("status", out)
         paths = [item.split(":", 1)[0].split()[0] for item in missing]
         self.assertEqual(len(paths), len(set(paths)), paths)
@@ -4372,12 +4376,22 @@ class ClaimAddDryRunTests(AlxTestCase):
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(1, code, out)
         lines = out.splitlines()
-        self.assertEqual("3 submitted, 2 accepted, 1 failed: C3(1)", lines[0])
+        self.assertEqual(
+            "3 submitted, 2 accepted, 1 failed: C3 — paste each "
+            "extract_or_location line above into a new claims file and "
+            "alx claim add it",
+            lines[0],
+        )
         self.assertIn("full output: .alx/last-claim-add.txt", out)
         transcript = (self.dir / ".alx" / "last-claim-add.txt").read_text(
             encoding="utf-8"
         )
-        self.assertTrue(transcript.startswith("3 submitted, 2 accepted, 1 failed: C3("))
+        self.assertTrue(
+            transcript.startswith(
+                "3 submitted, 2 accepted, 1 failed: C3 — paste each "
+                "extract_or_location line above"
+            )
+        )
         self.assertIn("C3 FAIL", transcript)
 
     def test_summary_line_says_zero_failed_without_a_list(self):
@@ -4976,10 +4990,7 @@ class ReviewFinishOneRoundTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(0, code, out)
         self.assertIn("WARN review/content:", out)
-        self.assertIn(
-            "question_answered scored none (< 4): revise, then alx review finish content",
-            out,
-        )
+        self.assertIn("nothing filled yet — edit", out)
         paths = []
         for line in out.splitlines():
             if line.startswith("WARN review/content: "):
@@ -5757,7 +5768,8 @@ class DefectAuditTests(AlxTestCase):
                 continue
             rest = line.split("WARN review/content: ", 1)[1]
             paths.append(rest.split(":", 1)[0].split()[0])
-        self.assertGreater(len(paths), 1, out)
+        self.assertEqual(1, len(paths), out)
+        self.assertTrue(paths[0].startswith("nothing"), paths)
         self.assertEqual(len(paths), len(set(paths)), paths)
 
     def test_d6_find_prints_one_window_for_two_keywords(self):

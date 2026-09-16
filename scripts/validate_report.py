@@ -25,14 +25,20 @@ try:
     from .report_blocks import mask_fenced_code as _mask_fenced_code
     from .report_blocks import report_length
     from .report_contract import detect_language, localized_date, report_length_policy
-    from .source_fidelity import validate_source_fidelity_receipt_online
+    from .source_fidelity import (
+        _registrable_domain,
+        validate_source_fidelity_receipt_online,
+    )
 except ImportError:
     from artifact_safety import validated_artifact_path
     from gate_severity import emit_findings, hard_errors, warning
     from report_blocks import mask_fenced_code as _mask_fenced_code
     from report_blocks import report_length
     from report_contract import detect_language, localized_date, report_length_policy
-    from source_fidelity import validate_source_fidelity_receipt_online
+    from source_fidelity import (
+        _registrable_domain,
+        validate_source_fidelity_receipt_online,
+    )
 
 try:
     from .gate_severity import Finding
@@ -410,6 +416,57 @@ def normalize_url(url):
     )
 
 
+LINK_NOT_IN_LEDGER_FIX = (
+    "cite the nearest ledger URL instead (alx check --fix rewrites it when "
+    "only www. or the domain suffix differs); a page you did not fetch must "
+    "be fetched first"
+)
+
+
+def _first_registrable_label(host):
+    if not host:
+        return ""
+    domain = _registrable_domain(host)
+    return domain.split(".")[0] if domain else ""
+
+
+def same_page_variant(report_url, ledger_url):
+    """True when only www. / public-suffix differs; path+query match; path has ≥2 segments."""
+    report = urlsplit(normalize_url(report_url))
+    ledger = urlsplit(normalize_url(ledger_url))
+    if report.path != ledger.path or report.query != ledger.query:
+        return False
+    segments = [part for part in report.path.split("/") if part]
+    if len(segments) < 2:
+        return False
+    report_label = _first_registrable_label(report.hostname)
+    ledger_label = _first_registrable_label(ledger.hostname)
+    return bool(report_label) and report_label == ledger_label
+
+
+def same_page_ledger_source(report_url, ledger):
+    """First matching source: (source['url'], source_id) or None.
+    Compare report_url against each source url AND aliases; return the source's primary url + id.
+    """
+    if not isinstance(ledger, dict):
+        return None
+    sources = ledger.get("sources", [])
+    if not isinstance(sources, list):
+        return None
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        candidates = [source.get("url"), *(source.get("aliases") or [])]
+        if any(
+            raw and same_page_variant(report_url, raw) for raw in candidates
+        ):
+            url = source.get("url")
+            source_id = source.get("source_id")
+            if url and source_id:
+                return (url, source_id)
+    return None
+
+
 def _http_url(url):
     scheme = urlsplit(str(url)).scheme.lower()
     return scheme in {"http", "https"}
@@ -581,7 +638,7 @@ def binding_findings(text, ledger):
             _finding(
                 "binding/link-not-in-ledger",
                 message,
-                fix="cite a ledger URL or alias",
+                fix=LINK_NOT_IN_LEDGER_FIX,
             )
         )
 

@@ -46,7 +46,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **rule:** claim-input object fails `references/claim-input.schema.json`, misses `claim_id`, names an unfetched source, or repeats an id inside one batch, or has an empty `claim`, `source_evidence` or `extract_or_location`. Every conditional field — `responds_to_claim_ids`, `resolves_claim_ids`, `decision_relevance`, `what_would_change`, `limitations`, `confidence`, `triangulation` — is optional at schema and never a `ledger/claim-input` finding (R28). Missing `reasoning` on `kind: analysis` or `assumptions` on `kind: estimate` is advised under `ledger/reference` (W), not here.
 - **fix:** set field `<name>` in `claims/<file>.json`, then `alx claim add claims/<file>.json` (the claim re-enters the ledger only through `claim add`, which upserts by `claim_id`).
 - **remove:** `alx claim drop C<n> --apply`
-- **example:** `source_evidence: []`.
+- **example:** `C17 FAIL [fidelity/mismatch] extract not found verbatim in S15 (searched: …)` then `  S15 extract_or_location: "…"`; or `source_evidence: []`.
 
 ### `ledger/schema` — W
 - **rule:** jsonschema on `sources`/`claims` items only; every violation prints as `<json path>: <message>`. R29: the ledger is machine-written, so a schema defect is never something the model can repair. `brief`/`people`/`coverage`/`synthesis` are notes and are not validated here.
@@ -197,8 +197,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Binding (`check` c / `validate_report`, `alx`)
 
 ### `binding/link-not-in-ledger` — F
-- **rule:** a body link URL, normalized, is in no source's `url`/`aliases`.
-- **fix:** `alx fetch <url>`
+- **rule:** a body link URL, normalized, is in no source's `url`/`aliases`. A same-page variant (paths and queries match after `normalize_url`, path has at least two segments, hosts match after stripping `www.` and the public suffix) is rewritten by `alx check --fix` instead of flagged.
+- **fix:** cite the nearest ledger URL instead (alx check --fix rewrites it when only www. or the domain suffix differs); a page you did not fetch must be fetched first
 - **remove:** delete paragraph `<n>` of report.md
 - **example:** `https://blog.example.net/x` cited, never fetched.
 
@@ -229,10 +229,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Cache and fidelity (`check` b,d / `source_fidelity`, `alx`)
 
 ### `fidelity/mismatch` — F
-- **rule:** an extract segment is absent from the cache (offline) or from the live text (online). Full coverage; no first-window rule. On a miss the line appends ` Closest passage in S<n>: <json string>` (original cache window, ≤240 chars) or `no similar passage in S<n>` when the longest common run is under 8 characters.
-- **fix:** `paste the closest passage as extract_or_location in <claims file>, or alx find S<n> KEYWORD`
+- **rule:** an extract segment is absent from the cache (offline) or from the live text (online). Full coverage; no first-window rule. `claim add` prints three lines: `C<n> FAIL [fidelity/mismatch] extract not found verbatim in S<n> (searched: <first 60 chars>…)`, then `  S<n> extract_or_location: <json string>` (original cache window, ≤240 chars) or `  no similar passage in S<n> — alx find S<n> KEYWORD`.
+- **fix:** paste the `extract_or_location` line into a new claims file and `alx claim add` it, or `alx find S<n> KEYWORD`
 - **remove:** `alx claim drop C<n> --apply`
-- **example:** C2 extract "4,000 documents" not in S1.txt; closest passage printed as a JSON literal.
+- **example:** `C17 FAIL [fidelity/mismatch] extract not found verbatim in S15 (searched: The archive released 9,999 documents.…)` then `  S15 extract_or_location: "The archive released 1,204 documents…"`.
 
 ### `fidelity/context-changed` — W
 - **rule:** printed only under `alx issue --live`. The probe is present but the probe's own recorded context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing. R29: contexts are recorded per probe, not per claim, so a claim quoting one source twice no longer reports a change on a cache that was never refetched, and a probe with no recorded context is not compared.

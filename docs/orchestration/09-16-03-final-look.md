@@ -161,3 +161,13 @@ Audit result: 80 message families; the printed Fix clears the line for 22, parti
 
 - W11a (Cursor grok xhigh): scripts/validate_ledger.py, scripts/content_gate.py — R38.1, R38.2, R38.3, R38.4, R38.5 (content_gate Fix texts, language rule), R38.6 (`schema_remedy`), R38.9 (`ledger/https` producer Fix text) + tests. Must not edit alx.py / validate_report.py / rewild_gate.py.
 - W11b (Cursor grok xhigh): scripts/alx.py, scripts/validate_report.py, scripts/rewild_gate.py (wording only), references/gate-errors.md, SKILL.md — R38.0 adopt rule, R38.5 (`review start` refusal/`--iter` move, adopt texts), R38.6 (claim add summary/FAIL fixes), R38.7, R38.8, R38.9 (`source set --url`, unreachable/checker/render fixes, context-changed live-only), R38.10 `test_remedy_truth.py` + docs.
+
+---
+
+# R39 — B2 (WorkBuddy verification of 332908d)
+
+Finding: `alx issue` writes content and rewild receipts while `reviews/*.json` is still `status: draft` (never finished) or blank (nothing filled). A receipt over an empty review certifies nothing.
+
+Ruling R39.1: `issue` is BLOCKED (exit 1, nothing written) when, for either kind, the review was never finished (`state.reviews[kind].finished` false) or the note is blank (`_is_blank_review_note`). Message, one per kind:
+`BLOCKED review/<kind>: reviews/<kind>.json is <not finished|empty> — edit <abs path> (<fields>), then alx review finish <kind>, then alx issue`.
+A partially filled, finished note never blocks (R35 stands: no exam on content). `render`'s automatic issue follows the same rule. gate-errors.md gets the BLOCKED line; SKILL.md §7 one sentence: "issue refuses only while a review is unfinished or empty". Tests: draft → BLOCKED; blank+finished → BLOCKED; one score filled + finished → issues.

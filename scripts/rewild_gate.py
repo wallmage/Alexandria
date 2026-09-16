@@ -1319,10 +1319,17 @@ def _hard_checker_warnings(result, report_lang):
     ]
 
 
+def _checker_fix(message):
+    text = str(message)
+    if "timed out" in text.casefold() or "120" in text:
+        return "alx check again — the checker has a 120 s budget"
+    return text
+
+
 def _hard_checker_errors(result, report_lang):
     """Render the unwaivable checker warnings as gate messages."""
     errors = [
-        f"Hard Rewild warning remains: {item.get('section')}: {item.get('message')}"
+        f"Rewild warning: {item.get('section')}: {item.get('message')}"
         for item in _hard_checker_warnings(result, report_lang)
     ]
     if report_lang != "zh-HK":
@@ -1337,12 +1344,12 @@ def _hard_checker_errors(result, report_lang):
         message = str(line.get("message", ""))
         if "register reads as " in message and "書面語 (" not in message:
             errors.append(
-                "Hard Rewild warning remains: Hong Kong report register "
+                "Rewild warning: Hong Kong report register "
                 f"is not standard written Chinese: {message}"
             )
         if message.startswith("Cantonese potential complements"):
             errors.append(
-                "Hard Rewild warning remains: Cantonese syntax in a "
+                "Rewild warning: Cantonese syntax in a "
                 f"professional Hong Kong report: {message}"
             )
     return errors
@@ -1436,7 +1443,7 @@ def run_check(
             _finding(
                 "rewild/checker",
                 f"Unsupported report language: {lang}",
-                fix="alx check",
+                fix=_checker_fix(f"Unsupported report language: {lang}"),
             )
         ]
     texts = {}
@@ -1451,7 +1458,9 @@ def run_check(
                 _finding(
                     "rewild/checker",
                     f"{label} file must be readable UTF-8 text: {exc}",
-                    fix="alx check",
+                    fix=_checker_fix(
+                        f"{label} file must be readable UTF-8 text: {exc}"
+                    ),
                 )
             )
     review_note = None
@@ -1466,7 +1475,7 @@ def run_check(
             _finding(
                 "review/rewild",
                 message,
-                fix="alx review start rewild --iter",
+                fix="alx review finish rewild",
             )
             for message in review_errors
         )
@@ -1500,14 +1509,14 @@ def run_check(
             )
         )
     findings.extend(
-        _finding("rewild/length", message, fix="alx check")
+        _finding("rewild/length", message)
         for message in _length_errors(report_text, lang)
     )
     result, checker_errors = _run_rewild_checker(
         report_text, source_text, lang, timeout
     )
     findings.extend(
-        _finding("rewild/checker", message, fix="alx check")
+        _finding("rewild/checker", message, fix=_checker_fix(message))
         for message in checker_errors
     )
     if result is None:
@@ -1516,7 +1525,7 @@ def run_check(
     findings.extend(
         _finding(
             _checker_warning_family(str(item.get("section", ""))),
-            f"Hard Rewild warning remains: {item.get('section')}: "
+            f"Rewild warning: {item.get('section')}: "
             f"{item.get('message')}",
         )
         for item in hard_warnings
@@ -1659,7 +1668,7 @@ def run_gate(
     # figures, attribution drift) still blocks; Region, AI vocabulary and the
     # Hong Kong register lines are warnings.
     for message in _hard_checker_errors(result, report_lang):
-        if message.startswith("Hard Rewild warning remains: Fidelity"):
+        if message.startswith("Rewild warning: Fidelity"):
             errors.append(message)
         else:
             soft.append(warning(message))

@@ -14,7 +14,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/quantity` — W
 - **rule:** an Arabic-digit figure, percentage, currency or date in a claim that no extract or cached page of its sources carries. Date fragments cover themselves; `n:` never covered by date parts. R14: a month-day (or day) fragment covers the claim's full date when the omitted year — and the month, for a day fragment — appears elsewhere in that source's cached text, title or `published`; without a cache the rule is unchanged. R14b: the same haystack covers a year-month claim (`1945年8月`) offered as a month-day fragment of that month (`8月2日`). R21: a bare-year claim (`1917年`) is covered by the same 4-digit number in any cited extract (`n:1917`, years 1000-2999 only) — an extract that ends before 年 still states the year. R29: a quantity spelled in Han numeral words (`三`, `三十萬`, with or without a classifier such as 位/次/个/年/月/日) carries no obligation and raises no finding; a digit, percentage, currency or date is covered when its form appears in the claim's extracts or anywhere in the cached page, title or `published` of any source the claim cites; a Han ordinal or year count on the page (第十三年, 十三周年) covers the digits 13. Han numerals stay silent (R26/C26). Display and Fix use the claim's surface text; the search covers every cited source (`source_evidence` ∪ `source_ids`). Message: `C3: '1919年10月2日' is in the claim but not in S13 or S1. Fix: alx find S18 1919年10月2日`.
-- **fix:** `alx find S<n> <surface form>` then correct the claim or extract, or `alx claim drop C<n>`
+- **fix:** `alx find S<n> <surface form> — paste that window into extract_or_location and alx claim add, or reword the claim`
 - **remove:** n/a (warning; `issue` repeats it under `=== REMINDERS (not fixed yet; warnings, never block) ===` and still issues)
 - **example:** C8 asserts `n:1918`; S16 offers `d:1918-01` only.
 
@@ -104,7 +104,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/https` — W
 - **rule:** `source.url` is not https (aliases may be http).
-- **fix:** `alx fetch <https form of the url>` (`--refresh` re-fetches the http url and fails again).
+- **fix:** `alx source set S<n> --url https://…` (rewrites `sources[].url`, keeps the cache)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `http://records.example.org/a`.
 
@@ -122,7 +122,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/person` — W
 - **rule:** a person-linked claim names an unregistered person id. R15: a claim naming a registered person without the `person_id` is auto-linked by `claim add` / `check --fix`.
-- **fix:** `alx ledger merge people.json` (auto-link warn: `alx check --fix`)
+- **fix:** set the person in a patch file, then `alx ledger merge <patch>` (auto-link warn: `alx check --fix`)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** C3 names P9; no P9 in `people`.
 
@@ -134,13 +134,13 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `ledger/coverage` — W
 - **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims); a coverage item that is not an object, an unknown `status`, or `claim_ids` that is not a list (`ledger merge` prints these too; the value is stored as given). Readers accept `claim_ids` or `claims` (list of strings). Merge warns once per item with neither key: `WARN coverage[3] '<area>': no claim_ids — check reads claim_ids: ["C1", …]`.
-- **fix:** `alx ledger merge coverage.json` (`--fix` repairs no coverage linkage)
+- **fix:** `set coverage[i].claim_ids to supported claim ids in a patch file, then alx ledger merge <patch>`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** area `supported` with an empty `claim_ids`.
 
 ### `ledger/synthesis` — W
 - **rule:** synthesis names a claim that does not exist, or a central judgment with no claim behind it; a claim-id list that is not a list, or a synthesis item that is not an object (`ledger merge` prints these too; the value is stored as given).
-- **fix:** `alx ledger merge coverage.json`
+- **fix:** `put the missing ids in synthesis.central_judgment_claim_ids in a patch file, then alx ledger merge <patch>`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `central_judgment_claim_ids: ["C9"]`; C9 was dropped.
 
@@ -204,7 +204,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `binding/claim-paragraph` — W
 - **rule:** an `include_in_report` claim maps to zero or to more than one paragraph.
-- **fix:** `alx claim bind C<n> --paragraph N` — `N` is the body-paragraph number of `validate_report.split_body_paragraphs`, the one numbering `check`, `claim bind`, `claim drop` and the claim→paragraph table all print.
+- **fix:** `alx claim bind C<n>:<paragraph>` — the body-paragraph number of `validate_report.split_body_paragraphs`. Out of range is treated as unbound (same candidate search).
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** ambiguous: candidates 12, 19.
 
@@ -304,7 +304,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `rewild/checker` — W
 - **rule:** bookkeeping: unreadable files, unsupported language, checker subprocess failure or timeout (120 s under `alx`, 300 s standalone).
-- **fix:** `alx check`
+- **fix:** `alx check again — the checker has a 120 s budget`, or the unreadable path the message names
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** Rewild checker timed out after 120 seconds.
 
@@ -312,31 +312,31 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `review/rewild` — W
 - **rule:** `N paragraph(s) changed since the rewild review — re-read them if the change was substantive; alx review finish rewild re-stamps.` Unknown or missing category is treated as style; unknown or missing disposition as rejected. Findings are kept. A finished note's quality lines print here the same way `review finish` printed them.
-- **fix:** `alx review finish rewild`
+- **fix:** `re-read the changed paragraphs, then alx review finish rewild`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** 2 paragraph(s) changed since the rewild review.
 
 ### `review/content-missing` — W
 - **rule:** no finished content review.
-- **fix:** `alx review start content --iter`
+- **fix:** `alx review start content` when no iteration exists, else `alx review finish content`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `reviews/content.json` absent.
 
 ### `review/content-stale` — W
 - **rule:** `N paragraph(s) changed since the content review — re-read them if the change was substantive; alx review finish content re-stamps.`
-- **fix:** `alx review finish content`
+- **fix:** `re-read the changed paragraphs, then alx review finish content`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** 2 paragraph(s) changed since the content review.
 
 ### `content/score` — W
 - **rule:** a content-review score is missing or below 4.
-- **fix:** `alx review start content --iter`
+- **fix:** `edit reviews/content.json (raise the score), then alx review finish content`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `scores.evidence.score = 3`.
 
 ### `content/check` — W
 - **rule:** the content note fails `content-review.schema.json` or its completeness rules; the same family also carries the two claim-binding errors below.
-- **fix:** `alx review start content --iter`
+- **fix:** `edit reviews/content.json (set checks true / fill sections), then alx review finish content`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `status` is not `completed`.
 - **binding exceptions (ruling R9):** "cannot be located in the report" → `alx check --fix` (it re-derives `report_excerpts` from the bound paragraph), or `alx claim bind C<n> --paragraph N` when the claim is unbound; "has no nearby citation to its ledger source" → add the source link to paragraph `<n>` of report.md. A re-review fixes neither, and a link insertion with unchanged visible text is a mechanical delta (§6.8).
@@ -349,13 +349,13 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `content/disclosure` — W
 - **rule:** a required disclosure excerpt cannot be located in `report.md`.
-- **fix:** `alx review start content --iter`
+- **fix:** `edit reviews/content.json (excerpt ≥40 chars from report.md), then alx review finish content`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** disclosure quotes a sentence that was edited away.
 
 ### `content/language` — W
 - **rule:** report language does not match the ledger's `report_language`.
-- **fix:** `alx review start content --iter`
+- **fix:** `set brief.report_language "<lang>" in a patch file, then alx ledger merge <patch>`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** zh-CN ledger, English body.
 
@@ -369,7 +369,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 
 ### `tooling/render` — W
 - **rule:** md_to_pdf or the rasterizer failed or timed out (90 s each); the backend chain pdfium → pdfkit → poppler is already exhausted. `render` keeps whatever PDFs it produced.
-- **fix:** `alx render`
+- **fix:** the underlying error line (`{template} not rendered: …`)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** poppler timeout on page 41.
 

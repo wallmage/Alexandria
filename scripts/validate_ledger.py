@@ -232,7 +232,10 @@ DIRECTION_ASSERTIONS = (
 def mentions_person_alias(text, person):
     """Match a registered name or alias without substringing another word."""
     folded = str(text or "").casefold()
-    values = [person.get("name"), *(person.get("aliases") or [])]
+    aliases = person.get("aliases")
+    aliases = aliases if isinstance(aliases, list) else []
+    name = person.get("name")
+    values = [name if isinstance(name, str) else None, *aliases]
     for value in values:
         alias = _text(value).casefold()
         if not alias:
@@ -2459,9 +2462,12 @@ def _reference_findings(data, cache_dir=None):
     for item in coverage:
         if not isinstance(item, dict) or item.get("status") != "supported":
             continue
+        coverage_claims = item.get("claim_ids")
+        if not isinstance(coverage_claims, list):
+            continue
         linked_sources = {
             source_id
-            for claim_id in item.get("claim_ids", [])
+            for claim_id in coverage_claims
             for source_id in foundation_source_ids(claim_id)
             if source_id in sources_by_id
         }
@@ -2997,7 +3003,10 @@ def _reference_findings(data, cache_dir=None):
         for test in adversarial_tests:
             if not isinstance(test, dict):
                 continue
-            for claim_id in test.get("claim_ids", []):
+            test_claims = test.get("claim_ids")
+            if not isinstance(test_claims, list):
+                continue
+            for claim_id in test_claims:
                 adversarial_claims.add(claim_id)
                 if claim_id not in claim_set:
                     errors.append(
@@ -3019,10 +3028,14 @@ def _reference_findings(data, cache_dir=None):
                     )
                 )
 
-        for implication in synthesis.get("implications", []):
+        implications = synthesis.get("implications")
+        implications = implications if isinstance(implications, list) else []
+        for implication in implications:
             if not isinstance(implication, dict):
                 continue
-            implication_claims = implication.get("claim_ids", [])
+            implication_claims = implication.get("claim_ids")
+            if not isinstance(implication_claims, list):
+                continue
             for claim_id in implication_claims:
                 if claim_id not in claim_set:
                     errors.append(
@@ -3032,10 +3045,14 @@ def _reference_findings(data, cache_dir=None):
                 errors.append(
                     "Implication is not linked to a central judgment."
                 )
-        for takeaway in synthesis.get("decisions_or_takeaways", []):
+        takeaways = synthesis.get("decisions_or_takeaways")
+        takeaways = takeaways if isinstance(takeaways, list) else []
+        for takeaway in takeaways:
             if not isinstance(takeaway, dict):
                 continue
-            rationale_claims = takeaway.get("rationale_claim_ids", [])
+            rationale_claims = takeaway.get("rationale_claim_ids")
+            if not isinstance(rationale_claims, list):
+                continue
             for claim_id in rationale_claims:
                 if claim_id not in claim_set:
                     errors.append(
@@ -3045,10 +3062,14 @@ def _reference_findings(data, cache_dir=None):
                 errors.append(
                     "Takeaway is not linked to a central judgment."
                 )
-        for scenario in synthesis.get("scenarios", []):
+        scenarios = synthesis.get("scenarios")
+        scenarios = scenarios if isinstance(scenarios, list) else []
+        for scenario in scenarios:
             if not isinstance(scenario, dict):
                 continue
-            scenario_claims = scenario.get("claim_ids", [])
+            scenario_claims = scenario.get("claim_ids")
+            if not isinstance(scenario_claims, list):
+                continue
             for claim_id in scenario_claims:
                 if claim_id not in claim_set:
                     errors.append(
@@ -3063,7 +3084,11 @@ def _reference_findings(data, cache_dir=None):
             claim_id
             for item in coverage
             if isinstance(item, dict) and item.get("priority") == "high"
-            for claim_id in item.get("claim_ids", [])
+            for claim_id in (
+                item.get("claim_ids")
+                if isinstance(item.get("claim_ids"), list)
+                else []
+            )
         }
         for claim_id in central:
             if claim_id in claim_set and claim_id not in high_priority_claims:

@@ -313,6 +313,13 @@ class AlxTestCase(unittest.TestCase):
 
 
 class InitTests(AlxTestCase):
+    def test_budget_minutes_default_is_30(self):
+        parser = alx.build_parser()
+        init = parser._subparsers._group_actions[0].choices["init"]
+        self.assertEqual(
+            30, init._option_string_actions["--budget-minutes"].default
+        )
+
     def test_init_creates_layout_state_and_footer(self):
         code, out = self.init("--budget-minutes", "60")
         self.assertEqual(0, code, out)
@@ -971,6 +978,19 @@ class LedgerMergeTests(AlxTestCase):
         self.assertEqual("a call", ledger["brief"]["decision_or_use"])
         self.assertNotIn("notes", ledger)
 
+    def test_merge_arbitrary_synthesis_prints_only_merged(self):
+        self.bootstrap()
+        patch = self.write_json("syn.json", {"synthesis": "arbitrary-shape notes"})
+        code, out = self.run_in("ledger", "merge", patch)
+        self.assertEqual(0, code, out)
+        content = [
+            line
+            for line in out.splitlines()
+            if line and not line.startswith("elapsed")
+        ]
+        self.assertEqual(["merged: synthesis"], content)
+        self.assertEqual("arbitrary-shape notes", self.ledger()["synthesis"])
+
 
 class CheckTests(AlxTestCase):
     def test_cache_detached_is_hard_with_refresh_remedy(self):
@@ -1371,7 +1391,7 @@ class IssueTests(AlxTestCase):
                     "disclosure_required": ["C1"],
                 },
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertGreaterEqual(calls["online"], 1)
         self.assertIn("source fidelity:", out)
@@ -1393,7 +1413,7 @@ class IssueTests(AlxTestCase):
         self.prepared()
         with ExitStack() as stack:
             self.stub_gates(stack)
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
         self.assertTrue((self.dir / "receipts" / "rewild.json").exists())
@@ -1446,6 +1466,17 @@ class IssueTests(AlxTestCase):
                 self.assertEqual([], alx.hard_findings([item]))
                 self.assertEqual([], alx.class_f_findings([item]))
 
+    def test_issue_default_does_not_call_live_sampler(self):
+        from contextlib import ExitStack
+
+        self.prepared()
+        with ExitStack() as stack:
+            calls = self.stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertEqual(0, calls["online"])
+        self.assertNotIn("source fidelity:", out)
+
     def test_issue_stamps_the_note_hashes_before_running_the_gates(self):
         """Spec §6.8/§6.9 step 4: stamp, then gate; `check` never judges hashes."""
         from contextlib import ExitStack
@@ -1491,7 +1522,7 @@ class IssueTests(AlxTestCase):
         (self.dir / "sources" / "S1.txt").write_text("tampered", encoding="utf-8")
         with ExitStack() as stack:
             calls = self.stub_gates(stack)
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C1 (fidelity/mismatch)", out)
         self.assertIn("cache-detached", out)
@@ -1574,7 +1605,7 @@ class IssueTests(AlxTestCase):
                     side_effect=failing_online,
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
         notes = json.loads(
@@ -2098,7 +2129,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertRegex(out, r"dropped C\d+ \(fidelity/mismatch\): ")
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2150,7 +2181,7 @@ class LiveFidelityTests(AlxTestCase):
                     alx.source_fidelity, "check_source_fidelity", return_value=result
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         notes = json.loads(
             (self.dir / "receipts" / "delivery-notes.json").read_text(encoding="utf-8")
@@ -2807,7 +2838,7 @@ class DeliveryRoundTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C2 (fidelity/mismatch)", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2827,7 +2858,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertNotIn("as the [registry note]", report)
@@ -2853,7 +2884,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         drops = [line for line in out.splitlines() if line.startswith("dropped ")]
         self.assertEqual(1, len(drops), out)
@@ -2877,7 +2908,7 @@ class DeliveryRoundTests(AlxTestCase):
         with ExitStack() as stack:
             issue_tests.stub_gates(stack)
             self.live_sequence(stack, [self.mismatch_result()])
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertFalse((self.dir / "receipts" / "source-fidelity.json").exists())
 
@@ -2898,7 +2929,7 @@ class DeliveryRoundTests(AlxTestCase):
             self.live_sequence(
                 stack, [self.mismatch_result(), self.passed_result()]
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertIn("dropped C2 (", out)
         self.assertTrue((self.dir / "receipts" / "issue.json").exists())
@@ -2981,7 +3012,7 @@ class DeliveryRoundTests(AlxTestCase):
                     side_effect=refused,
                 )
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         self.assertNotIn(alx.VERIFICATION_NOTE_PREFIX["en"], report)
@@ -3519,7 +3550,7 @@ class RefreshedSourceReprobeTests(AlxTestCase):
         stack.enter_context(
             mock_production_transport(self.responses_for(self.changed_page()))
         )
-        return self.run_in("issue", "--sample-size", "1", *extra)
+        return self.run_in("issue", "--live", "--sample-size", "1", *extra)
 
     def test_a_claim_outside_the_sample_is_dropped_by_issue(self):
         """C1 restatement of ..._blocks_issue."""
@@ -3590,7 +3621,7 @@ class VerificationNotePdfTests(AlxTestCase):
                     "disclosure_required": ["C1"],
                 },
             )
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
             self.assertEqual(0, code, out)
             code, out = self.run_in("render")
         self.assertEqual(0, code, out)
@@ -3941,11 +3972,11 @@ class ReserveReceiptTests(AlxTestCase):
         receipt = self.dir / "receipts" / "source-fidelity.json"
         with ExitStack() as stack:
             helper.stub_gates(stack)
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
             self.assertEqual(0, code, out)
             self.assertTrue(receipt.exists(), out)
             self.set_remaining(2)
-            code, out = self.run_in("issue")
+            code, out = self.run_in("issue", "--live")
         self.assertEqual(0, code, out)
         self.assertTrue(receipt.exists())
         issued = json.loads(
@@ -4224,6 +4255,51 @@ class RenderPdfCheckTests(AlxTestCase):
                         "characters; minimum is 5000.",
                         out,
                     )
+
+    def test_render_pdf_check_has_no_page_minimum_line(self):
+        from contextlib import ExitStack
+
+        from scripts import md_to_pdf, render_pdf_pages
+
+        captured = []
+
+        class PdfErrors(list):
+            text_chars = 5000
+
+        def fake_validate(path, **kwargs):
+            captured.append(kwargs)
+            return PdfErrors()
+
+        def fake_render_pdf(input_path, output_path, **kwargs):
+            Path(output_path).write_bytes(extractable_pdf_bytes())
+            return Path(output_path)
+
+        def fake_render_pages(pdf_path, output_dir, **kwargs):
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            page = Path(output_dir) / "page-001.png"
+            page.write_bytes(b"\x89PNG")
+            return [page]
+
+        with ExitStack() as stack:
+            self.issued(stack)
+            stack.enter_context(
+                mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_pages", side_effect=fake_render_pages
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    alx.validate_report, "validate_pdf", side_effect=fake_validate
+                )
+            )
+            code, out = self.run_in("render", "--template", "executive")
+        self.assertEqual(0, code, out)
+        self.assertEqual(1, len(captured), captured)
+        self.assertEqual(0, captured[0].get("min_pages", 1))
+        self.assertNotIn("pages; minimum is", out)
 
 
 class CheckerBudgetTests(AlxTestCase):
@@ -5576,9 +5652,10 @@ class PartBFlowTests(AlxTestCase):
         self.assertNotIn("--deliver", issue._option_string_actions)
         self.assertNotIn("--dry-run", claim_add._option_string_actions)
         self.assertIn(
-            "skip live source re-check; optional",
+            "accepted, ignored",
             issue._option_string_actions["--offline"].help,
         )
+        self.assertIn("--live", issue._option_string_actions)
 
 
 class DefectAuditTests(AlxTestCase):
@@ -5623,19 +5700,6 @@ class DefectAuditTests(AlxTestCase):
                 self.assertFalse(rest.endswith(" missing"), line)
         self.assertGreater(len(paths), 1, out)
         self.assertEqual(len(paths), len(set(paths)), paths)
-
-    def test_d4_ledger_merge_names_the_claim_file(self):
-        self.init()
-        self.fetch("https://example.org/study")
-        batch = self.dir / "claims" / "batch.json"
-        batch.write_text(json.dumps([dict(CLAIM_ONE, supports=["C99"])]), encoding="utf-8")
-        code, out = self.run_in("claim", "add", "claims/batch.json")
-        self.assertEqual(0, code, out)
-        patch = self.write_json("patch.json", {"coverage": []})
-        code, out = self.run_in("ledger", "merge", patch)
-        self.assertEqual(0, code, out)
-        self.assertIn("claims/batch.json", out)
-        self.assertNotIn("claims/*.json", out)
 
     def test_d6_find_prints_one_window_for_two_keywords(self):
         self.init()

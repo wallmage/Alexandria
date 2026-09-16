@@ -8,14 +8,9 @@
     "schema_version",
     "subject",
     "research_question",
-    "brief",
-    "people",
     "report_date",
-    "coverage",
     "sources",
-    "claims",
-    "synthesis",
-    "unresolved_questions"
+    "claims"
   ],
   "properties": {
     "schema_version": {
@@ -29,26 +24,13 @@
       "type": "string",
       "minLength": 1
     },
-    "brief": {
-      "$ref": "#/$defs/brief"
-    },
-    "people": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/person"
-      }
-    },
+    "brief": true,
+    "people": true,
     "report_date": {
       "type": "string",
       "format": "date"
     },
-    "coverage": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "$ref": "#/$defs/coverageItem"
-      }
-    },
+    "coverage": true,
     "sources": {
       "type": "array",
       "minItems": 1,
@@ -63,22 +45,17 @@
         "$ref": "#/$defs/claim"
       }
     },
-    "synthesis": {
-      "$ref": "#/$defs/synthesis"
-    },
-    "unresolved_questions": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "uniqueItems": true
-    },
+    "synthesis": true,
+    "unresolved_questions": true,
     "excluded_claims": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["claim_id", "reason", "dropped_at"],
+        "required": [
+          "claim_id",
+          "reason",
+          "dropped_at"
+        ],
         "additionalProperties": true,
         "properties": {
           "claim_id": {
@@ -112,49 +89,22 @@
     "brief": {
       "type": "object",
       "additionalProperties": true,
-      "required": [
-        "intended_reader",
-        "decision_or_use",
-        "archetype",
-        "report_language",
-        "editorial_mode",
-        "scope"
-      ],
       "properties": {
         "intended_reader": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "decision_or_use": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
-        "archetype": {
-          "enum": [
-            "artifact",
-            "concept",
-            "event",
-            "organization",
-            "person",
-            "system",
-            "hybrid"
-          ]
-        },
-        "report_language": {
-          "enum": ["en", "zh-CN", "zh-HK"]
-        },
-        "editorial_mode": {
-          "enum": [
-            "analytical",
-            "narrative",
-            "explanatory",
-            "investigative",
-            "historical",
-            "critical"
-          ]
-        },
+        "archetype": {},
+        "report_language": {},
+        "editorial_mode": {},
         "scope": {
-          "type": ["object", "string", "null"],
+          "type": [
+            "object",
+            "string",
+            "null"
+          ],
           "additionalProperties": true
         }
       }
@@ -162,82 +112,27 @@
     "coverageItem": {
       "type": "object",
       "additionalProperties": true,
-      "required": [
-        "area",
-        "question",
-        "priority",
-        "decision_relevance",
-        "completion_criteria",
-        "status",
-        "claim_ids",
-        "gap_impact"
-      ],
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "enum": ["supported", "disputed"]
-              }
-            },
-            "required": ["status"]
-          },
-          "then": {
-            "properties": {
-              "claim_ids": {
-                "minItems": 1
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "gap"
-              }
-            },
-            "required": ["status"]
-          },
-          "then": {
-            "properties": {
-              "claim_ids": {
-                "maxItems": 0
-              },
-              "gap_impact": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        }
-      ],
       "properties": {
         "area": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "question": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
-        "priority": {
-          "enum": ["high", "medium", "low"]
-        },
+        "priority": {},
         "decision_relevance": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "completion_criteria": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "owner": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "status": {
-          "enum": ["unstarted", "in_progress", "supported", "disputed", "gap"]
-        },
+        "status": {},
         "claim_ids": {
           "type": "array",
           "items": {
@@ -247,10 +142,16 @@
           "uniqueItems": true
         },
         "gap_impact": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "notes": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -296,10 +197,16 @@
           "minLength": 1
         },
         "author": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "published": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "format": "date"
         },
         "accessed": {
@@ -336,7 +243,10 @@
         },
         "family_justification": {
           "description": "Why this source is genuinely independent of the other sources sharing its host or registrable domain. Required to override the domain-derived family or to carry a different provenance class from a same-host source.",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "minLength": 20
         },
         "roles": {
@@ -364,35 +274,41 @@
           ]
         },
         "accountability_note": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "minLength": 20
         },
         "limitations": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "undated_reason": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
     "person": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["name"],
       "properties": {
         "person_id": {
           "type": "string",
           "pattern": "^P[0-9]+$"
         },
         "name": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "aliases": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
           "uniqueItems": true
         }
@@ -401,7 +317,11 @@
     "searchRecord": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["queries", "expected_locations", "searched_at"],
+      "required": [
+        "queries",
+        "expected_locations",
+        "searched_at"
+      ],
       "properties": {
         "queries": {
           "type": "array",
@@ -430,10 +350,17 @@
     "triangulation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "rationale"],
+      "required": [
+        "status",
+        "rationale"
+      ],
       "properties": {
         "status": {
-          "enum": ["met", "limited", "not_applicable"]
+          "enum": [
+            "met",
+            "limited",
+            "not_applicable"
+          ]
         },
         "rationale": {
           "type": "string",
@@ -444,7 +371,10 @@
     "sourceEvidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_id", "extract_or_location"],
+      "required": [
+        "source_id",
+        "extract_or_location"
+      ],
       "properties": {
         "source_id": {
           "type": "string",
@@ -460,7 +390,10 @@
     "claim": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["claim_id", "claim"],
+      "required": [
+        "claim_id",
+        "claim"
+      ],
       "allOf": [
         {
           "if": {
@@ -469,7 +402,9 @@
                 "minItems": 1
               }
             },
-            "required": ["source_ids"]
+            "required": [
+              "source_ids"
+            ]
           },
           "then": {
             "properties": {
@@ -477,7 +412,9 @@
                 "minItems": 1
               }
             },
-            "required": ["source_evidence"]
+            "required": [
+              "source_evidence"
+            ]
           }
         }
       ],
@@ -491,10 +428,19 @@
           "minLength": 1
         },
         "kind": {
-          "enum": ["fact", "reported_claim", "estimate", "analysis"]
+          "enum": [
+            "fact",
+            "reported_claim",
+            "estimate",
+            "analysis"
+          ]
         },
         "importance": {
-          "enum": ["key", "supporting", "context"]
+          "enum": [
+            "key",
+            "supporting",
+            "context"
+          ]
         },
         "source_ids": {
           "type": "array",
@@ -506,7 +452,10 @@
         },
         "extract_or_location": {
           "description": "The quoted or located evidence behind claim. Every source_evidence record is checked independently. Every quantitative token must preserve its prefix or postfix comparator, full symbolic or worded unit syntax, and complete canonical metric carrier; a bare figure is insufficient. Every quantitative token and status assertion must be covered here or declared in derived_assertions.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "source_evidence": {
           "description": "One evidence record per direct source_id. Cross-reference validation requires exact, unique coverage.",
@@ -517,17 +466,26 @@
         },
         "as_of": {
           "description": "The date the claim was true of the world.",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "format": "date"
         },
         "verified_at": {
           "description": "The date the extract was last re-read against the live source. Distinct from as_of: re-dating a claim is not re-verifying it.",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "format": "date"
         },
         "assumptions": {
           "description": "Stated inputs and steps behind original arithmetic. Required for kind estimate.",
-          "type": ["array", "null"],
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "string",
             "minLength": 20
@@ -536,12 +494,18 @@
         },
         "derived_assertions": {
           "description": "Narrow escape hatch: assertions in claim that are computed or inferred rather than quoted. Each entry names the exact expression and states its derivation. Not for restating the source.",
-          "type": ["array", "null"],
+          "type": [
+            "array",
+            "null"
+          ],
           "maxItems": 6,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["expression", "derivation"],
+            "required": [
+              "expression",
+              "derivation"
+            ],
             "properties": {
               "expression": {
                 "type": "string",
@@ -555,10 +519,19 @@
           }
         },
         "confidence": {
-          "enum": ["high", "medium", "low"]
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
         },
         "status": {
-          "enum": ["supported", "disputed", "inference", "unknown"]
+          "enum": [
+            "supported",
+            "disputed",
+            "inference",
+            "unknown"
+          ]
         },
         "include_in_report": {
           "type": "boolean"
@@ -597,22 +570,37 @@
           "uniqueItems": true
         },
         "reasoning": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "decision_relevance": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "what_would_change": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "triangulation": {
           "$ref": "#/$defs/triangulation"
         },
         "resolution": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "limitations": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "time_sensitive": {
           "type": "boolean",
@@ -620,8 +608,12 @@
         },
         "evidence_of_absence": {
           "anyOf": [
-            {"$ref": "#/$defs/searchRecord"},
-            {"type": "null"}
+            {
+              "$ref": "#/$defs/searchRecord"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       }
@@ -629,15 +621,12 @@
     "implication": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["statement", "claim_ids"],
       "properties": {
         "statement": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "claim_ids": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "string",
             "pattern": "^C[0-9]+$"
@@ -645,31 +634,28 @@
           "uniqueItems": true
         },
         "for_whom": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timing": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
     "takeaway": {
       "type": "object",
       "additionalProperties": true,
-      "required": [
-        "statement",
-        "rationale_claim_ids",
-        "tradeoff",
-        "success_signal",
-        "failure_signal"
-      ],
       "properties": {
         "statement": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "rationale_claim_ids": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "string",
             "pattern": "^C[0-9]+$"
@@ -677,66 +663,46 @@
           "uniqueItems": true
         },
         "tradeoff": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "success_signal": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "failure_signal": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         }
       }
     },
     "scenario": {
       "type": "object",
       "additionalProperties": true,
-      "required": [
-        "name",
-        "conditions",
-        "leading_indicators",
-        "disconfirming_indicators",
-        "implication",
-        "claim_ids"
-      ],
       "properties": {
         "name": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "conditions": {
           "type": "array",
-          "minItems": 1,
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           }
         },
         "leading_indicators": {
           "type": "array",
-          "minItems": 1,
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           }
         },
         "disconfirming_indicators": {
           "type": "array",
-          "minItems": 1,
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           }
         },
         "implication": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "claim_ids": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "string",
             "pattern": "^C[0-9]+$"
@@ -748,20 +714,9 @@
     "synthesis": {
       "type": "object",
       "additionalProperties": true,
-      "required": [
-        "central_judgment_claim_ids",
-        "counterevidence_claim_ids",
-        "adversarial_tests",
-        "implications",
-        "decisions_or_takeaways",
-        "scenarios",
-        "limitations",
-        "research_stop_reason"
-      ],
       "properties": {
         "central_judgment_claim_ids": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "string",
             "pattern": "^C[0-9]+$"
@@ -778,21 +733,18 @@
         },
         "adversarial_tests": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/adversarialTest"
           }
         },
         "implications": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/implication"
           }
         },
         "decisions_or_takeaways": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/takeaway"
           }
@@ -804,58 +756,48 @@
           }
         },
         "limitations": {
-          "type": ["array", "string", "null"],
+          "type": [
+            "array",
+            "string",
+            "null"
+          ],
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
           "uniqueItems": true
         },
         "research_stop_reason": {
-          "type": ["string", "null"],
-          "minLength": 1
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
     "adversarialTest": {
       "type": "object",
       "additionalProperties": true,
-      "required": [
-        "hypothesis",
-        "test",
-        "claim_ids",
-        "outcome",
-        "result",
-        "effect_on_conclusion"
-      ],
       "properties": {
         "hypothesis": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "test": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "claim_ids": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "type": "string",
             "pattern": "^C[0-9]+$"
           },
           "uniqueItems": true
         },
-        "outcome": {
-          "enum": ["supported", "rejected", "unresolved"]
-        },
+        "outcome": {},
         "result": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "effect_on_conclusion": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         }
       }
     }

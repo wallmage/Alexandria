@@ -1064,7 +1064,7 @@ def _scan_quantities(text):
         working = working.replace(mark, " ")
     working = _URL_RE.sub(" ", working)
     working = _LEDGER_ID_RE.sub(" ", working)
-    working = _normalize_dates(working)
+    working = _CJK_DATE_RANGE_RE.sub(_expand_date_ranges, working)
     tokens = []
 
     def take(pattern, handler):
@@ -1271,6 +1271,34 @@ def _scan_quantities(text):
         form = f"d:*-*-{int(match.group(1)):02d}"
         return (match.group(0), {form}, {form}, False)
 
+    def surface_cjk_date(match):
+        form = f"d:{match.group(1)}-{int(match.group(2)):02d}"
+        if match.group(3):
+            form += f"-{int(match.group(3)):02d}"
+        return (match.group(0), {form}, {form}, False)
+
+    def surface_ymd_date(match):
+        form = (
+            f"d:{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
+        )
+        return (match.group(0), {form}, {form}, False)
+
+    def surface_month_name_date(match):
+        month = _MONTHS[match.group(2).casefold()]
+        day = match.group(1) or match.group(3)
+        year = match.group(4)
+        form = (
+            f"d:{year}-{month:02d}-{int(day):02d}"
+            if day
+            else f"d:{year}-{month:02d}"
+        )
+        return (match.group(0), {form}, {form}, False)
+
+    take(_CJK_DATE_RE, surface_cjk_date)
+    take(_SLASH_DATE_RE, surface_ymd_date)
+    take(_DOT_DATE_RE, surface_ymd_date)
+    take(_MONTH_NAME_DATE_RE, surface_month_name_date)
+    working = _normalize_dates(working)
     take(_IDENTIFIER_RE, identifier)
     take(_ISO_DATE_RE, iso_date)
     take(_ISO_MONTH_RE, iso_month)
@@ -1807,18 +1835,22 @@ def _evidence_coverage_findings(
             continue
         if _year_number_coverage(claim_forms, covering_forms):
             continue
-        find_id = next(
-            (
-                entry.get("source_id")
-                for entry in claim.get("source_evidence") or []
-                if isinstance(entry, dict) and entry.get("source_id")
-            ),
-            None,
-        )
-        if not find_id:
-            linked = claim.get("source_ids")
-            if isinstance(linked, list) and linked:
-                find_id = linked[0]
+        cited = []
+        seen = set()
+        for entry in claim.get("source_evidence") or []:
+            if isinstance(entry, dict):
+                sid = entry.get("source_id")
+                if sid and sid not in seen:
+                    seen.add(sid)
+                    cited.append(sid)
+        linked = claim.get("source_ids")
+        if isinstance(linked, list):
+            for sid in linked:
+                if sid and sid not in seen:
+                    seen.add(sid)
+                    cited.append(sid)
+        find_id = cited[0] if cited else None
+        named = " or ".join(cited) if cited else "the cited sources"
         fix = (
             f"alx find {find_id} {display}"
             if find_id
@@ -1828,7 +1860,7 @@ def _evidence_coverage_findings(
             _f(
                 "ledger/quantity",
                 f"{claim_id}: '{display}' is in the claim but not in "
-                f"{find_id or 'the cited sources'} (extracts or cached page). "
+                f"{named} (extracts or cached page). "
                 f"Fix: {fix}, or reword the claim.",
                 ids=_ids_in(f"{claim_id} {find_id or ''}"),
                 fix=fix,
@@ -2210,6 +2242,16 @@ def _supports_cycles(claims_by_id):
     return sorted(cycles)
 
 
+def coverage_claim_ids(item):
+    if not isinstance(item, dict):
+        return []
+    for key in ("claim_ids", "claims"):
+        value = item.get(key)
+        if isinstance(value, list) and all(isinstance(x, str) for x in value):
+            return value
+    return []
+
+
 def _reference_findings(data, cache_dir=None):
     """Check ID uniqueness and links that JSON Schema cannot express."""
     if not isinstance(data, dict):
@@ -2316,9 +2358,7 @@ def _reference_findings(data, cache_dir=None):
         if not isinstance(item, dict):
             continue
         area = item.get("area", "<unknown>")
-        coverage_claims = item.get("claim_ids", [])
-        if not isinstance(coverage_claims, list):
-            continue
+        coverage_claims = coverage_claim_ids(item)
         for claim_id in coverage_claims:
             if claim_id not in claim_set:
                 errors.append(
@@ -2335,7 +2375,8 @@ def _reference_findings(data, cache_dir=None):
             errors.append(f"Coverage {area} is a gap but has no gap impact.")
         if item.get("status") == "gap" and coverage_claims:
             errors.append(f"Coverage {area} is a gap but still references claims.")
-        if item.get("status") == "disputed" and not any(
+        has_claim_list = "claim_ids" in item or "claims" in item
+        if item.get("status") == "disputed" and has_claim_list and not any(
             claims_by_id.get(claim_id, {}).get("status") == "disputed"
             for claim_id in coverage_claims
         ):
@@ -2347,7 +2388,7 @@ def _reference_findings(data, cache_dir=None):
                     fix="alx check --fix",
                 )
             )
-        if item.get("status") == "supported" and not any(
+        if item.get("status") == "supported" and has_claim_list and not any(
             claims_by_id.get(claim_id, {}).get("status") == "supported"
             for claim_id in coverage_claims
         ):
@@ -2462,9 +2503,7 @@ def _reference_findings(data, cache_dir=None):
     for item in coverage:
         if not isinstance(item, dict) or item.get("status") != "supported":
             continue
-        coverage_claims = item.get("claim_ids")
-        if not isinstance(coverage_claims, list):
-            continue
+        coverage_claims = coverage_claim_ids(item)
         linked_sources = {
             source_id
             for claim_id in coverage_claims
@@ -2976,21 +3015,26 @@ def _reference_findings(data, cache_dir=None):
                         fix="set field synthesis",
                     )
                 )
-        for claim_id, claim in claims_by_id.items():
+        missing_key = [
+            claim_id
+            for claim_id, claim in claims_by_id.items()
             if (
                 claim.get("importance") == "key"
                 and claim.get("include_in_report") is True
                 and claim_id not in central
-            ):
-                errors.append(
-                    _f(
-                        "ledger/synthesis",
-                        f"Key report claim {claim_id} is missing from the central synthesis.",
-                        severity="warn",
-                        ids=[claim_id],
-                        fix="set field synthesis",
-                    )
+            )
+        ]
+        if missing_key:
+            errors.append(
+                _f(
+                    "ledger/synthesis",
+                    f"{len(missing_key)} key report claims are not in "
+                    f"synthesis.central_judgment_claim_ids: {' '.join(missing_key)}",
+                    severity="warn",
+                    ids=missing_key,
+                    fix="alx ledger merge synthesis.json",
                 )
+            )
         for claim_id in counterevidence:
             if claim_id not in claim_set:
                 errors.append(
@@ -3080,20 +3124,21 @@ def _reference_findings(data, cache_dir=None):
                     "Scenario is not linked to a central judgment."
                 )
 
-        high_priority_claims = {
-            claim_id
-            for item in coverage
-            if isinstance(item, dict) and item.get("priority") == "high"
-            for claim_id in (
-                item.get("claim_ids")
-                if isinstance(item.get("claim_ids"), list)
-                else []
-            )
-        }
-        for claim_id in central:
-            if claim_id in claim_set and claim_id not in high_priority_claims:
+        if any(isinstance(item, dict) and "priority" in item for item in coverage):
+            high_priority_claims = {
+                claim_id
+                for item in coverage
+                if isinstance(item, dict) and item.get("priority") == "high"
+                for claim_id in coverage_claim_ids(item)
+            }
+            uncovered = [
+                claim_id
+                for claim_id in central
+                if claim_id in claim_set and claim_id not in high_priority_claims
+            ]
+            if uncovered:
                 errors.append(
-                    f"Central judgment {claim_id} is not covered by a "
+                    f"Central judgment {' '.join(uncovered)} is not covered by a "
                     "high-priority research area."
                 )
     return [_ref(item) for item in errors]
@@ -3162,6 +3207,16 @@ def notes_shape_findings(ledger):
                             "ledger/coverage",
                             f"coverage[{i}].claim_ids must be a list of claim ids "
                             f"like {_CLAIM_ID_LIST_HINT} — stored as given",
+                            severity="warn",
+                            ids=[],
+                        )
+                    )
+                elif "claim_ids" not in item and "claims" not in item:
+                    findings.append(
+                        _f(
+                            "ledger/coverage",
+                            f"coverage[{i}] '{item.get('area', '')}': no claim_ids — "
+                            'check reads claim_ids: ["C1", …]',
                             severity="warn",
                             ids=[],
                         )

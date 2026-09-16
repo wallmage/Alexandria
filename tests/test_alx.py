@@ -1464,6 +1464,7 @@ class IssueTests(AlxTestCase):
             "tooling/receipt",
             "tooling/render",
             "review/rewild",
+            "review/content",
             "review/content-stale",
             "fidelity/unreachable",
             "fidelity/undecodable",
@@ -1484,7 +1485,7 @@ class IssueTests(AlxTestCase):
             code, out = self.run_in("issue")
         self.assertEqual(0, code, out)
         self.assertEqual(0, calls["online"])
-        self.assertNotIn("source fidelity:", out)
+        self.assertIn("note: source fidelity: offline — extracts were verified", out)
 
     def test_issue_omits_reminders_header_when_there_are_none(self):
         """R35.13: the REMINDERS banner prints only when a reminder follows."""
@@ -1498,26 +1499,20 @@ class IssueTests(AlxTestCase):
         self.assertNotIn(alx.REMINDER_HEADER, out)
 
     def test_issue_stamps_the_note_hashes_before_running_the_gates(self):
-        """Spec §6.8/§6.9 step 4: stamp, then gate; `check` never judges hashes."""
+        """R37.3b: check/issue never overwrite note hashes; only start/finish do."""
         from contextlib import ExitStack
 
         self.prepared()
-        # A mechanical delta (spec §6.8) moves the report off the reviewed hash
-        # without making either review stale.
-        code, out = self.run_in("claim", "drop", "C2", "--apply")
-        self.assertEqual(0, code, out)
+        stamps = {}
         for kind in ("rewild", "content"):
             note = json.loads(
                 (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
             )
-            self.assertNotEqual(
-                alx.file_sha256(self.dir / "report.md"), note.get("report_sha256")
-            )
-        # `check` section (e) passes review_note_path=None, so the hashes the
-        # note still carries are never a finding there.
+            stamps[kind] = note["report_sha256"]
+        code, out = self.run_in("claim", "drop", "C2", "--apply")
+        self.assertEqual(0, code, out)
         _code, out = self.run_in("check")
         self.assertNotIn("report_sha256", out)
-        self.assertNotIn("[review/rewild]", out)
         with ExitStack() as stack:
             self.stub_gates(stack)
             code, out = self.run_in("issue")
@@ -1526,9 +1521,7 @@ class IssueTests(AlxTestCase):
             note = json.loads(
                 (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(
-                alx.file_sha256(self.dir / "report.md"), note["report_sha256"]
-            )
+            self.assertEqual(stamps[kind], note["report_sha256"])
 
     def test_issue_drops_the_class_f_claim_and_still_issues(self):
         """C1 restatement of ..._refuses_class_f_without_deliver.
@@ -2319,7 +2312,7 @@ class IntegrationHoleTests(AlxTestCase):
         )
 
     def test_issue_stamps_hashes_when_the_report_changed_after_the_review(self):
-        """R35.6: issue stamps current hashes into both notes unconditionally."""
+        """R37.3b: issue leaves the finish hashes; a later edit does not restamp."""
         issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
         for name in (
             "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
@@ -2327,6 +2320,12 @@ class IntegrationHoleTests(AlxTestCase):
         ):
             setattr(issue_tests, name, getattr(self, name))
         issue_tests.prepared()
+        stamps = {
+            kind: json.loads(
+                (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
+            )["report_sha256"]
+            for kind in ("rewild", "content")
+        }
         report = (self.dir / "report.md").read_text(encoding="utf-8")
         (self.dir / "report.md").write_text(
             report.replace(
@@ -2335,12 +2334,6 @@ class IntegrationHoleTests(AlxTestCase):
             encoding="utf-8",
         )
         current = alx.file_sha256(self.dir / "report.md")
-        stamps = {
-            kind: json.loads(
-                (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
-            )["report_sha256"]
-            for kind in ("rewild", "content")
-        }
         self.assertNotEqual(current, stamps["content"])
         alx._receipt_phase(
             alx.Workspace(self.dir), self.state(), self.ledger(), [], []
@@ -2349,7 +2342,7 @@ class IntegrationHoleTests(AlxTestCase):
             note = json.loads(
                 (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(current, note["report_sha256"])
+            self.assertEqual(stamps[kind], note["report_sha256"])
 
     # item 3 --------------------------------------------------------------
     def test_a_reworded_paragraph_gets_a_binding_remedy_not_a_re_review(self):
@@ -3181,6 +3174,9 @@ class RewildEffectiveSnapshotTests(AlxTestCase):
         snapshot = self.dir / "report.pre-rewild.md"
         self.assertIn(self.QUOTE, snapshot.read_text(encoding="utf-8"))
         seen = {}
+        note_sha = json.loads(
+            (self.dir / "reviews" / "rewild.json").read_text(encoding="utf-8")
+        )["source_sha256"]
         with ExitStack() as stack:
             issues = IssueTests("test_issue_writes_receipts_and_verification_note")
             issues.dir = self.dir
@@ -3198,7 +3194,7 @@ class RewildEffectiveSnapshotTests(AlxTestCase):
         note = json.loads(
             (self.dir / "reviews" / "rewild.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(alx.file_sha256(seen["source"]), note["source_sha256"])
+        self.assertEqual(note_sha, note["source_sha256"])
 
     def test_a_quotation_lost_from_a_surviving_paragraph_is_restored(self):
         """C1 restatement of ..._still_refuses: the Remove remedy of a lost
@@ -4024,8 +4020,8 @@ class ReserveReceiptTests(AlxTestCase):
         )
         self.assertIn("content", issued["receipts"])
         self.assertIn(
-            "content receipt issued without a source-fidelity receipt: "
-            "live fidelity never ran",
+            "source fidelity: offline — extracts were verified verbatim "
+            "at claim add; alx issue --live re-reads a sample of cited pages",
             issued["delivery_notes"],
         )
 
@@ -5693,7 +5689,7 @@ class PartBFlowTests(AlxTestCase):
             code, out = self.run_in("issue", "--offline")
         self.assertEqual(0, code, out)
         self.assertEqual(0, calls["online"])
-        self.assertNotIn("source fidelity:", out)
+        self.assertIn("note: source fidelity: offline — extracts were verified", out)
         issued = json.loads(
             (self.dir / "receipts" / "issue.json").read_text(encoding="utf-8")
         )

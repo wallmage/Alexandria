@@ -1041,25 +1041,59 @@ def _closest_passage_message(text, window, source_id):
 def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
     """Offline probe of one claim/source extract against cached text.
 
-    R22: one source may carry several evidence entries, so the caller names the
-    entry to probe; without one, the first entry for the source is probed.
+    R37.1: omit extract → probe every source_evidence record for this source.
+    Matching records produce no finding; each mismatch is its own Finding.
     """
     claim = claim if isinstance(claim, dict) else {}
     source = source if isinstance(source, dict) else {}
     claim_id = str(claim.get("claim_id") or "")
     source_id = str(source.get("source_id") or "")
     evidence = claim.get("source_evidence")
-    if extract is None and isinstance(evidence, list):
-        for entry in evidence:
-            if isinstance(entry, dict) and entry.get("source_id") == source_id:
-                extract = entry.get("extract_or_location")
-                break
-    if extract is None:
+    records = []
+    if isinstance(evidence, list):
+        records = [
+            (index, entry)
+            for index, entry in enumerate(evidence, start=1)
+            if isinstance(entry, dict) and entry.get("source_id") == source_id
+        ]
+    record_index = None
+    if extract is None and len(records) > 1:
+        findings = []
+        for _, entry in records:
+            piece = entry.get("extract_or_location")
+            if piece is None:
+                continue
+            findings.extend(
+                probe_findings(
+                    claim,
+                    source,
+                    text,
+                    cache_meta=cache_meta,
+                    extract=piece,
+                )
+            )
+        return findings
+    if extract is None and records:
+        record_index, entry = records[0]
+        extract = entry.get("extract_or_location")
+    elif extract is None:
         extract = claim.get("extract_or_location")
+    elif isinstance(evidence, list):
+        for index, entry in enumerate(evidence, start=1):
+            if (
+                isinstance(entry, dict)
+                and entry.get("source_id") == source_id
+                and entry.get("extract_or_location") == extract
+            ):
+                record_index = index
+                break
     document = _document(text)
     findings = []
     segments = _extract_segments(extract, document)
     usable = []
+    mismatch_ids = [claim_id, source_id]
+    if record_index is not None:
+        mismatch_ids.append(f"source_evidence[{record_index}]")
     for segment in segments:
         normalized = normalize_text(segment)
         usable.append(normalized)
@@ -1073,7 +1107,7 @@ def probe_findings(claim, source, text, *, cache_meta=None, extract=None):
                     family="fidelity/mismatch",
                     severity="hard",
                     klass="F",
-                    ids=[claim_id, source_id],
+                    ids=mismatch_ids,
                     message=(
                         f"{claim_id}: extract_or_location does not appear in "
                         f"{source.get('url') or source_id}. Missing: "

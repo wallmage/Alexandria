@@ -3187,12 +3187,25 @@ SOURCES_HEADINGS = {
 }
 
 
+def _source_entry_line(stripped):
+    if not (
+        stripped.startswith(("- ", "* ")) or re.match(r"\d+\. ", stripped)
+    ):
+        return False
+    return bool(re.search(r"https?://", stripped))
+
+
+def _sources_rewritten_line(entries, kept):
+    return f"sources section rewritten: {entries} entries, {kept} lines kept"
+
+
 def _regenerate_sources(ws, ledger, lang="en"):
     text = ws.report_text()
     offset = sources_heading_offset(text)
+    cited = _cited_sources(ledger, text)
     listing = "\n".join(
         f"- [{source.get('title', source.get('url'))}]({source.get('url')})"
-        for source in _cited_sources(ledger, text)
+        for source in cited
     )
     if offset is None:
         heading = SOURCES_HEADINGS.get(lang, SOURCES_HEADINGS["en"])
@@ -3200,7 +3213,7 @@ def _regenerate_sources(ws, ledger, lang="en"):
             text.rstrip("\n") + "\n\n" + heading + "\n\n" + listing + "\n",
             encoding="utf-8",
         )
-        return True
+        return _sources_rewritten_line(len(cited), 0)
     heading_end = text.index("\n", offset) if "\n" in text[offset:] else len(text)
     heading = text[offset:heading_end]
     block_start = heading_end + 1 if heading_end < len(text) else len(text)
@@ -3209,9 +3222,7 @@ def _regenerate_sources(ws, ledger, lang="en"):
     kept = []
     for line in text[block_start:block_end].splitlines():
         stripped = line.lstrip()
-        if not stripped:
-            continue
-        if stripped.startswith(("- ", "* ")) or re.match(r"\d+\. ", stripped):
+        if not stripped or _source_entry_line(stripped):
             continue
         kept.append(line)
     parts = [text[:offset] + heading, "", listing]
@@ -3223,7 +3234,7 @@ def _regenerate_sources(ws, ledger, lang="en"):
     if tail:
         rebuilt = rebuilt.rstrip("\n") + "\n\n" + tail.lstrip("\n")
     ws.report.write_text(rebuilt, encoding="utf-8")
-    return True
+    return _sources_rewritten_line(len(cited), len(kept))
 
 
 def _excerpt_prose(text):
@@ -3326,9 +3337,11 @@ def _binding_findings(ws, state, ledger, *, fix=False, rewrite_out=None):
     if fix or excerpt_rewritten:
         ws.save_ledger(ledger)
     if fix:
-        _regenerate_sources(
+        rewritten = _regenerate_sources(
             ws, _bound_ledger(state, ledger), state.get("lang", "en")
         )
+        if rewrite_out is not None:
+            rewrite_out.append(rewritten)
         text = ws.report_text()
         mapping, unbound = paragraph_mapping(ws, state, ledger, text)
     record_binding_hashes(state, text, mapping)

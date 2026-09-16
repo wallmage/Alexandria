@@ -5,6 +5,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
+from scripts import alx
 from tests.test_alx import AlxTestCase
 
 STAMP = "2026-09-16T19:14:04Z"
@@ -63,6 +64,35 @@ class SourcesTrailingProseTests(AlxTestCase):
         self.assertIn(BETWEEN, report)
         self.assertEqual(1, report.count("- [Primary]"))
         self.assertNotIn("* [Primary]", report)
+
+    def test_url_less_list_lines_kept_and_rewrite_printed(self):
+        after = "- 注：条目之后保留。"
+        between = "- 标题与条目之间的列表项"
+        self.bootstrap()
+        ledger = self.ledger()
+        ledger["sources"][0]["title"] = "Primary"
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        url = ledger["sources"][0]["url"]
+        path = self.dir / "report.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text[: text.index("## Sources")]
+            + f"## Sources\n\n{between}\n\n- [Primary]({url})\n\n{after}\n",
+            encoding="utf-8",
+        )
+        before = path.read_text(encoding="utf-8")
+        n = len(alx._cited_sources(self.ledger(), before))
+        code, out = self.run_in("check", "--fix")
+        self.assertEqual(0, code, out)
+        report = path.read_text(encoding="utf-8")
+        self.assertIn(after, report)
+        self.assertIn(between, report)
+        self.assertEqual(1, report.count("- [Primary]"))
+        self.assertGreater(report.index(after), report.index("- [Primary]"))
+        self.assertGreater(report.index(between), report.index("- [Primary]"))
+        self.assertIn(f"sources section rewritten: {n} entries, 2 lines kept", out)
 
     def test_no_heading_appends_heading_and_list(self):
         self.bootstrap()

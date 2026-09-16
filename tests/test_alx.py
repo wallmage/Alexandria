@@ -537,6 +537,10 @@ class FetchTests(AlxTestCase):
         self.assertEqual([], self.ledger()["sources"])
         self.assertFalse((self.dir / "sources" / "S1.txt").exists())
         self.assertFalse((self.dir / "sources" / "S1.meta.json").exists())
+        short_cjk = "<html><body><p>" + "蒋介石日记始于一九一五年" * 8 + "</p></body></html>"
+        code, out = self.fetch("https://example.org/cjk", page=short_cjk)
+        self.assertEqual(0, code, out)
+        self.assertRegex(out, r"S1 OK \d+ chars")
 
 
 class LanguageTests(AlxTestCase):
@@ -1138,6 +1142,17 @@ class CheckTests(AlxTestCase):
         self.assertEqual(0, code, out)
         code, out = self.run_in("check")
         self.assertRegex(out, r"uncited sources \(1\): S2 \(\d+ chars\)")
+        ledger = self.ledger()
+        ledger["sources"].append({**ledger["sources"][1], "source_id": "S3"})
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        code, out = self.run_in("check")
+        self.assertRegex(out, r"uncited sources \(2\): S3 \(no cache\) S2 \(\d+ chars\)")
+        ledger["sources"].pop()
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
         batch = self.write_json("claims2.json", [CLAIM_TWO])
         code, out = self.run_in("claim", "add", batch)
         self.assertEqual(0, code, out)

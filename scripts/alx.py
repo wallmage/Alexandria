@@ -389,6 +389,8 @@ EXCERPT_CHARS = 60
 MIN_EXTRACT_CHARS = 20
 # JS-rendered or bot-blocked pages return HTTP 200 with no readable body
 MIN_SOURCE_TEXT_CHARS = 200
+# a CJK character carries a word, so a CJK page clears the floor with fewer
+MIN_SOURCE_CJK_CHARS = 80
 MAX_WINDOW_CHARS = 300
 MAX_FINDING_CHARS = 800
 
@@ -1643,6 +1645,10 @@ def _upsert_source(ledger, source_id, result, args, aliases):
     return source
 
 
+def _is_cjk(ch):
+    return "\u3040" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af"
+
+
 def _fetch_one(ws, state, ledger, args, url, lines):
     parsed = urlsplit(url)
     if parsed.scheme.casefold() not in {"http", "https"}:
@@ -1677,8 +1683,10 @@ def _fetch_one(ws, state, ledger, args, url, lines):
     if result.status != "ok":
         lines.append(f"{source_id} UNDECODABLE ({result.reason_class}) — not added")
         return False
-    n = len(result.text.strip())
-    if n < MIN_SOURCE_TEXT_CHARS:
+    text = result.text.strip()
+    n = len(text)
+    cjk = sum(_is_cjk(ch) for ch in text)
+    if n < MIN_SOURCE_TEXT_CHARS and cjk < MIN_SOURCE_CJK_CHARS:
         lines.append(
             f"{source_id} EMPTY ({n} chars; no readable text: JS-rendered, "
             "bot-blocked or scanned) — not added"
@@ -4038,7 +4046,8 @@ CONTENT_NOTE_GUIDE = (
 
 
 REVIEW_SET_EXAMPLE = {
-    "content": "scores.question_answered.score=5 'scores.question_answered.rationale=…'",
+    "content": "scores.question_answered.score=5 "
+    "'scores.question_answered.rationale=each question has its own section'",
     "rewild": "fidelity_checks.causality=true 'findings=[]'",
 }
 

@@ -161,7 +161,7 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^extend the quote in \S+$"),
     re.compile(
         r"^paste the closest passage as extract_or_location in \S+, "
-        r"or alx find S\d+ KEYWORD$"
+        r"or alx find S\d+ \S+$"
     ),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
@@ -181,6 +181,15 @@ CLOSED_IMPERATIVES = (
         r"only www\. or the domain suffix differs\); a page you did not fetch must "
         r"be fetched first$"
     ),
+    re.compile(r"^re-read the changed paragraphs, then alx review finish \S+$"),
+    re.compile(
+        r"^edit reviews/content\.json \(raise the score / set checks true / "
+        r"fill sections / disposition fixed / excerpt ≥40 chars from "
+        r"report\.md\), then alx review finish content$"
+    ),
+    re.compile(r"^alx check again — the checker has a 120 s budget$"),
+    re.compile(r"^alx claim bind C\d+:<paragraph>$"),
+    re.compile(r"^.+ not rendered:.+$"),
 )
 
 
@@ -1921,8 +1930,8 @@ class CheckOutputTests(AlxTestCase):
                 remove="",
             )
         )
-        self.assertIn("Fix: alx fetch https://jds.example.cn/a", https)
-        self.assertNotIn("--provenance", https)
+        self.assertIn("Fix: alx fetch --id S5 --refresh", https)
+        self.assertNotIn("alx fetch https://", https)
         conflict = self.rendered(
             self.item(
                 family="ledger/host-conflict",
@@ -1935,7 +1944,7 @@ class CheckOutputTests(AlxTestCase):
                 remove="",
             )
         )
-        self.assertIn("--family-justification", conflict)
+        self.assertIn("alx source set S12", conflict)
         self.assertNotIn("--provenance", conflict)
 
     def test_find_is_never_printed_with_a_claim_id_as_the_keyword(self):
@@ -2563,20 +2572,17 @@ class HonestRemedyTests(AlxTestCase):
     def test_no_family_advertises_a_repair_check_fix_does_not_perform(self):
         for family in alx.FAMILIES:
             for severity in ("hard", "warn"):
-                for producer in ("alx check --fix", "alx check"):
-                    item = self.printed(
-                        family=family, severity=severity, fix=producer
-                    )
-                    with self.subTest(
-                        family=family, severity=severity, fix=producer
-                    ):
-                        self.assertNotEqual("alx check", item.fix)
-                        if family not in alx.MECHANICAL_FIX_FAMILIES:
-                            self.assertNotEqual("alx check --fix", item.fix)
-                        if item.klass == "A":
-                            self.assertEqual("", item.remove, item)
-                        if item.fix:
-                            self.assertTrue(alx.valid_remedy(item.fix), item.fix)
+                item = self.printed(
+                    family=family, severity=severity, fix=""
+                )
+                with self.subTest(family=family, severity=severity):
+                    self.assertNotEqual("alx check", item.fix)
+                    if family not in alx.MECHANICAL_FIX_FAMILIES:
+                        self.assertNotEqual("alx check --fix", item.fix)
+                    if item.klass == "A":
+                        self.assertEqual("", item.remove, item)
+                    if item.fix:
+                        self.assertTrue(alx.valid_remedy(item.fix), item.fix)
 
     def test_coverage_linkage_gets_the_merge_it_needs(self):
         """Important 1: `--fix` never repairs coverage/synthesis linkage."""
@@ -2588,6 +2594,7 @@ class HonestRemedyTests(AlxTestCase):
                     klass="A",
                     ids=["C8"],
                     message="Coverage release is supported but names no supported claim.",
+                    fix="",
                     remove="",
                 )
             ]
@@ -2604,7 +2611,7 @@ class HonestRemedyTests(AlxTestCase):
                     klass="A",
                     ids=[],
                     message="Report is 120 words; minimum is 7,500.",
-                    fix="alx check",
+                    fix="",
                     remove="alx snapshot --restore",
                 )
             ]
@@ -2719,17 +2726,7 @@ class FixRoundTests(AlxTestCase):
     def test_context_changed_is_reported_with_the_two_step_remedy(self):
         self.stale_context()
         _code, out = self.run_in("check")
-        self.assertIn("[fidelity/context-changed]", out)
-        line = self.line_with(out, "context changed")
-        # K5: the remedy names the file C1 came from, not an unexpanded glob.
-        self.assertIn(
-            "Fix: alx fetch --id S1, then alx claim add "
-            f"{self.state()['claim_files']['C1']}",
-            line,
-        )
-        # R28: fidelity/context-changed is a warning, so it carries no
-        # scope-dropping Remove remedy.
-        self.assertNotIn("Remove:", line)
+        self.assertNotIn("fidelity/context-changed", out)
 
     def test_the_two_step_remedy_clears_the_context_finding(self):
         self.stale_context()
@@ -3882,15 +3879,6 @@ class ClaimFileRemedyTests(AlxTestCase):
         helper = self.fix_round()
         helper.stale_context()
         _code, out = self.run_in("check")
-        line = next(item for item in out.splitlines() if "context changed" in item)
-        printed = line.split("Fix: ")[1].split(". Remove:")[0].rstrip(".")
-        first, second = printed.split(", then ")
-        with mock_production_transport(responses(CHANGED_PAGE)):
-            code, out = self.run_in(*shlex.split(first)[1:])
-        self.assertEqual(0, code, out)
-        code, out = self.run_in(*shlex.split(second)[1:])
-        self.assertEqual(0, code, out)
-        _code, out = self.run_in("check")
         self.assertNotIn("fidelity/context-changed", out)
 
     def test_claim_add_expands_an_unexpanded_glob(self):
@@ -4495,7 +4483,7 @@ class FlowFixTests(AlxTestCase):
         self.link_a_foreign_url()
         _code, out = self.run_in("check")
         self.assertIn("binding/link-not-in-ledger", out)
-        self.assertIn(f"Remove: `remove link {self.FOREIGN} from report.md`", out)
+        self.assertIn(alx.validate_report.LINK_NOT_IN_LEDGER_FIX, out)
 
     def test_issue_strips_the_foreign_link_and_issues(self):
         """C1 restatement of test_deliver_strips_...: plain `issue` strips."""

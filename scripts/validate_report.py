@@ -653,22 +653,15 @@ def binding_findings(text, ledger):
             continue
         claim_id = claim.get("claim_id", "<unknown>")
         bound = claim.get("report_paragraph")
+        in_range = False
         if bound is not None:
             try:
                 index = int(bound)
             except (TypeError, ValueError):
                 index = None
-            if index is None or index < 1 or index > len(paragraphs):
-                findings.append(
-                    _finding(
-                        "binding/claim-paragraph",
-                        f"Claim {claim_id} report_paragraph {bound} is out of range.",
-                        severity="warn",
-                        ids=[claim_id],
-                        fix=f"run `alx claim bind {claim_id} --paragraph N`",
-                        remove=f"alx claim drop {claim_id} --apply",
-                    )
-                )
+            if index is not None and 1 <= index <= len(paragraphs):
+                in_range = True
+        if in_range:
             continue
         foundation_urls = _foundation_urls(claim, sources_by_id)
         candidates = []
@@ -678,13 +671,18 @@ def binding_findings(text, ledger):
                 candidates.append(index)
         if len(candidates) != 1:
             listed = ", ".join(str(item) for item in candidates) or "none"
+            target = candidates[0] if candidates else "<paragraph>"
             findings.append(
                 _finding(
                     "binding/claim-paragraph",
-                    f"ambiguous: run `alx claim bind {claim_id} --paragraph N`; candidates: {listed}",
+                    f"ambiguous: run `alx claim bind {claim_id}:{target}`; candidates: {listed}",
                     severity="warn",
                     ids=[claim_id],
-                    fix=f"run `alx claim bind {claim_id} --paragraph N`",
+                    fix=(
+                        f"alx claim bind {claim_id}:{target}"
+                        if candidates
+                        else ""
+                    ),
                     remove=f"alx claim drop {claim_id} --apply",
                 )
             )

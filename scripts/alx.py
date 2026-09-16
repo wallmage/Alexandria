@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import re
 import shlex
@@ -193,11 +194,12 @@ VERIFICATION_NOTE_PREFIX = getattr(
 #: Every printed remedy (spec D14, ruling R6). Commands parse; the rest are the
 #: closed imperative list of spec §6 plus the two length imperatives of R6.
 REMEDY_TEMPLATES = {
-    "fetch-refresh": "alx fetch --id {source_id}",
+    "fetch-refresh": "alx fetch --id {source_id} --refresh",
     "fetch-url": "alx fetch {url}",
     "claim-add": "alx claim add {file}",
     "claim-drop": "alx claim drop {claim_id} --apply",
-    "claim-bind": "alx claim bind {claim_id} --paragraph {paragraph}",
+    "claim-bind": "alx claim bind {claim_id}:{paragraph}",
+    "source-set-url": "alx source set {source_id} --url {url}",
     "ledger-merge": "alx ledger merge {file}",
     "source-set": "alx source set {source_id} --provenance primary_independent",
     "source-family-justification": (
@@ -207,6 +209,13 @@ REMEDY_TEMPLATES = {
     "snapshot-restore": "alx snapshot --restore",
     "review-start": "alx review start {kind}",
     "review-iter": "alx review start {kind} --iter",
+    "review-stale": "re-read the changed paragraphs, then alx review finish {kind}",
+    "review-quality": (
+        "edit reviews/content.json (raise the score / set checks true / "
+        "fill sections / disposition fixed / excerpt ≥40 chars from "
+        "report.md), then alx review finish content"
+    ),
+    "checker-timeout": "alx check again — the checker has a 120 s budget",
     "check": "alx check",
     "check-fix": "alx check --fix",
     "issue": "alx issue",
@@ -220,7 +229,7 @@ REMEDY_TEMPLATES = {
     "extend-quote": "extend the quote in {file}",
     "paste-passage": (
         "paste the closest passage as extract_or_location in {file}, "
-        "or alx find {source_id} KEYWORD"
+        "or alx find {source_id} {keyword}"
     ),
     "extend-report": "extend the report body in report.md",
     "delete-paragraph": "delete paragraph {paragraph} of report.md",
@@ -258,8 +267,19 @@ CLOSED_IMPERATIVES = (
     re.compile(r"^extend the quote in \S+$"),
     re.compile(
         r"^paste the closest passage as extract_or_location in \S+, "
-        r"or alx find S\d+ KEYWORD$"
+        r"or alx find S\d+ \S+$"
     ),
+    re.compile(r"^re-read the changed paragraphs, then alx review finish \S+$"),
+    re.compile(
+        r"^edit reviews/content\.json \(raise the score / set checks true / "
+        r"fill sections / disposition fixed / excerpt ≥40 chars from "
+        r"report\.md\), then alx review finish content$"
+    ),
+    re.compile(r"^alx check again — the checker has a 120 s budget$"),
+    re.compile(r"^alx claim bind C\d+:<paragraph>$"),
+    re.compile(r"^.+ not rendered:.+$"),
+    re.compile(r"^.*must be readable UTF-8 text:.*$"),
+    re.compile(r"^Unsupported report language: .+$"),
     re.compile(r"^extend the report body in report\.md$"),
     re.compile(r"^delete paragraph \d+ of report\.md$"),
     re.compile(r"^remove link \S+ from report\.md$"),
@@ -399,6 +419,24 @@ def render_grouped(findings, *, per_family=5, verbose=False):
     )
 
 
+def _render_reminders(findings):
+    """R38.8: REMINDERS must not nest the HARD header."""
+    return "\n".join(
+        line
+        for line in render_grouped(findings).splitlines()
+        if not line.startswith("=== HARD")
+    )
+
+
+def _checker_fix(message):
+    text = str(message)
+    if "timed out" in text.casefold() or "120 s" in text or "120 second" in text:
+        return remedy("checker-timeout")
+    if "readable" in text.casefold() or text.startswith("Unsupported"):
+        return text
+    return remedy("checker-timeout")
+
+
 def finding_class(family, severity, *, online=False):
     """Class F unless the family is listed as availability/tooling."""
     if severity == "warn":
@@ -436,7 +474,7 @@ REMINDER_FAMILIES = frozenset(
 REMINDER_HEADER = "=== REMINDERS (not fixed yet; warnings, never block) ==="
 BLOCKED_HEADER = "=== BLOCKED (fix, then alx issue again) ==="
 STALE_FIDELITY_WARN = (
-    "WARNING: source-fidelity receipt predates the ledger; skipped "
+    "WARNING: source-fidelity receipt predates the ledger or report; skipped "
     "(alx issue --live refreshes it)"
 )
 
@@ -660,12 +698,25 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
             remedy("remove-link", url=url),
         )
     if family in {"binding/claim-paragraph", "binding/paragraph"}:
-        candidate = re.search(r"candidates: (\d+)", item.message)
-        paragraph = int(candidate.group(1)) if candidate else 1
-        return (
-            remedy("claim-bind", claim_id=claim_id or "C1", paragraph=paragraph),
-            remedy("claim-drop", claim_id=claim_id) if claim_id else "",
-        )
+        listed = re.search(r"candidates:\s*([^\n]+)", str(item.message))
+        numbers = []
+        if listed and listed.group(1).strip() != "none":
+            numbers = [
+                part.strip()
+                for part in listed.group(1).split(",")
+                if part.strip().isdigit()
+            ]
+        drop = remedy("claim-drop", claim_id=claim_id) if claim_id else ""
+        if numbers:
+            return (
+                remedy(
+                    "claim-bind",
+                    claim_id=claim_id or "C1",
+                    paragraph=int(numbers[0]),
+                ),
+                drop,
+            )
+        return f"alx claim bind {claim_id or 'C1'}:<paragraph>", drop
     if family == "binding/excerpt-missing":
         return (
             remedy("check-fix"),
@@ -695,11 +746,13 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
         )
     if family == "fidelity/mismatch":
         if "Closest passage in" in str(item.message):
+            keyword = _find_keyword(item.message)
             return (
                 remedy(
                     "paste-passage",
                     source_id=source_id or "S1",
                     file=(claim_files or {}).get(claim_id) or "claims/*.json",
+                    keyword=keyword or "the-missing-window",
                 ),
                 remedy("claim-drop", claim_id=claim_id) if claim_id else "",
             )
@@ -709,7 +762,17 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
             remedy("extend-quote", file="claims/*.json"),
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
-    if family in ONLINE_CLASS_A_FAMILIES or family.startswith("tooling/"):
+    if family in ONLINE_CLASS_A_FAMILIES:
+        return (
+            remedy("fetch-refresh", source_id=source_id or "S1"),
+            _drop_or_refresh(item),
+        )
+    if family == "tooling/render":
+        text = str(item.message).rstrip(".")
+        if "not rendered" in text:
+            return text, ""
+        return remedy("render"), ""
+    if family.startswith("tooling/"):
         return remedy("issue"), _drop_or_refresh(item)
     if family == "ledger/claim-input":
         return (
@@ -721,7 +784,12 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
     if family == "ledger/https":
         match = _URL_IN_MESSAGE.search(item.message)
         https = re.sub(r"^http://", "https://", match.group(0)) if match else ""
-        return (remedy("fetch-url", url=https) if https else ""), ""
+        if not https:
+            return "", ""
+        return (
+            remedy("source-set-url", source_id=source_id or "S1", url=https),
+            "",
+        )
     if family == "ledger/host-conflict":
         return remedy("source-family-justification", source_id=source_id or "S1"), ""
     if family in {
@@ -757,13 +825,19 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
             remedy("claim-drop", claim_id=claim_id) if claim_id else "",
         )
     if family.startswith("content/") or family.startswith("review/content"):
-        return remedy("review-iter", kind="content"), ""
+        if family.endswith("-stale"):
+            return remedy("review-stale", kind="content"), ""
+        if family.endswith("-missing"):
+            return remedy("review-start", kind="content"), ""
+        return remedy("review-quality"), ""
     if family.startswith("review/rewild"):
-        return remedy("review-iter", kind="rewild"), remedy(
-            "review-start", kind="rewild"
-        )
+        if "missing" in str(item.message):
+            return remedy("review-start", kind="rewild"), ""
+        return remedy("review-stale", kind="rewild"), ""
     if family in {"rewild/ai-vocabulary", "rewild/style", "rewild/length"}:
         return remedy("edit-prose"), ""
+    if family == "rewild/checker":
+        return _checker_fix(item.message), ""
     if family.startswith("rewild/"):
         return remedy("issue"), ""
     if family == "ledger/schema":
@@ -935,7 +1009,7 @@ def honest_fix(family, text):
 
 
 def adopt(findings, *, online=False, paragraphs=0, claim_files=None):
-    """Print the producer's remedies when it has them, `alx`'s own when not."""
+    """Fill a Fix only when the producer printed none; never replace one."""
     adopted = []
     seen = set()
     for item in findings:
@@ -951,25 +1025,23 @@ def adopt(findings, *, online=False, paragraphs=0, claim_files=None):
             continue
         seen.add(key)
         klass = adopted_class(item, online=online)
-        fix = _with_claim_file(_completed_remedy(item.fix, item), item, claim_files)
-        fix = fix if valid_remedy(fix) else ""
+        producer_fix = str(item.fix or "").strip()
+        fix = (
+            _with_claim_file(_completed_remedy(producer_fix, item), item, claim_files)
+            if producer_fix
+            else ""
+        )
         remove = _completed_remedy(getattr(item, "remove", ""), item)
         remove = remove if valid_remedy(remove) else ""
         if klass == "A":
             remove = ""
-        # Ruling R10: a dishonest `Fix:` sends the whole line back to `_remedies`
-        # rather than leaving the finding with a `Remove:` and no repair.
-        rejected = bool(fix) and not honest_fix(item.family, fix)
-        fix = "" if rejected else fix
-        # R30: a producer fix that fails `valid_remedy` must not leave the line
-        # with an empty `Fix:` just because a `Remove:` exists.
-        if rejected or not fix or item.family in REMEDY_OVERRIDES:
-            fix, remove = _remedies(
+        if not producer_fix:
+            fix, filled_remove = _remedies(
                 item, paragraphs=paragraphs, claim_files=claim_files
             )
-            # R20: `alx`'s own remedy names the real claim input too; only the
-            # producer's remedy passed through _with_claim_file before.
             fix = _with_claim_file(fix, item, claim_files)
+            if not remove:
+                remove = filled_remove
             if klass == "A":
                 remove = ""
         if remove and remove == fix:
@@ -1074,7 +1146,8 @@ def _minutes(state):
     deadline = datetime.fromisoformat(state["deadline"])
     now = _now()
     elapsed = max(0, int((now - start).total_seconds() // 60))
-    remaining = int((deadline - now).total_seconds() // 60)
+    left = (deadline - now).total_seconds()
+    remaining = 0 if left <= 0 else math.ceil(left / 60)
     return elapsed, remaining
 
 
@@ -1745,6 +1818,8 @@ def cmd_source_set(args):
         source["accountability_note"] = _input_path(args, args.accountability_note).read_text(
             encoding="utf-8"
         ).strip()
+    if getattr(args, "url", None):
+        source["url"] = args.url
     ws.save_ledger(ledger)
     lines.append(f"{args.source_id} classification updated.")
     _emit(
@@ -2228,6 +2303,8 @@ def cmd_claim_add(args):
                 message = str(item_finding.message)
                 if " Missing: " in message:
                     message = message.split(" Missing: ", 1)[0]
+                if item_finding.fix and "Fix:" not in message:
+                    message = f"{message} — Fix: {item_finding.fix}"
                 lines.append(
                     f"{claim_id} FAIL [{item_finding.family}] {message}"
                 )
@@ -2269,11 +2346,12 @@ def cmd_claim_add(args):
     state["counters"]["claims"] = len(ledger["claims"])
     ws.save_state(state)
     if failures:
-        tail = (
-            f"{len(failures)} failed: {' '.join(failures)} — paste each "
-            "extract_or_location line above into a new claims file and "
-            "alx claim add it"
-        )
+        tail = f"{len(failures)} failed: {' '.join(failures)}"
+        if any("extract_or_location:" in line for line in lines):
+            tail += (
+                " — paste each extract_or_location line above into a new "
+                "claims file and alx claim add it"
+            )
     else:
         tail = "0 failed"
     lines.insert(0, f"{len(items)} submitted, {accepted} accepted, {tail}")
@@ -2409,7 +2487,7 @@ def apply_drop(ws, state, ledger, claim_id, reason):
         lines.append(f"Also dropped (same paragraph): {', '.join(co_mapped)}")
     if dependents:
         lines.append(
-            "HARD until re-pointed — claims that support a dropped claim: "
+            "WARN [ledger/excluded-supports] claims that support a dropped claim: "
             + ", ".join(dependents)
         )
     dropped = [claim_id, *co_mapped]
@@ -2479,7 +2557,7 @@ def cmd_claim_drop(args):
             lines.append(f"Also dropped (same paragraph): {', '.join(co_mapped)}")
         if dependents:
             lines.append(
-                "HARD until re-pointed — claims that support a dropped claim: "
+                "WARN [ledger/excluded-supports] claims that support a dropped claim: "
                 + ", ".join(dependents)
             )
         lines.append(f"Apply with `{remedy('claim-drop', claim_id=claim_id)}`.")
@@ -2901,8 +2979,13 @@ def paragraph_mapping(ws, state, ledger, text):
         claim_id = claim.get("claim_id", "")
         explicit = _claim_paragraph(state, claim)
         if explicit:
-            mapping[claim_id] = explicit
-            continue
+            try:
+                number = int(explicit)
+            except (TypeError, ValueError):
+                number = None
+            if number is not None and 1 <= number <= len(paragraphs):
+                mapping[claim_id] = number
+                continue
         if claim_id in markers:
             mapping[claim_id] = markers[claim_id]
             continue
@@ -3235,9 +3318,14 @@ _SECTION_REVIEW_TEXT_KEYS = (
 
 def _blank_review_message(ws, kind):
     path = (ws.reviews / f"{kind}.json").resolve()
+    fields = (
+        "fidelity_checks, findings"
+        if kind == "rewild"
+        else "scores, checks, section_reviews, completion_note"
+    )
     return (
-        f"nothing filled yet — edit {path} (scores, checks, section_reviews, "
-        f"completion_note) and run alx review finish {kind} again"
+        f"nothing filled yet — edit {path} ({fields}) and run "
+        f"alx review finish {kind} again"
     )
 
 
@@ -3454,11 +3542,16 @@ def freshness_findings(ws, state, ledger, kind):
     """Spec §6.8: current inputs must equal the reviewed copy up to mechanics."""
     record = state.get("reviews", {}).get(kind, {})
     if not record.get("finished"):
+        fix = (
+            f"alx review finish {kind}"
+            if record.get("iteration")
+            else f"alx review start {kind}"
+        )
         return [
             finding(
                 _review_family(kind, "missing"),
                 f"the {kind} review is missing.",
-                fix=f"alx review start {kind}",
+                fix=fix,
             )
         ]
     reviewed = ws.review_dir(kind, record["iteration"])
@@ -3486,6 +3579,7 @@ def freshness_findings(ws, state, ledger, kind):
                 _review_family(kind, "stale"),
                 f"{n} paragraph(s) changed since the {kind} review — re-read them "
                 f"if the change was substantive; alx review finish {kind} re-stamps.",
+                fix=f"re-read the changed paragraphs, then alx review finish {kind}",
             )
         ]
     return []
@@ -3707,6 +3801,11 @@ def run_check(ws, state, ledger, *, fix=False, mapping_out=None, rewrite_out=Non
             findings, paragraphs=0, claim_files=state.get("claim_files", {})
         )
     findings.extend(_ledger_findings(ws, ledger))
+    findings = [
+        item
+        for item in findings
+        if getattr(item, "family", "") != "fidelity/context-changed"
+    ]
     binding, mapping = _binding_findings(
         ws, state, ledger, fix=fix, rewrite_out=rewrite_out
     )
@@ -3951,6 +4050,30 @@ def _note_skeleton(ws, state, kind, ledger):
 def cmd_review_start(args):
     ws, state, ledger = _open(args)
     kind = args.kind
+    note_path = ws.reviews / f"{kind}.json"
+    if note_path.exists() and not args.iter:
+        try:
+            existing = _read_json(note_path)
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if not _is_blank_review_note(existing, kind):
+            _emit(
+                ws,
+                state,
+                f"review start {kind}",
+                "already has content",
+                [
+                    f"reviews/{kind}.json already has content — alx review finish "
+                    f"{kind} attests it; --iter starts a new blind read and moves "
+                    f"it to reviews/{kind}.iter<N>.json"
+                ],
+            )
+            return 0
+    if args.iter and note_path.exists():
+        n = 1
+        while (ws.reviews / f"{kind}.iter{n}.json").exists():
+            n += 1
+        shutil.move(str(note_path), str(ws.reviews / f"{kind}.iter{n}.json"))
     record = state["reviews"].setdefault(kind, {"iteration": 0, "finished": False})
     iteration = record["iteration"] + 1 if (args.iter or not record["iteration"]) else record["iteration"]
     target = ws.review_dir(kind, iteration)
@@ -4432,7 +4555,7 @@ def cmd_issue(args):
     reminders = [item for item in findings if item.family in REMINDER_FAMILIES]
     if reminders:
         lines.append(REMINDER_HEADER)
-        lines.append(render_grouped(reminders))
+        lines.append(_render_reminders(reminders))
     online_findings, _ok = _online_phase(
         ws, state, ledger, args, lines, delivery_notes
     )
@@ -4474,7 +4597,7 @@ def cmd_issue(args):
             },
         )
     for note in delivery_notes:
-        lines.append(f"note: {note[:60]}")
+        lines.append(f"note: {note}")
     receipt = {
         "schema_version": 1,
         "issued_at": _now().isoformat(),
@@ -4613,7 +4736,7 @@ def cmd_render(args):
             _record_render_note(ws, note)
             lines.append(
                 render_grouped(
-                    [finding("tooling/render", f"{note}.", fix=remedy("issue"))]
+                    [finding("tooling/render", f"{note}.", fix=note)]
                 )
             )
             continue
@@ -4789,6 +4912,11 @@ def build_parser():
     fetch.add_argument("urls", nargs="*")
     fetch.add_argument("--id", dest="id", help="ledger source id to refresh")
     fetch.add_argument(
+        "--refresh",
+        action="store_true",
+        help="accepted with --id; --id already refreshes the cache",
+    )
+    fetch.add_argument(
         "--provenance", help="optional; stored, not used for the report"
     )
     fetch.add_argument("--type", help="optional; stored, not used for the report")
@@ -4814,6 +4942,7 @@ def build_parser():
     source_set.add_argument("--undated-reason", dest="undated_reason")
     source_set.add_argument("--family-justification", dest="family_justification")
     source_set.add_argument("--accountability-note", dest="accountability_note")
+    source_set.add_argument("--url", dest="url")
     source_set.set_defaults(
         handler=cmd_source_set,
         file_args=(

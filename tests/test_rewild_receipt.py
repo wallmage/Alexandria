@@ -227,7 +227,7 @@ class RewildReceiptTests(unittest.TestCase):
                 review_note_path=review,
                 receipt_path=receipt,
             )
-            self.assertIn("Hard Rewild warning", " ".join(findings))
+            self.assertIn("Rewild warning", " ".join(findings))
             self.assertTrue(all(is_warning(item) for item in findings), findings)
             self.assertTrue(receipt.is_file())
 

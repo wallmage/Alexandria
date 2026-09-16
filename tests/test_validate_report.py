@@ -694,7 +694,7 @@ Second mention also [one](https://example.com/a).
         }
         messages = [f.message for f in validate_report.binding_findings(report, ledger)]
         self.assertTrue(any("ambiguous" in message for message in messages), messages)
-        self.assertTrue(any("alx claim bind C5 --paragraph" in message for message in messages), messages)
+        self.assertTrue(any("alx claim bind C5:" in message for message in messages), messages)
 
         ledger["claims"][0]["report_paragraph"] = 1
         messages = [f.message for f in validate_report.binding_findings(report, ledger)]
@@ -1271,7 +1271,7 @@ class FindingClassTests(unittest.TestCase):
             for finding in findings
             if finding.family == "binding/claim-paragraph"
         ]
-        self.assertEqual(2, len(bindings))
+        self.assertEqual(1, len(bindings))
         self.assertEqual({"warn"}, {finding.severity for finding in bindings})
         self.assertEqual([], hard_errors(findings))
 

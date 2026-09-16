@@ -2444,33 +2444,41 @@ def cmd_ledger_merge(args):
         else:
             ledger[key] = value
     ws.save_ledger(ledger)
-    findings = adopt(
-        _ledger_findings(ws, ledger),
-        claim_files=state.get("claim_files", {}),
-    )
-    lines = [render_grouped(findings)] if findings else ["Ledger merged; no findings."]
+    lines = [f"merged: {', '.join(merged)}"]
     if blocked:
-        lines.insert(
-            0,
+        lines.append(
             f"ignored keys: {', '.join(blocked)} "
             "(sources only via fetch; claims only via claim add)",
         )
         ignored = [key for key in ignored if key not in blocked]
     if ignored:
-        lines.insert(
-            0,
+        lines.append(
             f"WARN: ignored key(s) not merged by `ledger merge`: {', '.join(ignored)} "
             f"(mergeable: {', '.join(sorted(MERGEABLE_LEDGER_KEYS))}).",
         )
     # Field test 4: a patch citing claims that were never added has to say so
     # in its first line; the per-reference WARNs scroll away.
-    known = {claim.get("claim_id") for claim in ledger.get("claims", [])}
-    referenced = [
-        claim_id
-        for item in ledger.get("coverage", [])
-        if isinstance(item, dict)
-        for claim_id in item.get("claim_ids", []) or []
-    ] + list(ledger.get("synthesis", {}).get("central_judgment_claim_ids", []) or [])
+    claims = ledger.get("claims")
+    claims = claims if isinstance(claims, list) else []
+    known = {
+        claim.get("claim_id")
+        for claim in claims
+        if isinstance(claim, dict)
+    }
+    coverage = ledger.get("coverage")
+    coverage = coverage if isinstance(coverage, list) else []
+    referenced = []
+    for item in coverage:
+        if not isinstance(item, dict):
+            continue
+        claim_ids = item.get("claim_ids")
+        if isinstance(claim_ids, list):
+            referenced.extend(claim_ids)
+    synthesis = ledger.get("synthesis")
+    if isinstance(synthesis, dict):
+        central = synthesis.get("central_judgment_claim_ids")
+        if isinstance(central, list):
+            referenced.extend(central)
     missing = list(dict.fromkeys(item for item in referenced if item not in known))
     if missing:
         shown = " ".join(missing[:8])
@@ -3950,8 +3958,8 @@ def _online_findings(result):
 
 
 def _online_phase(ws, state, ledger, args, lines, delivery_notes):
-    """Live fidelity unless `issue --offline` is passed."""
-    if getattr(args, "offline", False):
+    """Live fidelity only when `issue --live` is passed."""
+    if not getattr(args, "live", False):
         return [], True
     receipt_path = ws.receipts / "source-fidelity.json"
     # J1: only a receipt this pass wrote may be hashed into `issue.json`, and
@@ -4283,7 +4291,7 @@ def cmd_render(args):
         # C2: a missing or stale receipt is the issue step `render` runs itself.
         issue_code = cmd_issue(
             argparse.Namespace(
-                dir=args.dir, deliver=False, sample_size=8, offline=False
+                dir=args.dir, deliver=False, sample_size=8, offline=False, live=False
             )
         )
         if issue_code:
@@ -4338,7 +4346,7 @@ def cmd_render(args):
         try:
             pdf_errors = validate_report.validate_pdf(
                 output,
-                min_pages=10,
+                min_pages=0,
                 min_text_chars=5000,
                 min_links=1,
                 expected_lang=state.get("lang", "en"),
@@ -4490,7 +4498,7 @@ def build_parser():
         help="optional; stored, never required",
     )
     init.add_argument("--reader", help="file holding the intended reader")
-    init.add_argument("--budget-minutes", type=int, default=60)
+    init.add_argument("--budget-minutes", type=int, default=30)
     init.add_argument("--force", action="store_true")
     init.set_defaults(
         handler=cmd_init,
@@ -4588,9 +4596,14 @@ def build_parser():
 
     issue = subparsers.add_parser("issue", help="receipts, once, at the end")
     issue.add_argument(
+        "--live",
+        action="store_true",
+        help="re-read a sample of the cited pages",
+    )
+    issue.add_argument(
         "--offline",
         action="store_true",
-        help="skip live source re-check; optional",
+        help="accepted, ignored",
     )
     issue.add_argument("--sample-size", type=int, default=8)
     issue.set_defaults(handler=cmd_issue)

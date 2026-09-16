@@ -81,7 +81,7 @@ class FindingRecordTests(unittest.TestCase):
         self.assertNotIn("qty 5", rendered.split("+1 more")[0])
 
     def test_every_ledger_schema_member_is_printed(self):
-        """A7: each schema line names a distinct field, so none is hidden."""
+        """A7 / R35.3: each schema line names a distinct field; none is hidden."""
         findings = [
             self._finding(family="ledger/schema", ids=[], message=f"claims.{i}.kind")
             for i in range(40)
@@ -91,6 +91,38 @@ class FindingRecordTests(unittest.TestCase):
         self.assertNotIn("more", rendered)
         for index in range(40):
             self.assertIn(f"claims.{index}.kind.", rendered)
+        compact = render_grouped(
+            [
+                self._finding(
+                    family="ledger/schema",
+                    severity="warn",
+                    klass="A",
+                    ids=[],
+                    message=f"claims.{i}.kind",
+                )
+                for i in range(40)
+            ],
+            per_family=5,
+        )
+        self.assertNotIn("[ledger/schema] 40 —", compact)
+        for index in range(40):
+            self.assertIn(f"claims.{index}.kind", compact)
+
+    def test_claim_input_prints_every_schema_violation(self):
+        printed = render_grouped(
+            [
+                self._finding(
+                    family="ledger/claim-input",
+                    ids=[],
+                    message=f"source_evidence: violation {i}",
+                )
+                for i in range(6)
+            ],
+            per_family=5,
+        )
+        self.assertNotIn("more", printed)
+        for index in range(6):
+            self.assertIn(f"source_evidence: violation {index}.", printed)
 
     def test_a_finding_without_a_fix_keeps_its_sentence_final_period(self):
         item = self._finding(fix="", remove="alx snapshot --restore")

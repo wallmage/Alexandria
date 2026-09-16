@@ -1251,8 +1251,8 @@ class LedgerReferenceTests(unittest.TestCase):
         errors = validate_ledger.validate_schema(incomplete, schema)
         joined = " ".join(errors)
         self.assertIn("schema_version", joined)
-        self.assertIn("brief", joined)
-        self.assertIn("synthesis", joined)
+        self.assertNotIn("brief", joined)
+        self.assertNotIn("synthesis", joined)
 
     def test_accepts_known_source_and_claim_references(self):
         data = {
@@ -1538,7 +1538,7 @@ class LedgerReferenceTests(unittest.TestCase):
             )
         )
         errors = validate_ledger.validate_schema(data, schema)
-        self.assertTrue(
+        self.assertFalse(
             any("synthesis.adversarial_tests" in error for error in errors),
             errors,
         )
@@ -3322,18 +3322,10 @@ class SchemaRemedyTests(unittest.TestCase):
 
     def test_bad_top_level_field_points_at_that_field(self):
         ledger = living_harm_ledger()
-        ledger.pop("unresolved_questions", None)
+        ledger.pop("subject", None)
         self.assertEqual(
-            "set field unresolved_questions in ledger.json",
-            self._fix_for(ledger, "<root>", "unresolved_questions"),
-        )
-
-    def test_mergeable_section_path_points_at_ledger_merge(self):
-        ledger = living_harm_ledger()
-        ledger["people"][0].pop("name", None)
-        self.assertEqual(
-            "set field people.0.name in people via alx ledger merge",
-            self._fix_for(ledger, "people.0"),
+            "set field subject in ledger.json",
+            self._fix_for(ledger, "<root>", "subject"),
         )
 
     def test_empty_top_level_arrays_warn_with_schema_remedy(self):
@@ -3341,29 +3333,13 @@ class SchemaRemedyTests(unittest.TestCase):
             "schema_version": 4,
             "subject": "X",
             "research_question": "Y",
-            "brief": {
-                "intended_reader": "reader",
-                "decision_or_use": "use",
-                "archetype": "artifact",
-                "report_language": "en",
-                "editorial_mode": "analytical",
-                "scope": "now",
-            },
+            "brief": {},
             "people": [],
             "report_date": "2026-07-28",
             "coverage": [],
             "sources": [],
             "claims": [],
-            "synthesis": {
-                "central_judgment_claim_ids": [],
-                "counterevidence_claim_ids": [],
-                "adversarial_tests": [],
-                "implications": [],
-                "decisions_or_takeaways": [],
-                "scenarios": [],
-                "limitations": [],
-                "research_stop_reason": "stop",
-            },
+            "synthesis": {},
             "unresolved_questions": [],
         }
         findings = self._schema_findings(ledger)
@@ -3371,61 +3347,14 @@ class SchemaRemedyTests(unittest.TestCase):
         self.assertEqual({"warn"}, {item.severity for item in findings})
         printed = validate_ledger.render_grouped(findings)
         self.assertIn("[] should be non-empty", printed)
-        for item in findings:
-            self.assertTrue(
-                "via alx ledger merge" in item.fix or "in ledger.json" in item.fix
-                or "claims/*.json" in item.fix,
-                item.fix,
-            )
-        self.assertEqual(
-            "set field coverage in coverage via alx ledger merge",
-            self._fix_for(ledger, "coverage"),
-        )
+        messages = " ".join(item.message for item in findings)
+        self.assertIn("sources", messages)
+        self.assertIn("claims", messages)
+        self.assertNotIn("brief", messages)
+        self.assertNotIn("coverage", messages)
         self.assertEqual(
             "set field sources in ledger.json",
             self._fix_for(ledger, "sources"),
-        )
-        self.assertEqual(
-            "set field brief.intended_reader in brief via alx ledger merge",
-            self._fix_for({"brief": {}}, "brief", "intended_reader"),
-        )
-
-    def test_missing_brief_required_field_points_at_ledger_merge(self):
-        ledger = living_harm_ledger()
-        ledger["brief"] = {
-            "decision_or_use": "use",
-            "archetype": "artifact",
-            "report_language": "en",
-            "editorial_mode": "analytical",
-            "scope": "now",
-        }
-        self.assertEqual(
-            "set field brief.intended_reader in brief via alx ledger merge",
-            self._fix_for(ledger, "brief"),
-        )
-        printed = validate_ledger.render_grouped(
-            self._schema_findings(ledger), verbose=True
-        )
-        self.assertIn("brief: 'intended_reader' is a required property", printed)
-        self.assertIn(
-            "set field brief.intended_reader in brief via alx ledger merge",
-            printed,
-        )
-
-    def test_hollow_implication_warns_with_merge_remedy(self):
-        ledger = living_harm_ledger()
-        ledger["synthesis"]["implications"] = [{}]
-        printed = validate_ledger.render_grouped(
-            self._schema_findings(ledger), verbose=True
-        )
-        self.assertIn("'statement' is a required property", printed)
-        self.assertIn(
-            "set field synthesis.implications.0.statement in synthesis via alx ledger merge",
-            printed,
-        )
-        self.assertEqual(
-            {"warn"},
-            {item.severity for item in self._schema_findings(ledger)},
         )
 
     def test_no_finding_names_a_field_its_message_did_not(self):

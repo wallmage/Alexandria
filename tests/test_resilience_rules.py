@@ -744,11 +744,13 @@ class RecoveredSchemaWarnTests(unittest.TestCase):
         self.assertEqual([], [item for item in findings if item.severity == "hard"])
         printed = validate_ledger.render_grouped(schema, verbose=True)
         self.assertIn("[] should be non-empty", printed)
+        messages = " ".join(item.message for item in schema)
+        self.assertIn("sources", messages)
+        self.assertIn("claims", messages)
+        self.assertNotIn("brief", messages)
+        self.assertNotIn("coverage", messages)
         self.assertTrue(
-            any(
-                "via alx ledger merge" in item.fix or "in ledger.json" in item.fix
-                for item in schema
-            ),
+            any("in ledger.json" in item.fix for item in schema),
             [item.fix for item in schema],
         )
 

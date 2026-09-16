@@ -79,6 +79,7 @@ WARN_FULL_FAMILIES = frozenset(
         "rewild/length",
     }
 )
+SCHEMA_FAMILIES = frozenset({"ledger/schema", "ledger/claim-input"})
 
 
 def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
@@ -93,8 +94,16 @@ def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
         return CLASS_LABELS["F"]
 
     def emit_compact(items):
+        schema = [item for item in items if item.family in SCHEMA_FAMILIES]
         full = [item for item in items if item.family in WARN_FULL_FAMILIES]
-        compact = [item for item in items if item.family not in WARN_FULL_FAMILIES]
+        compact = [
+            item
+            for item in items
+            if item.family not in WARN_FULL_FAMILIES
+            and item.family not in SCHEMA_FAMILIES
+        ]
+        if schema:
+            emit(schema)
         if full:
             emit(full)
         for family, members in group(compact).items():
@@ -115,7 +124,7 @@ def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
             # `ledger/schema` is never capped; the other families still are.
             cap = (
                 len(members)
-                if family == "ledger/schema" or family in WARN_FULL_FAMILIES
+                if family in SCHEMA_FAMILIES or family in WARN_FULL_FAMILIES
                 else per_family
             )
             shown = members[:cap]

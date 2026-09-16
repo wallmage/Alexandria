@@ -275,125 +275,28 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(
             "https://json-schema.org/draft/2020-12/schema", schema["$schema"]
         )
-        self.assertIn("claims", schema["required"])
-        self.assertIn("sources", schema["required"])
+        self.assertEqual(
+            [
+                "schema_version",
+                "subject",
+                "research_question",
+                "report_date",
+                "sources",
+                "claims",
+            ],
+            schema["required"],
+        )
         self.assertEqual(4, schema["properties"]["schema_version"]["const"])
-        # B2/B3: empty coverage/sources/claims and thin synthesis are
-        # structurally invalid; runtime still emits ledger/schema WARN (R29).
-        self.assertEqual(
-            [
-                "central_judgment_claim_ids",
-                "counterevidence_claim_ids",
-                "adversarial_tests",
-                "implications",
-                "decisions_or_takeaways",
-                "scenarios",
-                "limitations",
-                "research_stop_reason",
-            ],
-            schema["$defs"]["synthesis"]["required"],
-        )
-        self.assertEqual(
-            1, schema["$defs"]["synthesis"]["properties"]["central_judgment_claim_ids"]["minItems"]
-        )
-        self.assertEqual(
-            1, schema["$defs"]["synthesis"]["properties"]["adversarial_tests"]["minItems"]
-        )
-        self.assertEqual(
-            1, schema["$defs"]["synthesis"]["properties"]["implications"]["minItems"]
-        )
-        self.assertEqual(
-            1,
-            schema["$defs"]["synthesis"]["properties"]["decisions_or_takeaways"]["minItems"],
-        )
-        self.assertEqual(
-            ["array", "string", "null"],
-            schema["$defs"]["synthesis"]["properties"]["limitations"]["type"],
-        )
-        self.assertTrue(schema["$defs"]["synthesis"]["additionalProperties"])
-        for section in ("coverage", "sources", "claims"):
+        for key in (
+            "brief",
+            "people",
+            "coverage",
+            "synthesis",
+            "unresolved_questions",
+        ):
+            self.assertEqual(True, schema["properties"][key])
+        for section in ("sources", "claims"):
             self.assertEqual(1, schema["properties"][section]["minItems"])
-        self.assertEqual(
-            [
-                "intended_reader",
-                "decision_or_use",
-                "archetype",
-                "report_language",
-                "editorial_mode",
-                "scope",
-            ],
-            schema["$defs"]["brief"]["required"],
-        )
-        self.assertEqual(
-            ["object", "string", "null"],
-            schema["$defs"]["brief"]["properties"]["scope"]["type"],
-        )
-        self.assertEqual(
-            [
-                "area",
-                "question",
-                "priority",
-                "decision_relevance",
-                "completion_criteria",
-                "status",
-                "claim_ids",
-                "gap_impact",
-            ],
-            schema["$defs"]["coverageItem"]["required"],
-        )
-        self.assertTrue(schema["$defs"]["coverageItem"]["allOf"])
-        self.assertEqual(
-            ["statement", "claim_ids"],
-            schema["$defs"]["implication"]["required"],
-        )
-        self.assertEqual(
-            "string",
-            schema["$defs"]["implication"]["properties"]["statement"]["type"],
-        )
-        self.assertEqual(
-            [
-                "statement",
-                "rationale_claim_ids",
-                "tradeoff",
-                "success_signal",
-                "failure_signal",
-            ],
-            schema["$defs"]["takeaway"]["required"],
-        )
-        self.assertEqual(
-            [
-                "name",
-                "conditions",
-                "leading_indicators",
-                "disconfirming_indicators",
-                "implication",
-                "claim_ids",
-            ],
-            schema["$defs"]["scenario"]["required"],
-        )
-        self.assertEqual(
-            [
-                "hypothesis",
-                "test",
-                "claim_ids",
-                "outcome",
-                "result",
-                "effect_on_conclusion",
-            ],
-            schema["$defs"]["adversarialTest"]["required"],
-        )
-        self.assertEqual(
-            "string",
-            schema["$defs"]["adversarialTest"]["properties"]["hypothesis"]["type"],
-        )
-        self.assertEqual(
-            "string",
-            schema["$defs"]["adversarialTest"]["properties"]["test"]["type"],
-        )
-        self.assertEqual(
-            "string",
-            schema["$defs"]["adversarialTest"]["properties"]["result"]["type"],
-        )
 
     def test_references_match_spec_thresholds_and_alx_lifecycle(self):
         recording = (ROOT / "references" / "evidence-recording.md").read_text(

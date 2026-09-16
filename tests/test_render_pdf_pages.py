@@ -203,7 +203,7 @@ class RenderPagesCommandTests(unittest.TestCase):
         render.assert_called_once()
         self.assertEqual(Path(output), Path(render.call_args.args[1]))
 
-    def test_auto_fallback_tries_pdfkit_then_pdfium_then_poppler(self):
+    def test_auto_fallback_tries_pdfium_then_pdfkit_then_poppler(self):
         from scripts import render_pdf_pages
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -242,10 +242,70 @@ class RenderPagesCommandTests(unittest.TestCase):
                     pdf, output, backend="auto"
                 )
 
-        self.assertEqual(["pdfkit", "pdfium", "poppler"], order)
+        self.assertEqual(["pdfium", "pdfkit", "poppler"], order)
         self.assertEqual("poppler", selected)
         self.assertTrue(any(item.startswith("pdfkit:") for item in failures), failures)
         self.assertTrue(any(item.startswith("pdfium:") for item in failures), failures)
+
+    def test_darwin_auto_chain_tries_pdfium_before_pdfkit_and_isolates_subprocesses(
+        self,
+    ):
+        from scripts import render_pdf_pages
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            pdf = temp / "report.pdf"
+            output = temp / "pages"
+            pdf.write_bytes(b"%PDF")
+            order = []
+
+            def fail_pdfium(*args, **kwargs):
+                order.append("pdfium")
+                raise RuntimeError("pdfium missing")
+
+            def succeed_pdfkit(*args, **kwargs):
+                order.append("pdfkit")
+                (output / "page-0001.png").write_bytes(b"png")
+
+            with (
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfium", side_effect=fail_pdfium
+                ),
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfkit", side_effect=succeed_pdfkit
+                ),
+                mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
+                mock.patch.object(render_pdf_pages.sys, "platform", "darwin"),
+            ):
+                selected, failures = render_pdf_pages.render_pages(
+                    pdf, output, backend="auto"
+                )
+
+        self.assertEqual(["pdfium", "pdfkit"], order)
+        self.assertEqual("pdfkit", selected)
+        self.assertEqual(["pdfium: pdfium missing"], failures)
+
+        recorded = []
+
+        def fake_run(*args, **kwargs):
+            recorded.append(kwargs)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(
+                render_pdf_pages.subprocess, "run", side_effect=fake_run
+            ),
+            mock.patch.object(
+                render_pdf_pages.shutil, "which", return_value="/usr/bin/swift"
+            ),
+        ):
+            render_pdf_pages.render_with_pdfkit(Path("in.pdf"), Path("out"), dpi=96)
+            render_pdf_pages._run_renderer(["/bin/true"], "Poppler")
+
+        self.assertEqual(2, len(recorded))
+        for kwargs in recorded:
+            self.assertIs(kwargs.get("stdin"), subprocess.DEVNULL)
+            self.assertIs(kwargs.get("start_new_session"), True)
 
     def test_auto_fallback_exposes_selected_backend_and_failures(self):
         from scripts import render_pdf_pages
@@ -262,11 +322,11 @@ class RenderPagesCommandTests(unittest.TestCase):
             with (
                 mock.patch.object(
                     render_pdf_pages,
-                    "render_with_pdfkit",
-                    side_effect=RuntimeError("swift missing"),
+                    "render_with_pdfium",
+                    side_effect=RuntimeError("pdfium missing"),
                 ),
                 mock.patch.object(
-                    render_pdf_pages, "render_with_pdfium", side_effect=succeed
+                    render_pdf_pages, "render_with_pdfkit", side_effect=succeed
                 ),
                 mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
                 mock.patch.object(render_pdf_pages.sys, "platform", "darwin"),
@@ -275,8 +335,8 @@ class RenderPagesCommandTests(unittest.TestCase):
                     pdf, output, backend="auto"
                 )
 
-        self.assertEqual("pdfium", selected)
-        self.assertEqual(["pdfkit: swift missing"], failures)
+        self.assertEqual("pdfkit", selected)
+        self.assertEqual(["pdfium: pdfium missing"], failures)
 
     def test_fallback_errors_are_one_line_each(self):
         from scripts import render_pdf_pages
@@ -342,7 +402,7 @@ class RenderPagesCommandTests(unittest.TestCase):
             )
         self.assertEqual(90, captured.get("timeout"))
 
-    def test_pdfkit_timeout_falls_through_to_next_backend(self):
+    def test_pdfium_timeout_falls_through_to_next_backend(self):
         from scripts import render_pdf_pages
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -353,25 +413,25 @@ class RenderPagesCommandTests(unittest.TestCase):
             order = []
 
             def timeout(*args, **kwargs):
-                order.append("pdfkit")
-                raise subprocess.TimeoutExpired(cmd="swift", timeout=90)
+                order.append("pdfium")
+                raise subprocess.TimeoutExpired(cmd="pdfium", timeout=90)
 
             def succeed(*args, **kwargs):
-                order.append("pdfium")
+                order.append("pdfkit")
                 (output / "page-0001.png").write_bytes(b"png")
 
             with (
                 mock.patch.object(
-                    render_pdf_pages, "render_with_pdfkit", side_effect=timeout
+                    render_pdf_pages, "render_with_pdfium", side_effect=timeout
                 ),
                 mock.patch.object(
-                    render_pdf_pages, "render_with_pdfium", side_effect=succeed
+                    render_pdf_pages, "render_with_pdfkit", side_effect=succeed
                 ),
                 mock.patch.object(render_pdf_pages.sys, "stdout", mock.Mock()),
                 mock.patch.object(render_pdf_pages.sys, "platform", "darwin"),
             ):
                 render_pdf_pages.render_pages(pdf, output, backend="auto")
-        self.assertEqual(["pdfkit", "pdfium"], order)
+        self.assertEqual(["pdfium", "pdfkit"], order)
 
     def test_force_allows_nonempty_output_directory(self):
         from scripts import render_pdf_pages

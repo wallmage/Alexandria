@@ -4069,10 +4069,13 @@ class RenderPdfkitVisibilityTests(AlxTestCase):
             Path(output_path).write_bytes(extractable_pdf_bytes())
             return Path(output_path)
 
+        def fail_pdfium(*args, **kwargs):
+            raise RuntimeError("pdfium missing")
+
         def fail_pdfkit(*args, **kwargs):
             raise RuntimeError("swift missing")
 
-        def succeed_pdfium(pdf_path, output_dir, **kwargs):
+        def succeed_poppler(pdf_path, output_dir, **kwargs):
             Path(output_dir).mkdir(parents=True, exist_ok=True)
             (Path(output_dir) / "page-0001.png").write_bytes(b"png")
 
@@ -4083,12 +4086,17 @@ class RenderPdfkitVisibilityTests(AlxTestCase):
             )
             stack.enter_context(
                 mock.patch.object(
+                    render_pdf_pages, "render_with_pdfium", side_effect=fail_pdfium
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
                     render_pdf_pages, "render_with_pdfkit", side_effect=fail_pdfkit
                 )
             )
             stack.enter_context(
                 mock.patch.object(
-                    render_pdf_pages, "render_with_pdfium", side_effect=succeed_pdfium
+                    render_pdf_pages, "render_with_poppler", side_effect=succeed_poppler
                 )
             )
             stack.enter_context(mock.patch.object(alx.sys, "platform", "darwin"))
@@ -4102,7 +4110,7 @@ class RenderPdfkitVisibilityTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertIn(
             "executive contact sheet: PDFKit failed (swift missing); "
-            "rendered with pdfium",
+            "rendered with poppler",
             out,
         )
         self.assertTrue((self.dir / "pages-executive" / "page-0001.png").is_file())
@@ -4116,6 +4124,9 @@ class RenderPdfkitVisibilityTests(AlxTestCase):
             Path(output_path).write_bytes(extractable_pdf_bytes())
             return Path(output_path)
 
+        def fail_pdfium(*args, **kwargs):
+            raise RuntimeError("pdfium missing")
+
         def succeed_pdfkit(pdf_path, output_dir, **kwargs):
             Path(output_dir).mkdir(parents=True, exist_ok=True)
             (Path(output_dir) / "page-0001.png").write_bytes(b"png")
@@ -4124,6 +4135,11 @@ class RenderPdfkitVisibilityTests(AlxTestCase):
             self.issued(stack)
             stack.enter_context(
                 mock.patch.object(md_to_pdf, "render_pdf", side_effect=fake_render_pdf)
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    render_pdf_pages, "render_with_pdfium", side_effect=fail_pdfium
+                )
             )
             stack.enter_context(
                 mock.patch.object(

@@ -173,16 +173,12 @@ PDF_CHECK_DIR="$(mktemp -d)"
   "$REPORT_PDF" "$PDF_CHECK_DIR" --dpi 144
 ```
 
-CLI `--backend auto` (the default) is not PDFKit-mandatory: it tries PDFKit,
-then PDFium, then Poppler, and a later backend succeeding still writes the
-pages. That CLI fallback is not the `alx render` Preview path. On macOS,
-`alx render` requests PDFKit first for each contact sheet (same framework as
-Preview, because PDFium and Poppler can display an embedded font that Preview
-cannot); when PDFKit fails it prints
+CLI `--backend auto` (the default) tries PDFium first; PDFKit, Poppler as
+fallbacks; `--backend pdfkit` on request. A later backend succeeding still
+writes the pages. On macOS, when PDFKit is reached and fails it prints
 `<template> contact sheet: PDFKit failed (<reason>); rendered with <backend>`,
-keeps the PDF, and returns 0. Use `--backend pdfium` only for cross-renderer
-diagnosis. Outside macOS, CLI `auto` starts at PDFium, then Poppler;
-`alx render` is unchanged; `--backend pdfkit` is rejected.
+keeps the PDF, and returns 0. Outside macOS, CLI `auto` is PDFium then
+Poppler; `--backend pdfkit` is rejected.
 
 For a compatibility review, install the external renderers and run:
 

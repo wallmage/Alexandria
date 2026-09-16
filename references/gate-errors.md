@@ -368,7 +368,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** source-fidelity receipt not issued: network unavailable.
 
 ### `tooling/render` — W
-- **rule:** md_to_pdf or the rasterizer failed or timed out (90 s each); the backend chain pdfkit → pdfium → poppler is already exhausted. `render` keeps whatever PDFs it produced.
+- **rule:** md_to_pdf or the rasterizer failed or timed out (90 s each); the backend chain pdfium → pdfkit → poppler is already exhausted. `render` keeps whatever PDFs it produced.
 - **fix:** `alx render`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** poppler timeout on page 41.

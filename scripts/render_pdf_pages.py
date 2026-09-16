@@ -10,7 +10,7 @@ from pathlib import Path
 
 PDFKIT_RENDERER = Path(__file__).with_name("render_pdfkit_pages.swift")
 SUBPROCESS_TIMEOUT_S = 90
-AUTO_FALLBACK = ("pdfkit", "pdfium", "poppler")
+AUTO_FALLBACK = ("pdfium", "pdfkit", "poppler")
 
 
 def _one_line(exc):
@@ -73,10 +73,12 @@ def render_with_pdfkit(pdf_path, output_dir, *, dpi):
                 str(output_dir),
                 str(dpi),
             ],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
             timeout=SUBPROCESS_TIMEOUT_S,
+            start_new_session=True,
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
@@ -110,10 +112,12 @@ def _run_renderer(command, label):
     try:
         result = subprocess.run(
             command,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=False,
             timeout=SUBPROCESS_TIMEOUT_S,
+            start_new_session=True,
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"{label} page rendering timed out after {SUBPROCESS_TIMEOUT_S}s") from exc
@@ -207,7 +211,7 @@ def render_pages(pdf_path, output_dir, *, dpi=144, backend="auto", force=False):
     failures = []
     if backend == "auto":
         selected = None
-        chain = AUTO_FALLBACK if sys.platform == "darwin" else AUTO_FALLBACK[1:]
+        chain = AUTO_FALLBACK if sys.platform == "darwin" else ("pdfium", "poppler")
         for name in chain:
             try:
                 selected = _render_named_backend(name, pdf_path, output_dir, dpi=dpi)
@@ -252,7 +256,7 @@ def main(argv=None):
             "ghostscript",
         ),
         default="auto",
-        help="Rendering engine (auto falls back pdfkit → pdfium → poppler)",
+        help="Rendering engine (auto falls back pdfium → pdfkit → poppler)",
     )
     parser.add_argument(
         "--force",

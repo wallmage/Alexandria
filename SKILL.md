@@ -5,7 +5,7 @@ description: Use only when the user explicitly asks to use Alexandria or explici
 
 # Alexandria
 
-Produce a source-backed research report that is useful to a decision-maker and pleasant to read, via `alx`, within about 60 min. The normal deliverables are one Markdown source file and two visually checked PDFs. Infer the brief from the request and start researching at once; never ask intake questions, never present templates.
+Produce a source-backed research report that is useful to a decision-maker and pleasant to read, via `alx`, within about 30 min. The normal deliverables are one Markdown source file and two visually checked PDFs. Infer the brief from the request and start researching at once; never ask intake questions, never present templates.
 
 `SKILL_ROOT` = this file's directory. `REPORT_LANG` ∈ {en, zh-CN, zh-HK} = the user's language. `$WORK` = the workspace (WorkBuddy: the current dated folder; else `./alexandria-work`).
 The command lines below are complete; prose shortens them to `alx …`. File arguments may be relative to `$WORK`.
@@ -61,7 +61,7 @@ Alexandria is deliberately long-form. The delivery bounds are hard:
 
 - **English:** 7,500–15,000 words.
 - **Simplified or Traditional Chinese:** 5,000–10,000 non-whitespace characters.
-- **Production target:** roughly ten or more finished PDF pages, depending on language, tables, and layout.
+- **Typical result:** about ten PDF pages; the word/character range above is the only length rule.
 
 Adapt the outline and research depth within those limits. A narrower subject belongs near the lower bound; a complex, well-documented subject belongs near the upper bound. If the first draft is short, deepen the explanation, history, counterevidence, alternatives, or implications through additional research. Do not pad with repetition. If it is long, compress background and repetition without deleting decisive evidence.
 
@@ -81,7 +81,7 @@ Read `references/research-protocol.md`. Create:
 3. an evidence ledger (`alx` keeps it in `ledger.json`);
 4. an explicit list of unresolved questions.
 
-Record the brief, the people involved and the coverage map in the ledger with a patch file (`brief`/`people`/`coverage`; the schema is `references/evidence-ledger.schema.json`, `alx` reports what is malformed and never blocks on it):
+Record the brief, the people involved and the coverage map in the ledger with a patch file (`brief`/`people`/`coverage`/`synthesis`, in whatever JSON shape you find useful; `alx` stores it as given):
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" ledger merge "$PATCH"`
 
 If parallel research is available and appropriate, divide coverage areas among research agents. Give each agent exclusive primary ownership and a disjoint numeric ID range—for example, `S1000–S1999` and `C1000–C1999`—while allowing it to flag cross-cutting evidence. Each returns ledger entries, contradictions, gaps, and a short synthesis—not a detached pile of URLs. The primary agent deduplicates sources and rewrites IDs and relationships before validation.
@@ -130,7 +130,7 @@ Before drafting:
 - verify quotations against the original source;
 - verify current facts close to delivery;
 - mark unsupported coverage areas as gaps rather than filling them with inference;
-- record the central judgment, counterevidence, adversarial tests and limitations in the ledger `synthesis` (a `ledger merge` patch).
+- record the central judgment, counterevidence, adversarial tests and limitations in the ledger `synthesis` (a `ledger merge` patch); `check` reads `central_judgment_claim_ids` and `counterevidence_claim_ids`, the rest is free-form.
 
 No source minimum is mandatory. Use enough independent evidence to support the claims and perspectives the report actually contains.
 
@@ -205,7 +205,7 @@ If Rewild takes the report below the minimum length, deepen the research, analys
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" snapshot`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" check`
 
-7 The two reviews. `review start rewild` and `review start content` each print a skeleton into `reviews/`; the skeleton lists every field; fill only those (the content review scores eight dimensions 1–5 with a rationale each and reviews every section's structure); never read scripts/ or references/*.schema.json; `review finish` names anything still missing and never blocks. A dimension below 4 or a substantive finding sends the report back for revision: revise, then `check --fix`, then finish the review again. When a separate reviewer is available, give it the draft and the checklist and ask for a patch or a list of changed passages, not an untraceable replacement; the primary agent reviews every material change against the evidence ledger. Include the three structural counts in Section 13 of `references/content-quality.md`: the closing-sentence census, the section-shape census, and the section-length spread. Record structural uniformity as a `structure` finding.
+7 The two reviews. `review start rewild` and `review start content` each write the note into `reviews/` with its metadata filled in; edit it in place and fill only the judgment fields it lists (the content review scores eight dimensions 1–5 with a rationale each and reviews every section's structure); `review finish` prints what is still empty or scored below 4, and finishes anyway. A dimension below 4 or a substantive finding sends the report back for revision: revise, then `check --fix`, then finish the review again. When a separate reviewer is available, give it the draft and the checklist and ask for a patch or a list of changed passages, not an untraceable replacement; the primary agent reviews every material change against the evidence ledger. Include the three structural counts in Section 13 of `references/content-quality.md`: the closing-sentence census, the section-shape census, and the section-length spread. Record structural uniformity as a `structure` finding.
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" review start rewild`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" review finish rewild`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" review start content`
@@ -213,11 +213,11 @@ If Rewild takes the report below the minimum length, deepen the research, analys
 
 ## 7. Issue, render and inspect the PDF
 
-8 `issue` re-reads a sample of the cited pages live (central-judgment citations first), drops whatever is still hard, prints what it dropped and every note, and writes the receipts; when a BLOCKED gate stands it prints `=== BLOCKED (fix, then alx issue again) ===` with the fixes, writes nothing, and exits 1 — fix and run it again. `render` produces both PDFs and a contact sheet each (it issues first if needed).
+8 `issue` drops whatever is still hard, prints what it dropped and every note, and writes the receipts; when a BLOCKED gate stands it prints `=== BLOCKED (fix, then alx issue again) ===` with the fixes, writes nothing, and exits 1 — fix and run it again. `issue --live` also re-reads a sample of the cited pages. `render` produces both PDFs and a contact sheet each (it issues first if needed).
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" issue`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" render`
 
-`render` then reopens each PDF and prints its checks (text, links, fonts, page count and size, bookmarks, near-blank pages, header collisions) as `<template> PDF check:` lines; fix what they name and render again.
+`render` then reopens each PDF and prints its checks (text, links, fonts, page size, bookmarks, near-blank pages, header collisions) as `<template> PDF check:` lines; fix what they name and render again.
 
 Render the PDF to images and inspect every page or a complete contact sheet (`pages-executive/`, `pages-atlas/`). For compatibility work, cross-render with `scripts/pdf_compatibility.py`; use PDFium, Poppler, MuPDF, and Ghostscript, plus PDFKit on macOS. Check the cover, contents, headings, tables, code, images, links, page numbers, long URLs, CJK glyphs, overflow, blank pages, and clipped content. Fix and rerender until clean. Do not use file size as a content or quality signal. When automated tools are unavailable, carry out the corresponding verification and review by hand and say so in the delivery.
 
@@ -249,4 +249,4 @@ One command at a time. Write claim and report text to files; never put it inside
 
 ## Clock
 
-60 min wall-clock from `init`; every command prints elapsed/remaining and nothing ever blocks on it. At remaining ≤ 15 min stop polishing: `alx issue`, `alx render`, deliver what `issue` accepts; a BLOCKED gate is fixed regardless of the clock, which never lifts a block.
+30 min wall-clock from `init`; every command prints elapsed/remaining and nothing ever blocks on it. At remaining ≤ 8 min stop polishing: `alx issue`, `alx render`, deliver what `issue` accepts; a BLOCKED gate is fixed regardless of the clock, which never lifts a block.

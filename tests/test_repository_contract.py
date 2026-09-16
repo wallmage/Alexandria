@@ -9,6 +9,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryContractTests(unittest.TestCase):
+    def test_clock_docs_use_thirty_and_eight_minutes(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("within about 30 min", skill)
+        self.assertIn("30 min wall-clock from `init`", skill)
+        self.assertIn("At remaining ≤ 8 min stop polishing", skill)
+        self.assertNotIn("within about 60 min", skill)
+        self.assertNotIn("At remaining ≤ 15 min", skill)
+        readmes = {
+            "README.md": ("预算 30 分钟。剩余时间不足 8 分钟时", "预算 60 分钟", "不足 15 分钟"),
+            "README.zh-CN.md": ("预算 30 分钟。剩余时间不足 8 分钟时", "预算 60 分钟", "不足 15 分钟"),
+            "README.zh-HK.md": ("預算 30 分鐘。剩餘時間不足 8 分鐘時", "預算 60 分鐘", "不足 15 分鐘"),
+            "README.en.md": (
+                "30-minute budget. When remaining time is 8 minutes or less",
+                "60-minute budget",
+                "15 minutes or less",
+            ),
+        }
+        for name, (keep, old_budget, old_stop) in readmes.items():
+            text = (ROOT / name).read_text(encoding="utf-8")
+            with self.subTest(name=name):
+                self.assertIn(keep, text)
+                self.assertNotIn(old_budget, text)
+                self.assertNotIn(old_stop, text)
+
     def test_skill_treats_every_external_source_as_untrusted_data(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
 
@@ -188,7 +212,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("nothing ships that failed a fabrication check", skill)
         self.assertIn("scripts/alx.py", skill)
         self.assertIn("review start content", skill)
-        self.assertIn("`review finish` names anything still missing and never blocks", skill)
+        self.assertIn("`review finish` prints what is still empty or scored below 4, and finishes anyway", skill)
         self.assertIn("counterevidence", protocol.casefold())
         self.assertIn("research stop", protocol.casefold())
         self.assertIn("tests/ci_render_matrix.py", workflow)

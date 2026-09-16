@@ -10,7 +10,7 @@ Alexandria 得名于亚历山大图书馆。那座图书馆曾怀抱汇聚世间
 
 [简体中文](README.md) · [English](README.en.md) · [繁體中文（香港）](README.zh-HK.md)
 
-Alexandria 研究任何主题，没有固定的选题限制，志向是汇聚全世界的知识。交付走 `alx`：init → fetch → claim add → check → snapshot → review → issue → render，预算 60 分钟。剩余时间不足 15 分钟时执行 `alx issue`，再执行 `alx render`。成品是专业制作的 PDF，配有紧跟在相关事实后的引用。
+Alexandria 研究任何主题，没有固定的选题限制，志向是汇聚全世界的知识。交付走 `alx`：init → fetch → claim add → check → snapshot → review → issue → render，预算 30 分钟。剩余时间不足 8 分钟时执行 `alx issue`，再执行 `alx render`。成品是专业制作的 PDF，配有紧跟在相关事实后的引用。
 
 ## 一套能研究任何主题的框架
 

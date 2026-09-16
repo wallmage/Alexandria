@@ -49,10 +49,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `source_evidence: []`.
 
 ### `ledger/schema` — W
-- **rule:** ledger fails `evidence-ledger.schema.json`. R29: the ledger is machine-written, so a schema defect is never something the model can repair. Empty top-level `coverage`/`sources`/`claims`, missing `$defs.brief`/`coverageItem`/`synthesis` required keys, empty minItems arrays, and hollow implication/takeaway/scenario/adversarialTest objects are WARN here.
-- **fix:** set field `<name>` in `<section>` via `alx ledger merge` (brief/people/coverage/synthesis); otherwise set field `<name>` in `ledger.json`; claims paths: set field `<name>` in `claims/*.json`, then `alx claim add claims/*.json`.
+- **rule:** jsonschema on `sources`/`claims` items only; every violation prints as `<json path>: <message>`. R29: the ledger is machine-written, so a schema defect is never something the model can repair. `brief`/`people`/`coverage`/`synthesis` are notes and are not validated here.
+- **fix:** set field `<name>` in `ledger.json` for `sources`; claims paths: set field `<name>` in `claims/*.json`, then `alx claim add claims/*.json`.
 - **remove:** n/a (warning; never blocks `issue`)
-- **example:** `coverage: []`; `brief: 'intended_reader' is a required property`; `synthesis.implications.0.statement` missing.
+- **example:** `claims.0.claim: ''`; `sources.0.url` missing.
 
 ### `ledger/key-claim` — W
 - **rule:** key/central claim rests on `unverified`/interested-only sources, or lacks `decision_relevance`/`what_would_change`. `unverified` counts as interested.
@@ -235,7 +235,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** C2 extract "4,000 documents" not in S1.txt; closest passage printed as a JSON literal.
 
 ### `fidelity/context-changed` — W
-- **rule:** the probe is present but the probe's own recorded context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing. R29: contexts are recorded per probe, not per claim, so a claim quoting one source twice no longer reports a change on a cache that was never refetched, and a probe with no recorded context is not compared.
+- **rule:** printed only under `alx issue --live`. The probe is present but the probe's own recorded context hash changed since research; correction markers (更正/撤回/correction/retract/erratum) are flagged when present. Never self-authorizing. R29: contexts are recorded per probe, not per claim, so a claim quoting one source twice no longer reports a change on a cache that was never refetched, and a probe with no recorded context is not compared.
 - **fix:** `alx fetch --id S<n> --refresh, then alx claim add claims/<file>` — the refresh alone keeps the recorded probe contexts; `claim add` re-confirms the extract and re-binds them.
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** S7 paragraph now begins "Correction:".
@@ -253,13 +253,13 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** S1.txt hand-edited after the fetch.
 
 ### `fidelity/unreachable` — W
-- **rule:** the source cannot be fetched (dns, timeout, tls, http-<status>, plaintext-http, oversize, redirect-loop, cross-domain-redirect). Availability, not fabrication, in both modes (R28): the cached text still decides fidelity.
+- **rule:** printed only under `alx issue --live`. The source cannot be fetched (dns, timeout, tls, http-<status>, plaintext-http, oversize, redirect-loop, cross-domain-redirect). Availability, not fabrication, in both modes (R28): the cached text still decides fidelity.
 - **fix:** `alx fetch --id S<n> --refresh`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** S9 UNREACHABLE (timeout) at issue time.
 
 ### `fidelity/undecodable` — W
-- **rule:** the fetched bytes do not decode (U+FFFD ratio > 1% after the charset ladder). Availability, not fabrication, in both modes (R28).
+- **rule:** printed only under `alx issue --live`. The fetched bytes do not decode (U+FFFD ratio > 1% after the charset ladder). Availability, not fabrication, in both modes (R28).
 - **fix:** `alx fetch --id S<n> --refresh`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** S6 UNDECODABLE (gb2312).
@@ -311,10 +311,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Reviews (`check` f / `content_gate`, `rewild_gate`, `alx`)
 
 ### `review/rewild` — W
-- **rule:** the blind-review note is missing, incomplete, or no longer matches the reviewed report/source/language/profile.
-- **fix:** `alx review start rewild --iter`
+- **rule:** `N paragraph(s) changed since the rewild review — re-read them if the change was substantive; alx review finish rewild re-stamps.`
+- **fix:** `alx review finish rewild`
 - **remove:** n/a (warning; never blocks `issue`)
-- **example:** note does not match the reviewed report: report_sha256.
+- **example:** 2 paragraph(s) changed since the rewild review.
 
 ### `review/content-missing` — W
 - **rule:** no finished content review.
@@ -323,10 +323,10 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** `reviews/content.json` absent.
 
 ### `review/content-stale` — W
-- **rule:** report or ledger changed beyond the §6.8 mechanical-delta allowlist since the content review.
-- **fix:** `alx review start content --iter`
+- **rule:** `N paragraph(s) changed since the content review — re-read them if the change was substantive; alx review finish content re-stamps.`
+- **fix:** `alx review finish content`
 - **remove:** n/a (warning; never blocks `issue`)
-- **example:** 2 paragraphs rewritten after `review finish content`.
+- **example:** 2 paragraph(s) changed since the content review.
 
 ### `content/score` — W
 - **rule:** a content-review score is missing or below 4.
@@ -396,6 +396,8 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 ## Removed families
 
 R29 deletions: `content/claim-support` and `content/claim-binding` — claim↔paragraph binding is the binding gate's job, and the review skeleton's `claim_support[]` field stays accepted but unused. `rewild/humanization` — `issue` creating the snapshot itself is recorded as a delivery disclosure, not a finding. Han-numeral quantities raise no `ledger/quantity` finding.
+
+R35 deletions: review-note metadata bindings (hash/path/profile/schema_version) — `issue` stamps them; content-review prose floors; evidence-ledger schema on `brief`/`people`/`coverage`/`synthesis`; PDF page-count minimum at `alx render`; live re-read by default at `issue`.
 
 ## Aliases
 

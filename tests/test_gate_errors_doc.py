@@ -68,6 +68,7 @@ class GateErrorsDocTests(unittest.TestCase):
         hard_refuse = {
             "integrity/encoding",
             "integrity/length",
+            "review/unfinished",
         }
         for name, letter in sorted(letters.items()):
             with self.subTest(family=name):

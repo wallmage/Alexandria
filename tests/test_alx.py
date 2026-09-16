@@ -1042,6 +1042,14 @@ class CheckTests(AlxTestCase):
         self.assertIn("1,204", report)
         code, out = self.run_in("snapshot")
         self.assertEqual(0, code, out)
+        from tests.test_alx import ReviewTests
+
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        reviews.dir = self.dir
+        reviews.root = self.root
+        reviews.run_alx = self.run_alx
+        reviews.run_in = self.run_in
+        reviews.finish_reviews()
         (self.dir / "report.md").write_text(
             report.replace("1,204", "1,304"), encoding="utf-8"
         )
@@ -1650,6 +1658,12 @@ class RenderTests(AlxTestCase):
         self.run_in("check", "--fix")
         self.pad_report()
         self.run_in("snapshot")
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        reviews.dir = self.dir
+        reviews.root = self.root
+        reviews.run_alx = self.run_alx
+        reviews.run_in = self.run_in
+        reviews.finish_reviews()
         code, out = self.run_in("render")
         self.assertEqual(0, code, out)
         self.assertIn("receipts/issue.json written", out)
@@ -5661,6 +5675,12 @@ class PartBFlowTests(AlxTestCase):
         self.run_in("check", "--fix")
         self.pad_report()
         self.run_in("snapshot")
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        reviews.dir = self.dir
+        reviews.root = self.root
+        reviews.run_alx = self.run_alx
+        reviews.run_in = self.run_in
+        reviews.finish_reviews()
         with ExitStack() as stack:
             helper = IssueTests("test_issue_writes_receipts_and_verification_note")
             helper.dir = self.dir
@@ -5936,6 +5956,12 @@ class HardRefuseTests(AlxTestCase):
         self.bootstrap()
         self.run_in("check", "--fix")
         self.pad_report()
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        reviews.dir = self.dir
+        reviews.root = self.root
+        reviews.run_alx = self.run_alx
+        reviews.run_in = self.run_in
+        reviews.finish_reviews()
         self.assertIsNone(alx.Workspace(self.dir).latest_snapshot())
         with ExitStack() as stack:
             self.helper().stub_gates(stack)
@@ -6050,6 +6076,12 @@ class HardRefuseTests(AlxTestCase):
         (self.dir / "report.md").write_text(restored, encoding="utf-8")
         self.pad_report()
         self.run_in("snapshot")
+        reviews = ReviewTests("test_start_copies_report_and_binds_hashes")
+        reviews.dir = self.dir
+        reviews.root = self.root
+        reviews.run_alx = self.run_alx
+        reviews.run_in = self.run_in
+        reviews.finish_reviews()
         with ExitStack() as stack:
             self.helper().stub_gates(stack)
             code, out = self.run_in("issue")

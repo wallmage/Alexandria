@@ -3316,17 +3316,49 @@ _SECTION_REVIEW_TEXT_KEYS = (
 )
 
 
-def _blank_review_message(ws, kind):
-    path = (ws.reviews / f"{kind}.json").resolve()
-    fields = (
+def _review_judgment_fields(kind):
+    return (
         "fidelity_checks, findings"
         if kind == "rewild"
         else "scores, checks, section_reviews, completion_note"
     )
+
+
+def _blank_review_message(ws, kind):
+    path = (ws.reviews / f"{kind}.json").resolve()
+    fields = _review_judgment_fields(kind)
     return (
         f"nothing filled yet — edit {path} ({fields}) and run "
         f"alx review finish {kind} again"
     )
+
+
+def _review_issue_block_lines(ws, state):
+    """R39.1: unfinished or blank review; one BLOCKED line per kind."""
+    lines = []
+    reviews = state.get("reviews") or {}
+    for kind in REVIEW_KINDS:
+        record = reviews.get(kind) or {}
+        path = ws.reviews / f"{kind}.json"
+        note = {}
+        if path.exists():
+            try:
+                loaded = _read_json(path)
+            except (OSError, json.JSONDecodeError):
+                loaded = {}
+            if isinstance(loaded, dict):
+                note = loaded
+        finished = bool(record.get("finished"))
+        if finished and not _is_blank_review_note(note, kind):
+            continue
+        reason = "not finished" if not finished else "empty"
+        fields = _review_judgment_fields(kind)
+        lines.append(
+            f"BLOCKED review/{kind}: reviews/{kind}.json is {reason} — "
+            f"edit {path.resolve()} ({fields}), then alx review finish {kind}, "
+            f"then alx issue"
+        )
+    return lines
 
 
 def _is_blank_review_note(note, kind):
@@ -4536,6 +4568,14 @@ def cmd_issue(args):
     ws, state, ledger = _open(args)
     lines = []
     delivery_notes = []
+    review_blocks = _review_issue_block_lines(ws, state)
+    if review_blocks:
+        state["last_issue"] = {"blocked": len(review_blocks)}
+        ws.save_state(state)
+        lines.append(BLOCKED_HEADER)
+        lines.extend(review_blocks)
+        _emit(ws, state, "issue", f"blocked {len(review_blocks)}", lines)
+        return 1
     findings = run_check(ws, state, ledger, fix=False)
     state, ledger, findings, _dropped = _drop_hard(
         ws, state, ledger, findings, lines

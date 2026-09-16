@@ -2,7 +2,7 @@
 
 Family → severity → rule → fix → remove → example. One section per family the code emits, grouped by the module that emits it.
 
-Severity is three-valued (ruling R33). **F = HARD-drop**: at `issue` the offending claim, paragraph or edit is removed or restored so it never ships; delivery continues; the removal is printed and noted. **B = HARD-refuse**: `issue` (or `render`) stops with exit 1 and the fix list; nothing is written until fixed; used only for whole-report defects that no drop can cure: no snapshot at `issue`, a report under two thirds of the length floor, an unrestorable encoding, a broken PDF at `render`. An unsupported figure, a Rewild meaning reversal and an unfixed critical review finding are warnings that `issue` repeats as reminders (user ruling, 09-16). HARD-refuse prints `=== BLOCKED (fix, then alx issue again) ===` and blocks `issue` and `render`. **W = WARN**: printed with a fix; never changes the deliverable. WARN is listed in the delivery notes and never blocks `issue`, `render` or `claim add`.
+Severity is three-valued (ruling R33). **F = HARD-drop**: at `issue` the offending claim, paragraph or edit is removed or restored so it never ships; delivery continues; the removal is printed and noted. **B = HARD-refuse**: `issue` (or `render`) stops with exit 1 and the fix list; nothing is written until fixed; used only for whole-report defects that no drop can cure: no snapshot at `issue`, a report under two thirds of the length floor, an unrestorable encoding, a broken PDF at `render`, an unfinished or empty review at `issue`. An unsupported figure, a Rewild meaning reversal and an unfixed critical review finding are warnings that `issue` repeats as reminders (user ruling, 09-16). HARD-refuse prints `=== BLOCKED (fix, then alx issue again) ===` and blocks `issue` and `render`. **W = WARN**: printed with a fix; never changes the deliverable. WARN is listed in the delivery notes and never blocks `issue`, `render` or `claim add`.
 
 Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
@@ -317,10 +317,16 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** 2 paragraph(s) changed since the rewild review.
 
 ### `review/content-missing` — W
-- **rule:** no finished content review.
+- **rule:** no finished content review. `check` warns; `issue` blocks via `review/unfinished` when a note is unfinished or empty.
 - **fix:** `alx review start content` when no iteration exists, else `alx review finish content`
-- **remove:** n/a (warning; never blocks `issue`)
+- **remove:** n/a (warning at `check`; `issue` refuses the unfinished or empty case)
 - **example:** `reviews/content.json` absent.
+
+### `review/unfinished` — B
+- **rule:** `issue` (and `render`'s automatic issue) is BLOCKED when, for either kind, the review was never finished or the note is blank. Message, one per kind: `BLOCKED review/<kind>: reviews/<kind>.json is <not finished|empty> — edit <abs path> (<fields>), then alx review finish <kind>, then alx issue`. A partially filled, finished note never blocks.
+- **fix:** `edit reviews/<kind>.json (<fields>), then alx review finish <kind>, then alx issue`
+- **remove:** n/a (HARD-refuse; nothing is written)
+- **example:** `reviews/content.json` still `status: draft`; or a finished note that is still the blank skeleton.
 
 ### `review/content-stale` — W
 - **rule:** `N paragraph(s) changed since the content review — re-read them if the change was substantive; alx review finish content re-stamps.`

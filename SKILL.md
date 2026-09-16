@@ -213,7 +213,7 @@ If Rewild takes the report below the minimum length, deepen the research, analys
 
 ## 7. Issue, render and inspect the PDF
 
-8 `issue` drops whatever is still hard, prints what it dropped and every note, and writes the receipts; when a BLOCKED gate stands it prints `=== BLOCKED (fix, then alx issue again) ===` with the fixes, writes nothing, and exits 1 — fix and run it again. `issue --live` also re-reads a sample of the cited pages. `render` produces both PDFs and a contact sheet each (it issues first if needed).
+8 `issue` drops whatever is still hard, prints what it dropped and every note, and writes the receipts; when a BLOCKED gate stands it prints `=== BLOCKED (fix, then alx issue again) ===` with the fixes, writes nothing, and exits 1 — fix and run it again. issue refuses only while a review is unfinished or empty. `issue --live` also re-reads a sample of the cited pages. `render` produces both PDFs and a contact sheet each (it issues first if needed).
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" issue`
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" render`
 

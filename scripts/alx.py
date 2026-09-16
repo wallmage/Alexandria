@@ -7,7 +7,6 @@ appends one worklog line and prints the elapsed/remaining footer last.
 """
 
 import argparse
-import functools
 import glob
 import hashlib
 import importlib.util
@@ -1774,24 +1773,9 @@ def _find_sources(ledger, value):
     return [part.strip() for part in str(value).split(",") if part.strip()]
 
 
-@functools.lru_cache(maxsize=1)
 def _script_character_maps():
-    """Single-character Simplified→Traditional and Traditional→Simplified maps."""
-    s2t = {}
-    t2s = {}
-    for line in validate_report.S2T_CHARACTER_MAP.read_text(
-        encoding="utf-8"
-    ).splitlines():
-        if not line or line.startswith("#"):
-            continue
-        source, targets = line.split("\t", 1)
-        targets = targets.split()
-        if not targets:
-            continue
-        s2t[source] = targets[0]
-        for target in targets:
-            t2s.setdefault(target, source)
-    return s2t, t2s
+    """One table for `find` and the fidelity probe (R37.2)."""
+    return source_fidelity._script_character_maps()
 
 
 def _script_variants(keyword):

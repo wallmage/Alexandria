@@ -690,7 +690,11 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
         if item.severity == "warn":
             return remedy("extend-report"), ""
         return "", remedy("delete-paragraph", paragraph=max(paragraphs, 1))
-    if family in {"integrity/structure", "integrity/date-line"}:
+    if family in {
+        "integrity/structure",
+        "integrity/date-line",
+        "integrity/language-mix",
+    }:
         return remedy("edit-prose"), ""
     if family == "binding/link-not-in-ledger":
         match = _URL_IN_MESSAGE.search(item.message)
@@ -1656,8 +1660,10 @@ def _fetch_one(ws, state, ledger, args, url, lines):
         return False
     aliases = [url]
     target = url
+    http_retry = None
     if parsed.scheme.casefold() == "http":
         target = urlunsplit(("https",) + tuple(parsed)[1:])
+        http_retry = url
     existing = _source_by_url(ledger, target) or _source_by_url(ledger, url)
     if existing is not None:
         lines.append(f"{existing['source_id']} already in the ledger: {existing['url']}")
@@ -1668,6 +1674,20 @@ def _fetch_one(ws, state, ledger, args, url, lines):
         refresh=False,
         timeout=FETCH_TIMEOUT_SECONDS,
     )
+    https_failed = None
+    if result.status == "unreachable":
+        if http_retry is None and result.reason_class == "tls":
+            http_retry = urlunsplit(("http",) + tuple(parsed)[1:])
+        if http_retry is not None:
+            https_failed = result
+            http_result = source_fidelity.fetch_document(
+                http_retry,
+                cache_dir=ws.sources,
+                refresh=False,
+                timeout=FETCH_TIMEOUT_SECONDS,
+                allow_plaintext_http=True,
+            )
+            result = http_result if http_result.status == "ok" else https_failed
     source_id = _next_id(ledger["sources"], "S", "source_id")
     if result.status == "unreachable":
         # The real class is printed, never relabelled `plaintext-http`: an agent
@@ -1697,6 +1717,16 @@ def _fetch_one(ws, state, ledger, args, url, lines):
     result.aliases = sorted(set(aliases))
     source_fidelity.write_cache(ws.sources, source_id, result)
     _upsert_source(ledger, source_id, result, args, result.aliases)
+    if https_failed is not None:
+        source = next(
+            item for item in ledger["sources"] if item.get("source_id") == source_id
+        )
+        source["url"] = http_retry
+        source["plain_http"] = f"https failed: {https_failed.reason_class}"
+        lines.append(
+            f"{source_id} fetched over plain http (https failed: "
+            f"{https_failed.reason_class})"
+        )
     text, _meta = cached(ws, source_id)
     lines.append(
         f"{source_id} OK {len(text)} chars {result.charset} "
@@ -2226,12 +2256,40 @@ def _unwrap_claim_items(payload):
     return [payload]
 
 
+def cmd_claim_schema(_args):
+    schema = _claim_input_schema()
+    required = set(schema.get("required") or [])
+    for name, spec in schema.get("properties", {}).items():
+        parts = [name]
+        types = spec.get("type")
+        if isinstance(types, list):
+            parts.append("|".join(types))
+        elif types:
+            parts.append(types)
+        enums = spec.get("enum")
+        if enums:
+            parts.append("|".join(str(item) for item in enums))
+        if name in required:
+            parts.append("required")
+        print(" ".join(parts))
+    print("gate-required: claim_id, claim, source_id, extract_or_location")
+    return 0
+
+
 def cmd_claim_add(args):
     ws, state, ledger = _open(args)
     items = []
     sources = {}
     for path in expand_file_globs([str(_input_path(args, item)) for item in args.files]):
-        payload = _read_json(path)
+        try:
+            payload = _read_json(path)
+        except json.JSONDecodeError as exc:
+            print(
+                f"{path} is not valid JSON: {exc.msg} "
+                f"at line {exc.lineno} column {exc.colno}",
+                file=sys.stderr,
+            )
+            return 1
         batch = _unwrap_claim_items(payload)
         for item in batch:
             if isinstance(item, dict) and item.get("claim_id"):
@@ -2256,6 +2314,13 @@ def cmd_claim_add(args):
         if assigned:
             batch_ids.append(item["claim_id"])
         claim_id = item.get("claim_id") or "<no claim_id>"
+        kind = item.get("kind")
+        kind_line = None
+        if isinstance(kind, str):
+            normalized_kind = kind.lower().replace(" ", "_").replace("-", "_")
+            if normalized_kind != kind:
+                item["kind"] = normalized_kind
+                kind_line = f"{claim_id} kind {kind!r} stored as {normalized_kind}"
         extras = []
         if unknown:
             extras.append(
@@ -2358,6 +2423,8 @@ def cmd_claim_add(args):
             lines.append(
                 f"{claim['claim_id']} {verb} ({len(claim['source_ids'])} sources)"
             )
+        if kind_line:
+            lines.append(kind_line)
         lines.extend(_warn_lines(claim_id, warns))
     ws.save_ledger(ledger)
     state["counters"]["claims"] = len(ledger["claims"])
@@ -2600,6 +2667,13 @@ def cmd_claim_drop(args):
 MERGEABLE_LEDGER_KEYS = frozenset(
     {"brief", "people", "coverage", "synthesis", "unresolved_questions"}
 )
+MERGEABLE_LEDGER_TYPES = {
+    "brief": dict,
+    "synthesis": dict,
+    "people": list,
+    "coverage": list,
+    "unresolved_questions": list,
+}
 
 
 def _deep_merge(target, patch):
@@ -2634,14 +2708,32 @@ def cmd_ledger_merge(args):
         for key in patch
         if key not in MERGEABLE_LEDGER_KEYS or key in ("sources", "claims")
     ]
+    applied = []
+    type_warns = []
     for key in merged:
         value = patch[key]
-        if isinstance(value, dict):
-            _deep_merge(ledger.setdefault(key, {}), value)
+        expected = MERGEABLE_LEDGER_TYPES[key]
+        if not isinstance(value, expected):
+            want = "object" if expected is dict else "list"
+            got = (
+                "object"
+                if isinstance(value, dict)
+                else "list"
+                if isinstance(value, list)
+                else type(value).__name__
+            )
+            type_warns.append(f"WARN {key}: expected {want}, got {got} — not merged")
+            continue
+        if isinstance(value, dict) and isinstance(ledger.get(key), dict):
+            _deep_merge(ledger[key], value)
         else:
             ledger[key] = value
+        applied.append(key)
     ws.save_ledger(ledger)
-    lines = [f"merged: {', '.join(merged)}"]
+    lines = []
+    if applied:
+        lines.append(f"merged: {', '.join(applied)}")
+    lines.extend(type_warns)
     for finding in validate_ledger.notes_shape_findings(ledger):
         lines.append(f"WARN {finding.message}")
     if blocked:
@@ -2841,7 +2933,12 @@ def _ledger_findings(ws, ledger):
         )
     )
     key_source_ids = set()
-    central = set(ledger.get("synthesis", {}).get("central_judgment_claim_ids", []))
+    synthesis = ledger.get("synthesis")
+    central = set(
+        synthesis.get("central_judgment_claim_ids", [])
+        if isinstance(synthesis, dict)
+        else []
+    )
     for claim in ledger.get("claims", []):
         if claim.get("importance") == "key" or claim.get("claim_id") in central:
             key_source_ids.update(claim.get("source_ids", []))
@@ -3182,18 +3279,23 @@ def _binding_findings(ws, state, ledger, *, fix=False, rewrite_out=None):
         if rewrite_out is not None:
             rewrite_out.extend(rewrites)
         paragraphs = {number: block for number, _s, _e, block in body_paragraphs(text)}
-        for claim in ledger.get("claims", []):
-            number = mapping.get(claim.get("claim_id"))
-            block = paragraphs.get(number)
-            if not block:
-                continue
-            prose = _excerpt_prose(block)
-            # The excerpt is re-derived whenever the bound paragraph no longer
-            # contains it, so a prose edit (humanization) does not leave every
-            # claim "cannot be located".
-            if not _excerpts_located(claim, prose):
-                claim["report_excerpts"] = [prose[:EXCERPT_CHARS]]
+        mapping, unbound = paragraph_mapping(ws, state, ledger, text)
+    excerpt_rewritten = False
+    for claim in ledger.get("claims", []):
+        number = mapping.get(claim.get("claim_id"))
+        block = paragraphs.get(number)
+        if not block:
+            continue
+        prose = _excerpt_prose(block)
+        # The excerpt is re-derived whenever the bound paragraph no longer
+        # contains it, so a prose edit (humanization) does not leave every
+        # claim "cannot be located".
+        if not _excerpts_located(claim, prose):
+            claim["report_excerpts"] = [prose[:EXCERPT_CHARS]]
+            excerpt_rewritten = True
+    if fix or excerpt_rewritten:
         ws.save_ledger(ledger)
+    if fix:
         _regenerate_sources(
             ws, _bound_ledger(state, ledger), state.get("lang", "en")
         )
@@ -3440,7 +3542,7 @@ def _note_completeness(ws, state, ledger, kind):
         ]
         if false:
             missing.append("fidelity_checks false: " + ", ".join(false))
-        for index, item in enumerate(note.get("findings") or [], start=1):
+        for index, item in enumerate(note.get("findings") or [], start=0):
             if not isinstance(item, dict):
                 continue
             category = item.get("category")
@@ -3474,7 +3576,7 @@ def _note_completeness(ws, state, ledger, kind):
         missing.append("section_reviews empty")
     if not note.get("completion_note"):
         missing.append("completion_note empty")
-    for index, item in enumerate(note.get("findings") or [], start=1):
+    for index, item in enumerate(note.get("findings") or [], start=0):
         if not isinstance(item, dict):
             continue
         if item.get("severity") == "critical" and item.get("disposition") != "fixed":
@@ -4048,7 +4150,7 @@ CONTENT_NOTE_GUIDE = (
 REVIEW_SET_EXAMPLE = {
     "content": "scores.question_answered.score=5 "
     "'scores.question_answered.rationale=each question has its own section'",
-    "rewild": "fidelity_checks.causality=true 'findings=[]'",
+    "rewild": "findings.0.disposition=resolved fidelity_checks.causality=true",
 }
 
 
@@ -4064,7 +4166,10 @@ def _rewild_note_guide():
             "findings[]",
             "may stay empty",
             "keys: category style|region|fidelity, finding, disposition "
-            "resolved|rejected, reason",
+            "resolved|rejected, reason. resolved = fixed OR checked and "
+            "nothing to change; rejected = the finding stands and was not "
+            "applied; a region/fidelity check that found nothing is resolved "
+            "(or not recorded at all)",
         ),
     )
 
@@ -4265,7 +4370,8 @@ def _assignment_tokens(path):
         match = _PATH_SEGMENT.match(path, pos)
         if match is None or match.start() != pos:
             raise KeyError(path)
-        tokens.append(match.group(1))
+        name = match.group(1)
+        tokens.append(int(name) if name.isdigit() else name)
         if match.group(2) is not None:
             tokens.append(int(match.group(2)))
         pos = match.end()
@@ -4280,8 +4386,10 @@ def _set_note_path(note, path, value):
     for i, token in enumerate(tokens[:-1]):
         nxt = tokens[i + 1]
         if isinstance(token, int):
-            if not isinstance(cur, list) or token >= len(cur):
+            if not isinstance(cur, list) or token > len(cur):
                 raise KeyError(path)
+            if token == len(cur):
+                cur.append([] if isinstance(nxt, int) else {})
             cur = cur[token]
             continue
         if token not in cur:
@@ -4289,9 +4397,12 @@ def _set_note_path(note, path, value):
         cur = cur[token]
     last = tokens[-1]
     if isinstance(last, int):
-        if not isinstance(cur, list) or last >= len(cur):
+        if not isinstance(cur, list) or last > len(cur):
             raise KeyError(path)
-        cur[last] = value
+        if last == len(cur):
+            cur.append(value)
+        else:
+            cur[last] = value
         return
     cur[last] = value
 
@@ -5157,6 +5268,8 @@ def build_parser():
     claim_bind.add_argument("claims", nargs="+", metavar="C<n>[:<paragraph>]")
     claim_bind.add_argument("--paragraph", type=int)
     claim_bind.set_defaults(handler=cmd_claim_bind)
+    claim_schema = claim_sub.add_parser("schema")
+    claim_schema.set_defaults(handler=cmd_claim_schema)
 
     ledger = subparsers.add_parser("ledger", help="ledger edits")
     ledger_sub = ledger.add_subparsers(dest="ledger_command", required=True)

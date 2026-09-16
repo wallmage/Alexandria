@@ -133,7 +133,7 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** C4 supports C2, and C2 was dropped.
 
 ### `ledger/coverage` — W
-- **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims); a coverage item that is not an object, an unknown `status`, or `claim_ids` that is not a list (`ledger merge` prints these too; the value is stored as given). Readers accept `claim_ids` or `claims` (list of strings). Merge warns once per item with neither key: `WARN coverage[3] '<area>': no claim_ids — check reads claim_ids: ["C1", …]`.
+- **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims); a coverage item that is not an object, an unknown `status` (`unstarted|in_progress|supported|disputed|gap`), or `claim_ids` that is not a list (`ledger merge` prints these too; the value is stored as given). Readers accept `claim_ids` or `claims` (list of strings). Merge warns once per item with neither key: `WARN coverage[3] '<area>': no claim_ids — check reads claim_ids: ["C1", …]`.
 - **fix:** `set coverage[i].claim_ids to supported claim ids in a patch file, then alx ledger merge <patch>`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** area `supported` with an empty `claim_ids`.
@@ -187,6 +187,12 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx check --fix` when only the whitespace of the line under the H1 is wrong; otherwise (placement or format) edit prose (warning; never blocks).
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `> 2026年9月14日` vs ledger `2026-09-15`.
+
+### `integrity/language-mix` — W
+- **rule:** zh-CN/zh-HK body prose has a run of ≥ 4 consecutive ASCII words (letters/digits, space-separated). Markdown links, URLs, code spans, and the Sources section are excluded. At most 5 items; one family line. Never blocks.
+- **fix:** edit prose (warning; never blocks)
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `paragraph 3: "The archive released many documents"`
 
 ### `integrity/length` — B/W
 - **rule:** report length outside the band (en 7,500–15,000 words; zh 5,000–10,000 report-body characters), counted on the visible prose body — front matter, headings, Sources excluded (`report_blocks.report_length`). `alx check` prints `length <count> <unit>; floor <n>, ceiling <m>`. HARD-refuse when below two thirds of the floor (en < 5,000 words; zh-CN/zh-HK < 3,333 non-whitespace chars). Between two thirds and the floor stays WARN. The ceiling stays WARN; SKILL.md keeps the target.

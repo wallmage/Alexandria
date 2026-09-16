@@ -461,10 +461,17 @@ def _map_fetch_exception(url, exc):
     return _empty_fetch(url, status="unreachable", reason_class=klass, reason=message)
 
 
-def fetch_document(url, *, cache_dir=None, refresh=False, timeout=DEFAULT_TIMEOUT_SECONDS):
+def fetch_document(
+    url,
+    *,
+    cache_dir=None,
+    refresh=False,
+    timeout=DEFAULT_TIMEOUT_SECONDS,
+    allow_plaintext_http=False,
+):
     """Fetch one URL through the production transport and decode it."""
     raw_url = str(url or "")
-    if raw_url.casefold().startswith("http://"):
+    if raw_url.casefold().startswith("http://") and not allow_plaintext_http:
         return _empty_fetch(
             raw_url,
             status="unreachable",
@@ -500,7 +507,9 @@ def fetch_document(url, *, cache_dir=None, refresh=False, timeout=DEFAULT_TIMEOU
                             text_sha256=str(stored.get("text_sha256") or ""),
                         )
     try:
-        fetched = default_fetcher(raw_url, timeout=timeout)
+        fetched = default_fetcher(
+            raw_url, timeout=timeout, allow_plaintext_http=allow_plaintext_http
+        )
     except (URLError, OSError, ValueError, UnicodeError, ssl.SSLError) as exc:
         mapped = _map_fetch_exception(raw_url, exc)
         if mapped.reason_class == "cross-domain-redirect":
@@ -542,7 +551,7 @@ def fetch_document(url, *, cache_dir=None, refresh=False, timeout=DEFAULT_TIMEOU
     )
 
 
-def validate_public_http_url(url, *, resolver=None):
+def validate_public_http_url(url, *, resolver=None, allow_plaintext_http=False):
     """Resolve one HTTPS target or reject it before any connection."""
     resolver = resolver or socket.getaddrinfo
     try:
@@ -551,12 +560,12 @@ def validate_public_http_url(url, *, resolver=None):
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Malformed source URL: {url!r}") from exc
     scheme = parsed.scheme.casefold()
-    if scheme == "http":
+    if scheme == "http" and not allow_plaintext_http:
         raise ValueError(
             "Plaintext HTTP sources are not accepted; "
             "source URLs must use HTTPS."
         )
-    elif scheme != "https":
+    elif scheme not in {"http", "https"}:
         raise ValueError("Source URLs must use HTTPS.")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("Source URLs may not contain credentials.")
@@ -1165,10 +1174,13 @@ def default_fetcher(
     *,
     timeout=DEFAULT_TIMEOUT_SECONDS,
     resolver=None,
+    allow_plaintext_http=False,
 ):
     """Fetch one public source through a DNS-pinned, redirect-safe transport."""
     resolver = resolver or socket.getaddrinfo
-    current = validate_public_http_url(url, resolver=resolver)
+    current = validate_public_http_url(
+        url, resolver=resolver, allow_plaintext_http=allow_plaintext_http
+    )
     original_host = current.host
     visited = set()
     redirects = []
@@ -1205,6 +1217,7 @@ def default_fetcher(
             redirected = validate_public_http_url(
                 urljoin(current.url, location),
                 resolver=resolver,
+                allow_plaintext_http=allow_plaintext_http,
             )
             if current.scheme == "https" and redirected.scheme != "https":
                 raise ValueError("HTTPS source redirected to insecure HTTP.")

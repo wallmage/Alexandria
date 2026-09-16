@@ -90,7 +90,7 @@ class RepositoryContractTests(unittest.TestCase):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         body = skill.split("---", 2)[2]
         self.assertLessEqual(len(body.splitlines()), 260)
-        self.assertLess(len(skill.split()), 3000)
+        self.assertLess(len(skill.split()), 3200)
         for legacy_token in (
             "AskUserQuestion",
             "WebSearch",

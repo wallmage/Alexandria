@@ -5,6 +5,7 @@ import json
 import re
 import shlex
 import shutil
+import ssl
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from scripts import alx
+from scripts import alx, source_fidelity
 from tests.source_fidelity_transport import mock_production_transport
 
 PAGE = """<html><head><title>Ledger Study</title>
@@ -456,6 +457,61 @@ class FetchTests(AlxTestCase):
         self.assertNotIn("plaintext-http", out)
         self.assertIn("https was tried in place of http://dead.example.org/study", out)
 
+    def _plain_http_fetcher(self, *, http_ok=True):
+        def fake_fetcher(url, **_kwargs):
+            if str(url).startswith("https://"):
+                raise ssl.SSLError("tls")
+            if not http_ok:
+                raise TimeoutError("timeout")
+            html = PAGE * 3
+            return source_fidelity.FetchedDocument(
+                text=html,
+                final_url=url,
+                redirects=(),
+                response_sha256="0" * 64,
+                content_type="text/html",
+                byte_count=len(html.encode("utf-8")),
+                charset="utf-8",
+            )
+
+        return fake_fetcher
+
+    def test_http_fallback_stores_plain_http_when_https_fails(self):
+        self.init()
+        with mock.patch.object(
+            source_fidelity, "default_fetcher", side_effect=self._plain_http_fetcher()
+        ):
+            code, out = self.run_in("fetch", "http://plain.example.org/study")
+        self.assertEqual(0, code, out)
+        self.assertIn("fetched over plain http (https failed: tls)", out)
+        source = self.ledger()["sources"][0]
+        self.assertEqual("http://plain.example.org/study", source["url"])
+        self.assertEqual("https failed: tls", source["plain_http"])
+
+    def test_http_fallback_both_fail_keeps_unreachable(self):
+        self.init()
+        with mock.patch.object(
+            source_fidelity,
+            "default_fetcher",
+            side_effect=self._plain_http_fetcher(http_ok=False),
+        ):
+            code, out = self.run_in("fetch", "http://plain.example.org/study")
+        self.assertEqual(0, code, out)
+        self.assertIn("UNREACHABLE (tls:", out)
+        self.assertEqual([], self.ledger()["sources"])
+
+    def test_https_tls_failure_retries_plain_http(self):
+        self.init()
+        with mock.patch.object(
+            source_fidelity, "default_fetcher", side_effect=self._plain_http_fetcher()
+        ):
+            code, out = self.run_in("fetch", "https://plain.example.org/study")
+        self.assertEqual(0, code, out)
+        self.assertIn("fetched over plain http (https failed: tls)", out)
+        source = self.ledger()["sources"][0]
+        self.assertEqual("http://plain.example.org/study", source["url"])
+        self.assertEqual("https failed: tls", source["plain_http"])
+
     def test_non_http_scheme_is_rejected(self):
         self.init()
         code, out = self.run_in("fetch", "ftp://example.org/study")
@@ -644,6 +700,37 @@ class ClaimTests(AlxTestCase):
             (self.dir / "sources" / "S1.meta.json").read_text(encoding="utf-8")
         )
         self.assertEqual(meta["fetched_at"][:10], claim["verified_at"])
+
+    def test_claim_add_normalizes_kind_and_warns(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        batch = self.write_json(
+            "claims.json", [dict(CLAIM_ONE, kind="reported claim")]
+        )
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        self.assertIn("C1 kind 'reported claim' stored as reported_claim", out)
+        self.assertEqual("reported_claim", self.ledger()["claims"][0]["kind"])
+
+    def test_claim_add_invalid_json_is_one_line(self):
+        self.init()
+        self.fetch("https://example.org/study")
+        path = self.root / "claims.json"
+        path.write_text('{"a":1}}', encoding="utf-8")
+        code, out = self.run_in("claim", "add", path)
+        self.assertEqual(1, code, out)
+        self.assertIn("is not valid JSON: Extra data at line 1 column 8", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_claim_schema_lists_properties_and_gate_fields(self):
+        code, out = self.run_in("claim", "schema")
+        self.assertEqual(0, code, out)
+        self.assertIn("kind fact|reported_claim|estimate|analysis", out)
+        self.assertIn("claim_id string required", out)
+        self.assertIn("source_evidence array required", out)
+        self.assertIn(
+            "gate-required: claim_id, claim, source_id, extract_or_location", out
+        )
 
     def test_missing_claim_id_fails_while_a_warned_claim_is_upserted(self):
         # A2: a quantity not in the extract/page warns; the claim still lands.
@@ -1009,18 +1096,16 @@ class LedgerMergeTests(AlxTestCase):
         self.assertEqual("a call", ledger["brief"]["decision_or_use"])
         self.assertNotIn("notes", ledger)
 
-    def test_merge_arbitrary_synthesis_prints_only_merged(self):
+    def test_merge_list_synthesis_warns_and_skips(self):
         self.bootstrap()
-        patch = self.write_json("syn.json", {"synthesis": "arbitrary-shape notes"})
+        before = self.ledger()["synthesis"]
+        patch = self.write_json("syn.json", {"synthesis": ["not", "an", "object"]})
         code, out = self.run_in("ledger", "merge", patch)
         self.assertEqual(0, code, out)
-        content = [
-            line
-            for line in out.splitlines()
-            if line and not line.startswith("elapsed")
-        ]
-        self.assertEqual(["merged: synthesis"], content)
-        self.assertEqual("arbitrary-shape notes", self.ledger()["synthesis"])
+        self.assertIn("WARN synthesis: expected object, got list — not merged", out)
+        self.assertEqual(before, self.ledger()["synthesis"])
+        code, out = self.run_in("check")
+        self.assertEqual(0, code, out)
 
 
 class CheckTests(AlxTestCase):
@@ -1111,18 +1196,35 @@ class CheckTests(AlxTestCase):
         self.assertIn("C2=2", out)
 
     def test_unbound_excerpts_are_hard_and_fix_writes_them(self):
-        """Ruling R3: the schema clause is gone; §6.7(c) reports the gap."""
+        """Ruling R3: the schema clause is gone; §6.7(c) writes a mapped excerpt."""
         self.bootstrap()
         code, out = self.run_in("check")
         self.assertEqual(0, code)
-        self.assertIn("binding/excerpt-missing", out)
         self.assertNotIn("[ledger/schema]", out)
-        _code, out = self.run_in("check", "--fix")
         self.assertNotIn("binding/excerpt-missing", out)
         claim = next(
             claim for claim in self.ledger()["claims"] if claim["claim_id"] == "C1"
         )
         self.assertTrue(claim["report_excerpts"])
+
+    def test_plain_check_rederives_stale_excerpt(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        claim = next(
+            item for item in self.ledger()["claims"] if item["claim_id"] == "C1"
+        )
+        excerpt = claim["report_excerpts"][0]
+        path = self.dir / "report.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace(excerpt, "Reworded after Rewild. ", 1), encoding="utf-8")
+        code, out = self.run_in("check")
+        self.assertEqual(0, code, out)
+        self.assertNotIn("binding/excerpt-missing", out)
+        updated = next(
+            item for item in self.ledger()["claims"] if item["claim_id"] == "C1"
+        )
+        self.assertTrue(updated["report_excerpts"])
+        self.assertNotEqual(excerpt, updated["report_excerpts"][0])
 
     def test_check_prints_grouped_output_and_status_line(self):
         self.bootstrap()
@@ -2452,10 +2554,10 @@ class IntegrationHoleTests(AlxTestCase):
             encoding="utf-8",
         )
         code, out = self.run_in("check", "--verbose")
-        # R32: the stale excerpt prints again as a content/check WARN (as at
-        # 4a1825c); it informs and never blocks.
+        # H: a bound reworded paragraph re-derives the excerpt on plain check.
         self.assertEqual(0, code, out)
-        self.assertIn("cannot be located in the report", out)
+        self.assertNotIn("cannot be located in the report", out)
+        self.assertNotIn("binding/excerpt-missing", out)
 
     def test_a_missing_citation_asks_for_the_link_not_a_re_review(self):
         self.started_content_review()
@@ -2607,12 +2709,9 @@ class IntegrationHoleTests(AlxTestCase):
             encoding="utf-8",
         )
         _code, out = self.run_in("check")
+        self.assertNotIn("C1 is included in the report with no", out)
         line = self.line_with(out, "C2 is included in the report with no")
-        self.assertIn(
-            "Fix: write [C2] at the end of the sentence in paragraph", line
-        )
-        bound = self.line_with(out, "C1 is included in the report with no")
-        self.assertIn("Fix: alx check --fix", bound)
+        self.assertIn("write [C2]", line)
 
 
 CLAIM_THREE = {
@@ -3350,6 +3449,36 @@ class ParkedReviewNoteTests(AlxTestCase):
                 self.assertIn(name, out)
         self.assertIn("disposition resolved|rejected", out)
         self.assertIn("alx review finish rewild", out)
+
+    def test_review_set_appends_findings_on_a_fresh_rewild_skeleton(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        self.run_in("snapshot")
+        self.run_in("review", "start", "rewild")
+        code, out = self.run_in(
+            "review",
+            "set",
+            "rewild",
+            "findings.0.category=style",
+            "findings.0.finding=x",
+            "findings.0.disposition=resolved",
+            "findings.0.reason=y",
+            "fidelity_checks.causality=true",
+        )
+        self.assertEqual(0, code, out)
+        note = json.loads((self.dir / "reviews" / "rewild.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            [
+                {
+                    "category": "style",
+                    "finding": "x",
+                    "disposition": "resolved",
+                    "reason": "y",
+                }
+            ],
+            note["findings"],
+        )
+        self.assertTrue(note["fidelity_checks"]["causality"])
 
 
 class ClaimInputRoundTripTests(AlxTestCase):

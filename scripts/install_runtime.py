@@ -99,7 +99,9 @@ def install_fonts():
 
 
 def verify_runtime():
-    for requirement in (ROOT / "requirements.txt").read_text().splitlines():
+    for requirement in (ROOT / "requirements.txt").read_text(
+        encoding="utf-8"
+    ).splitlines():
         name, version = requirement.split("==")
         if importlib.metadata.version(name) != version:
             raise RuntimeError(f"Incorrect installed version: {name}")

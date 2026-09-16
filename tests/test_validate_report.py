@@ -1209,6 +1209,61 @@ class FindingClassTests(unittest.TestCase):
         self.assertEqual("warn", findings[0].severity)
         self.assertEqual([], hard_errors(findings))
 
+    def test_language_mix_flags_an_english_run_in_zh(self):
+        report = (
+            "# 题目\n\n> 问题\n> 2026年9月14日\n\n"
+            "## 正文\n\n"
+            "档案公布了 The archive released many documents 这一事实。\n\n"
+            "## Sources\n\n"
+            "- [x](https://example.org/study)\n"
+        )
+        mix = [
+            item
+            for item in validate_report.integrity_findings(
+                report, DATED_LEDGER, lang="zh-CN"
+            )
+            if item.family == "integrity/language-mix"
+        ]
+        self.assertEqual(1, len(mix))
+        self.assertEqual("warn", mix[0].severity)
+        self.assertIn("paragraph 1:", mix[0].message)
+        self.assertIn("The archive released many documents", mix[0].message)
+        self.assertEqual([], hard_errors(mix))
+
+    def test_language_mix_ignores_a_short_proper_name(self):
+        report = (
+            "# 题目\n\n> 问题\n> 2026年9月14日\n\n"
+            "## 正文\n\n"
+            "材料藏于 Hoover Institution 档案室。\n\n"
+            "## Sources\n\n"
+            "- [x](https://example.org/study)\n"
+        )
+        mix = [
+            item
+            for item in validate_report.integrity_findings(
+                report, DATED_LEDGER, lang="zh-CN"
+            )
+            if item.family == "integrity/language-mix"
+        ]
+        self.assertEqual([], mix)
+
+    def test_language_mix_ignores_four_claim_markers(self):
+        report = (
+            "# 题目\n\n> 问题\n> 2026年9月14日\n\n"
+            "## 正文\n\n"
+            "档案公布了这一事实。[C1] [C2] [C3] [C4]\n\n"
+            "## Sources\n\n"
+            "- [x](https://example.org/study)\n"
+        )
+        mix = [
+            item
+            for item in validate_report.integrity_findings(
+                report, DATED_LEDGER, lang="zh-CN"
+            )
+            if item.family == "integrity/language-mix"
+        ]
+        self.assertEqual([], mix)
+
     def test_altered_quotation_is_hard_and_a_removed_one_only_warns(self):
         snapshot = 'The memo said "alpha beta gamma delta" in full.'
         header = "# Title\n\n> 14 September 2026\n\n"

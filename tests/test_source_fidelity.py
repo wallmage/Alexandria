@@ -363,6 +363,25 @@ class SafeTargetTests(unittest.TestCase):
         self.assertEqual("example.com", target.host)
         self.assertEqual(("93.184.216.34",), target.addresses)
 
+    def test_plaintext_http_is_accepted_only_when_allowed(self):
+        with self.assertRaises(ValueError):
+            source_fidelity.validate_public_http_url(
+                "http://example.com/page", resolver=self.public_resolver
+            )
+        target = source_fidelity.validate_public_http_url(
+            "http://example.com/page",
+            resolver=self.public_resolver,
+            allow_plaintext_http=True,
+        )
+        self.assertEqual("http", target.scheme)
+        self.assertEqual(80, target.port)
+        with self.assertRaises(ValueError):
+            source_fidelity.validate_public_http_url(
+                "ftp://example.com/page",
+                resolver=self.public_resolver,
+                allow_plaintext_http=True,
+            )
+
     def test_resolved_addresses_are_accepted_regardless_of_range(self):
         target = source_fidelity.validate_public_http_url(
             "https://example.com/",

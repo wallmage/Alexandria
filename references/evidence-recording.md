@@ -12,7 +12,7 @@ A complete entry records the following, though the gate still asks only for the 
 
 - a stable claim ID;
 - a precise claim;
-- fact, reported claim, estimate, or analysis;
+- fact, reported_claim, estimate, or analysis;
 - source ID and public HTTP(S) URL;
 - publication and access dates;
 - `undated_reason` when a living source has no publication date;
@@ -21,7 +21,7 @@ A complete entry records the following, though the gate still asks only for the 
 - evidence type, source family, role, and independence.
 
 Every other field is optional and the gate never asks for it: `kind` (fact,
-reported claim, estimate, analysis), importance, confidence, limitations,
+reported_claim, estimate, analysis), importance, confidence, limitations,
 `decision_relevance`, `reasoning`, `what_would_change`, `assumptions`,
 triangulation status, and supporting or contradicting claim IDs.
 Record them when they help the reader; never to satisfy a checker.

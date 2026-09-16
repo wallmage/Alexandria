@@ -101,6 +101,7 @@ FAMILIES = (
     "integrity/date-line",
     "integrity/length",
     "integrity/quotation-lost",
+    "integrity/language-mix",
     "binding/link-not-in-ledger",
     "binding/claim-paragraph",
     "binding/sources-section",
@@ -108,6 +109,11 @@ FAMILIES = (
 _QUOTE_SPAN_RE = re.compile(
     r"「[^」]{4,}」|『[^』]{4,}』|[“][^”]{4,}[”]|[‘][^’]{4,}[’]|\"[^\"\n]*\""
 )
+_MD_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*\)")
+_CODE_SPAN_RE = re.compile(r"`[^`]+`")
+_URL_RE = re.compile(r"https?://\S+", re.I)
+_CLAIM_MARKER_RE = re.compile(r"\[[CS]\d+(?:,\s*[CS]\d+)*\]")
+_ASCII_WORD_RE = re.compile(r"^[A-Za-z0-9]+$")
 ROOT = Path(__file__).resolve().parents[1]
 S2T_CHARACTER_MAP = (
     ROOT / "references" / "rewild" / "opencc" / "STCharacters.txt"
@@ -721,6 +727,37 @@ def binding_findings(text, ledger):
     return findings
 
 
+def _language_mix_findings(text, lang):
+    """WARN: ≥4 consecutive ASCII words in zh body prose (R15 language-mix)."""
+    if lang not in {"zh-CN", "zh-HK"}:
+        return []
+    findings = []
+    for number, block in split_body_paragraphs(text):
+        stripped = _MD_LINK_RE.sub(" ", block)
+        stripped = _CODE_SPAN_RE.sub(" ", stripped)
+        stripped = _URL_RE.sub(" ", stripped)
+        stripped = _CLAIM_MARKER_RE.sub(" ", stripped)
+        run = []
+        for token in stripped.split() + ["."]:
+            token = token.strip(".,;:!?()[]\"'“”‘’—-")
+            if _ASCII_WORD_RE.match(token):
+                run.append(token)
+                continue
+            if len(run) >= 4:
+                snippet = " ".join(run)[:60]
+                findings.append(
+                    _finding(
+                        "integrity/language-mix",
+                        f'paragraph {number}: "{snippet}"',
+                        severity="warn",
+                    )
+                )
+                if len(findings) >= 5:
+                    return findings
+            run = []
+    return findings
+
+
 def integrity_findings(text, ledger, *, snapshot_text=None, lang):
     """Integrity checks from spec §6.7(a)."""
     findings = []
@@ -823,6 +860,7 @@ def integrity_findings(text, ledger, *, snapshot_text=None, lang):
                     remove="alx snapshot --restore" if altered else "",
                 )
             )
+    findings.extend(_language_mix_findings(text, lang))
     return findings
 
 

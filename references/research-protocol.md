@@ -13,6 +13,8 @@ Example:
 | High | Outcomes | What happened or is likely to happen? | Measurements, studies, filings, datasets | Main estimates include uncertainty and alternatives |
 | Medium | Context | Which history changes the interpretation? | Original and later historical sources | The reader can understand the present without a chronology dump |
 
+Ledger coverage rows use `status` `unstarted|in_progress|supported|disputed|gap`. Example: `{"area":"…","status":"supported","claim_ids":["C1"]}`.
+
 ## Query design
 
 Use several query families:

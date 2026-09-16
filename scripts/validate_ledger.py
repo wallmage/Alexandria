@@ -2486,7 +2486,9 @@ def _reference_findings(data, cache_dir=None):
         if published and accessed and published > accessed:
             errors.append(f"{source_id} is published after it was accessed.")
         url = _text(source.get("url"))
-        if url and not url.lower().startswith("https://"):
+        if url and not url.lower().startswith("https://") and not source.get(
+            "plain_http"
+        ):
             errors.append(
                 _f(
                     "ledger/https",

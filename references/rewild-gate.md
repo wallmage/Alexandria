@@ -66,7 +66,7 @@ not require `--iter`.
 Edit it in place. Fill `fidelity_checks` (four booleans) and `findings[]`
 (`category` style|region|fidelity — other words are accepted as style;
 `finding`; `disposition` resolved|rejected — other words are accepted as rejected;
-`reason`). Then `alx review finish rewild`.
+`reason`). `resolved` = fixed OR checked and nothing to change; `rejected` = the finding stands and was not applied; a region/fidelity check that found nothing is `resolved` (or not recorded at all). Then `alx review finish rewild`.
 
 ```json
 {

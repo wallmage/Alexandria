@@ -1688,12 +1688,21 @@ def _fetch_one(ws, state, ledger, args, url, lines):
                 allow_plaintext_http=True,
             )
             result = http_result if http_result.status == "ok" else https_failed
+        else:
+            http_result = None
+    else:
+        http_result = None
     source_id = _next_id(ledger["sources"], "S", "source_id")
     if result.status == "unreachable":
         # The real class is printed, never relabelled `plaintext-http`: an agent
         # told the host is dead does not retry it over https.
         suffix = " — not added"
-        if target != url:
+        if https_failed is not None and http_result is not None:
+            suffix += (
+                f"; https ({https_failed.reason_class}) and plain http "
+                f"({http_result.reason_class}) both failed"
+            )
+        elif target != url:
             suffix += f"; https was tried in place of {url}"
         lines.append(
             f"{source_id} UNREACHABLE ({result.reason_class}: {result.reason})"
@@ -1750,6 +1759,7 @@ def _refresh_one(ws, state, ledger, args, source_id, lines):
         cache_dir=ws.sources,
         refresh=True,
         timeout=FETCH_TIMEOUT_SECONDS,
+        allow_plaintext_http=bool(source.get("plain_http")),
     )
     if result.status != "ok":
         lines.append(

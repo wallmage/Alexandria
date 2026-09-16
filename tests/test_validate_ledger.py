@@ -2738,6 +2738,16 @@ class ResilienceLedgerApiTests(unittest.TestCase):
         families = {item.family for item in validate_ledger.collect_findings(data)}
         self.assertNotIn("ledger/https", families)
 
+    def test_plain_http_source_passes_schema_check(self):
+        data = valid_quality_ledger()
+        data["sources"][0]["plain_http"] = "https failed: tls"
+        unexpected = [
+            item
+            for item in validate_ledger.collect_findings(data)
+            if item.family == "ledger/schema" and "plain_http" in item.message
+        ]
+        self.assertEqual([], unexpected)
+
     def test_bare_year_is_covered_by_any_date_of_that_year(self):
         """A5: the date-granularity family is gone; the year is simply covered."""
         self.assertEqual(

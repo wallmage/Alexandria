@@ -455,7 +455,7 @@ class FetchTests(AlxTestCase):
         self.assertEqual(0, code)
         self.assertIn("(dns:", out)
         self.assertNotIn("plaintext-http", out)
-        self.assertIn("https was tried in place of http://dead.example.org/study", out)
+        self.assertIn("https (dns) and plain http (dns) both failed", out)
 
     def _plain_http_fetcher(self, *, http_ok=True):
         def fake_fetcher(url, **_kwargs):
@@ -498,7 +498,26 @@ class FetchTests(AlxTestCase):
             code, out = self.run_in("fetch", "http://plain.example.org/study")
         self.assertEqual(0, code, out)
         self.assertIn("UNREACHABLE (tls:", out)
+        self.assertIn(
+            "https (tls) and plain http (timeout) both failed", out
+        )
+        self.assertNotIn("https was tried in place of", out)
         self.assertEqual([], self.ledger()["sources"])
+
+    def test_refresh_plain_http_source_refetches(self):
+        self.init()
+        with mock.patch.object(
+            source_fidelity, "default_fetcher", side_effect=self._plain_http_fetcher()
+        ):
+            code, out = self.run_in("fetch", "http://plain.example.org/study")
+        self.assertEqual(0, code, out)
+        with mock.patch.object(
+            source_fidelity, "default_fetcher", side_effect=self._plain_http_fetcher()
+        ):
+            code, out = self.run_in("fetch", "--id", "S1")
+        self.assertEqual(0, code, out)
+        self.assertNotIn("plaintext-http", out)
+        self.assertIn("S1 OK", out)
 
     def test_https_tls_failure_retries_plain_http(self):
         self.init()

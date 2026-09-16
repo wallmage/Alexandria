@@ -609,6 +609,36 @@ class FidelityTests(unittest.TestCase):
         self.assertEqual("passed", result["status"], result["checks"])
         self.assertEqual(2, result["counts"]["verified"])
 
+    def test_live_sampler_reaches_transport_for_http_url(self):
+        value = ledger()
+        value["sources"][0]["url"] = "http://example.org/pricing"
+        seen = []
+
+        def fake_transport(url, **_kwargs):
+            seen.append(url)
+            html = PRICING_PAGE
+            return source_fidelity.FetchedDocument(
+                text=html,
+                final_url=url,
+                redirects=(),
+                response_sha256="0" * 64,
+                content_type="text/html",
+                byte_count=len(html.encode("utf-8")),
+                charset="utf-8",
+            )
+
+        with mock.patch.object(
+            source_fidelity, "default_fetcher", side_effect=fake_transport
+        ):
+            result = source_fidelity.check_source_fidelity(
+                value, online=True, sample_size=0
+            )
+        self.assertIn("http://example.org/pricing", seen)
+        verified = [
+            check for check in result["checks"] if check["claim_id"] == "C1"
+        ]
+        self.assertEqual(["verified"], [check["status"] for check in verified])
+
     def test_matching_extract_verifies(self):
         result = source_fidelity.check_source_fidelity(
             ledger(),

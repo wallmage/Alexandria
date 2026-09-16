@@ -1480,6 +1480,7 @@ def check_source_fidelity(
                 cache_dir=cache_dir,
                 refresh=True,
                 timeout=timeout,
+                allow_plaintext_http=url.casefold().startswith("http://"),
             )
     if not online:
         transport = None

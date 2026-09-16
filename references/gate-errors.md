@@ -8,7 +8,7 @@ Commands: `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" …`.
 
 Legacy and spec spellings map to the emitted family in [Aliases](#aliases).
 
-Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 800 characters (the quoted window is truncated with `…`, never the remedy); the WARN tier prints one line per family (family, count, the first member's message cut at 160 characters, its fix), and `alx check --verbose` expands it to one line per item (5 per family, then `+N more`).
+Remedy rules `alx check` applies to every line it prints: the producing module's own fix/remove wins and is printed once; `alx` adds a generic remedy only when the finding carries none; the same remedy is never printed twice in one line; `Fix: alx check --fix` appears only for the mechanical repairs of spec §6.7 — `ledger/source-ids`, `ledger/person`, `ledger/source-family`, `ledger/freshness`, `binding/excerpt-missing`, `binding/sources-section`, `integrity/date-line` — whichever module wrote the remedy (ruling R10), and a bare `Fix: alx check` is never printed at all; a WARN finding never carries a `Remove:` remedy, and one whose only honest repair is editing the prose prints `Fix: edit prose (warning; never blocks)` (ruling R8); no printed line exceeds 800 characters (the quoted window is truncated with `…`, never the remedy); the WARN tier prints one line per distinct message (family, count of that text, the first occurrence's message cut at 160 characters, its fix; 5 lines per family, then `[family] +N more (--verbose)`), and `alx check --verbose` expands it to one line per item (5 per family, then `+N more`).
 
 ## Ledger (`check` b / `validate_ledger`)
 
@@ -213,6 +213,12 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **fix:** `alx claim bind C<n>:<paragraph>` — the body-paragraph number of `validate_report.split_body_paragraphs`. Out of range is treated as unbound (same candidate search).
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** ambiguous: candidates 12, 19.
+
+### `binding/claim-marker` — W
+- **rule:** a bare `[C<n>]` / `[S<n>]` (or a comma group of those) in a body paragraph names an id that is not in the ledger (`claim_ids` ∪ `source_ids`). One finding per unknown id; Sources is not scanned.
+- **fix:** edit prose (warning; never blocks)
+- **remove:** n/a (warning; never blocks `issue`)
+- **example:** `paragraph 1: unknown marker [C99]`
 
 ### `binding/excerpt-missing` — W
 - **rule:** an `include_in_report` claim has an empty `report_excerpts`.

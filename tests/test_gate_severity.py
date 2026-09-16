@@ -165,7 +165,7 @@ class FindingRecordTests(unittest.TestCase):
         warn = self._finding(severity="warn", klass="A", family="ledger/coverage")
         rendered = render_grouped([self._finding(), warn], with_class=True)
         self.assertIn("[ledger/quantity] 1 (F)", rendered)
-        # R29: the WARN tier is one compact line per family.
+        # R29: the WARN tier is one compact line per distinct message.
         self.assertIn(
             f"[ledger/coverage] 1 — {warn.message} — Fix: {warn.fix}", rendered
         )
@@ -385,7 +385,7 @@ if __name__ == "__main__":
 
 
 class CompactWarnTierTests(unittest.TestCase):
-    """R29/A5: the WARN tier is one line per family; HARD is unchanged."""
+    """R29/A5: the WARN tier is one line per distinct message; HARD is unchanged."""
 
     def _item(self, **overrides):
         base = {
@@ -407,6 +407,53 @@ class CompactWarnTierTests(unittest.TestCase):
             rendered,
         )
         self.assertNotIn("\n  ", rendered)
+
+    def test_distinct_texts_print_separate_lines_identical_fold(self):
+        different = [
+            self._item(family="ledger/reference", message="missing S1", fix="fetch S1"),
+            self._item(family="ledger/reference", message="missing S2", fix="fetch S2"),
+            self._item(family="ledger/reference", message="missing S3", fix="fetch S3"),
+        ]
+        identical = [
+            self._item(family="ledger/reference", message="unfetched S9", fix="fetch S9"),
+            self._item(family="ledger/reference", message="unfetched S9", fix="ignored"),
+        ]
+        rendered = render_grouped(different + identical)
+        lines = [
+            line
+            for line in rendered.splitlines()
+            if line.startswith("[ledger/reference]")
+        ]
+        self.assertEqual(
+            [
+                "[ledger/reference] 1 — missing S1 — Fix: fetch S1",
+                "[ledger/reference] 1 — missing S2 — Fix: fetch S2",
+                "[ledger/reference] 1 — missing S3 — Fix: fetch S3",
+                "[ledger/reference] 2 — unfetched S9 — Fix: fetch S9",
+            ],
+            lines,
+        )
+
+    def test_seven_distinct_texts_cap_at_five_then_plus_more(self):
+        items = [
+            self._item(family="ledger/reference", message=f"missing S{i}", fix=f"fetch S{i}")
+            for i in range(7)
+        ]
+        rendered = render_grouped(items)
+        lines = [
+            line
+            for line in rendered.splitlines()
+            if line.startswith("[ledger/reference]")
+        ]
+        self.assertEqual(6, len(lines))
+        self.assertEqual(
+            [
+                f"[ledger/reference] 1 — missing S{i} — Fix: fetch S{i}"
+                for i in range(5)
+            ],
+            lines[:5],
+        )
+        self.assertEqual("[ledger/reference] +2 more (--verbose)", lines[5])
 
     def test_a_long_message_is_cut_at_160_characters(self):
         rendered = render_grouped([self._item(message="x" * 400, fix="")])

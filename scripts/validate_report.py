@@ -104,6 +104,7 @@ FAMILIES = (
     "integrity/language-mix",
     "binding/link-not-in-ledger",
     "binding/claim-paragraph",
+    "binding/claim-marker",
     "binding/sources-section",
 )
 _QUOTE_SPAN_RE = re.compile(
@@ -692,6 +693,30 @@ def binding_findings(text, ledger):
                     remove=f"alx claim drop {claim_id} --apply",
                 )
             )
+
+    known_ids = set(sources_by_id) | {
+        claim["claim_id"]
+        for claim in (ledger.get("claims") if isinstance(ledger.get("claims"), list) else [])
+        if isinstance(claim, dict) and claim.get("claim_id")
+    }
+    seen_unknown = set()
+    for number, paragraph in paragraphs:
+        for match in _CLAIM_MARKER_RE.finditer(paragraph):
+            nxt = paragraph[match.end() : match.end() + 1]
+            if nxt in {"(", "["}:
+                continue
+            for marker in re.findall(r"[CS]\d+", match.group(0)):
+                if marker in known_ids or marker in seen_unknown:
+                    continue
+                seen_unknown.add(marker)
+                findings.append(
+                    _finding(
+                        "binding/claim-marker",
+                        f"paragraph {number}: unknown marker [{marker}]",
+                        severity="warn",
+                        ids=[marker],
+                    )
+                )
 
     if source_index is None:
         findings.append(

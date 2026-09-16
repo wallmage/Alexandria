@@ -5476,7 +5476,7 @@ class InitLengthTargetTests(AlxTestCase):
 
 
 class CompactWarnTierTests(AlxTestCase):
-    """R29/A5: the WARN tier is one line per family; `--verbose` expands it."""
+    """R29/A5: WARN is one line per distinct text; `--verbose` expands it."""
 
     def _unverified(self):
         self.bootstrap()
@@ -5487,7 +5487,7 @@ class CompactWarnTierTests(AlxTestCase):
             json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
         )
 
-    def test_check_prints_one_line_per_warn_family(self):
+    def test_check_prints_one_line_per_distinct_warning(self):
         self._unverified()
         _code, out = self.run_in("check")
         warn = out.split("=== WARN ")[1].split("=== STATUS:")[0].splitlines()[1:]
@@ -5495,15 +5495,21 @@ class CompactWarnTierTests(AlxTestCase):
         for line in warn:
             with self.subTest(line=line):
                 self.assertTrue(line.startswith("["), line)
+                if "more (--verbose)" in line:
+                    continue
                 self.assertIn(" — ", line)
-        families = [line.split("]")[0] + "]" for line in warn]
-        self.assertEqual(len(families), len(set(families)))
 
     def test_verbose_expands_the_warn_tier_to_one_line_per_item(self):
         self._unverified()
         _code, compact = self.run_in("check")
         _code, verbose = self.run_in("check", "--verbose")
-        self.assertIn("[ledger/provenance] 2", compact)
+        compact_prov = [
+            line
+            for line in compact.splitlines()
+            if line.startswith("[ledger/provenance]")
+        ]
+        self.assertEqual(2, len(compact_prov))
+        self.assertTrue(all("] 1 — " in line for line in compact_prov), compact_prov)
         self.assertIn("[ledger/provenance] 2", verbose)
         self.assertGreater(
             len(verbose.splitlines()), len(compact.splitlines())
@@ -5527,7 +5533,13 @@ class CompactWarnTierTests(AlxTestCase):
         )
         _code, compact = self.run_in("check")
         _code, verbose = self.run_in("check", "--verbose")
-        self.assertIn("[ledger/quantity] 2", compact)
+        compact_qty = [
+            line
+            for line in compact.splitlines()
+            if line.startswith("[ledger/quantity]")
+        ]
+        self.assertEqual(2, len(compact_qty))
+        self.assertTrue(all("] 1 — " in line for line in compact_qty), compact_qty)
         self.assertIn("[ledger/quantity] 2", verbose)
         self.assertGreater(
             len(verbose.splitlines()), len(compact.splitlines())

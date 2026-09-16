@@ -694,6 +694,7 @@ def _remedies(item, *, paragraphs=0, claim_files=None):
         "integrity/structure",
         "integrity/date-line",
         "integrity/language-mix",
+        "binding/claim-marker",
     }:
         return remedy("edit-prose"), ""
     if family == "binding/link-not-in-ledger":
@@ -1534,7 +1535,9 @@ def cmd_init(args):
         print(f"workspace at {ws.dir} is incomplete; re-initializing it")
     subject_text = _input_path(args, args.subject).read_text(encoding="utf-8").strip()
     lines = [line.strip() for line in subject_text.splitlines() if line.strip()]
-    subject = lines[0] if lines else "Untitled subject"
+    subject = (
+        re.sub(r"^#{1,6}\s*", "", lines[0]) if lines else "Untitled subject"
+    )
     question = lines[1] if len(lines) > 1 else subject
     reader = (
         _input_path(args, args.reader).read_text(encoding="utf-8").strip()
@@ -3200,9 +3203,26 @@ def _regenerate_sources(ws, ledger, lang="en"):
         return True
     heading_end = text.index("\n", offset) if "\n" in text[offset:] else len(text)
     heading = text[offset:heading_end]
-    ws.report.write_text(
-        text[:offset] + heading + "\n\n" + listing + "\n", encoding="utf-8"
-    )
+    block_start = heading_end + 1 if heading_end < len(text) else len(text)
+    next_heading = re.search(r"^#{1,6}\s", text[block_start:], re.M)
+    block_end = block_start + next_heading.start() if next_heading else len(text)
+    kept = []
+    for line in text[block_start:block_end].splitlines():
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        if stripped.startswith(("- ", "* ")) or re.match(r"\d+\. ", stripped):
+            continue
+        kept.append(line)
+    parts = [text[:offset] + heading, "", listing]
+    if kept:
+        parts.append("")
+        parts.extend(kept)
+    rebuilt = "\n".join(parts).rstrip("\n") + "\n"
+    tail = text[block_end:]
+    if tail:
+        rebuilt = rebuilt.rstrip("\n") + "\n\n" + tail.lstrip("\n")
+    ws.report.write_text(rebuilt, encoding="utf-8")
     return True
 
 
@@ -3881,6 +3901,21 @@ def _review_findings(ws, state, ledger):
     return findings
 
 
+def _local_date_from_fetched_at(stamp, fallback=""):
+    raw = stamp or ""
+    if not raw:
+        return fallback
+    try:
+        return (
+            datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            .astimezone()
+            .date()
+            .isoformat()
+        )
+    except (TypeError, ValueError):
+        return raw[:10] or fallback
+
+
 def mechanical_fixes(ws, state, ledger):
     """`check --fix`: derivations and refreshes only, never claim text or prose."""
     for source in ledger.get("sources", []):
@@ -3888,8 +3923,8 @@ def mechanical_fixes(ws, state, ledger):
         if entry is None:
             continue
         meta = entry[1]
-        source["accessed"] = (meta.get("fetched_at") or "")[:10] or source.get(
-            "accessed"
+        source["accessed"] = _local_date_from_fetched_at(
+            meta.get("fetched_at"), source.get("accessed")
         )
         domain = _registrable_domain(source.get("url", "")) or ""
         if domain and not source.get("family_justification"):
@@ -3911,7 +3946,9 @@ def mechanical_fixes(ws, state, ledger):
         )
         stamps = sorted(
             (
-                meta_by_source.get(source_id, {}).get("fetched_at", "")[:10]
+                _local_date_from_fetched_at(
+                    meta_by_source.get(source_id, {}).get("fetched_at", "")
+                )
                 for source_id in claim.get("source_ids", [])
             ),
             reverse=True,

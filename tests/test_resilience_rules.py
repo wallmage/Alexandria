@@ -601,7 +601,12 @@ class UnclassifiedSourcePortfolioTests(AlxTestCase):
         warn_block = out.split("=== WARN", 1)[1]
         self.assertNotIn("waivable by --deliver", warn_block.split("=== STATUS")[0])
         self.assertIn("[ledger/portfolio] 1", warn_block)
-        self.assertIn("[ledger/provenance] 2", warn_block)
+        provenance = [
+            line
+            for line in warn_block.splitlines()
+            if line.startswith("[ledger/provenance]")
+        ]
+        self.assertEqual(2, len(provenance), warn_block)
         self.assertIn("[ledger/key-claim] 1", warn_block)
 
 

@@ -68,8 +68,9 @@ def group(findings):
 CLASS_LABELS = {"F": " (F)"}
 
 
-#: R29: the WARN tier is advice, so it prints one line per family. The first
-#: member carries the family's message and fix; `--verbose` expands the tier.
+#: R29: the WARN tier is advice, so it prints one line per distinct
+#: message (first occurrence's fix), at most 5 per family; `--verbose`
+#: expands the tier.
 WARN_MESSAGE_CHARS = 160
 WARN_FULL_FAMILIES = frozenset(
     {
@@ -107,15 +108,24 @@ def render_grouped(findings, *, per_family=5, with_class=False, verbose=False):
         if full:
             emit(full)
         for family, members in group(compact).items():
-            first = members[0]
-            # One line per family, so a message spanning several lines folds.
-            message = " ".join(str(first.message).split())
-            if len(message) > WARN_MESSAGE_CHARS:
-                message = message[:WARN_MESSAGE_CHARS].rstrip() + "…"
-            line = f"[{family}] {len(members)} — {message}"
-            if first.fix:
-                line += f" — Fix: {first.fix}"
-            lines.append(line)
+            by_text = OrderedDict()
+            for item in members:
+                key = " ".join(str(item.message).split())
+                by_text.setdefault(key, []).append(item)
+            shown = list(by_text.items())[:per_family]
+            extra = len(members) - sum(len(copies) for _text, copies in shown)
+            for _text, copies in shown:
+                first = copies[0]
+                # One line per distinct text; a multi-line message still folds.
+                message = " ".join(str(first.message).split())
+                if len(message) > WARN_MESSAGE_CHARS:
+                    message = message[:WARN_MESSAGE_CHARS].rstrip() + "…"
+                line = f"[{family}] {len(copies)} — {message}"
+                if first.fix:
+                    line += f" — Fix: {first.fix}"
+                lines.append(line)
+            if extra > 0:
+                lines.append(f"[{family}] +{extra} more (--verbose)")
 
     def emit(items):
         for family, members in group(items).items():

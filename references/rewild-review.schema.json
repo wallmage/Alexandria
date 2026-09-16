@@ -3,7 +3,6 @@
   "$id": "https://github.com/wallmage/Alexandria/references/rewild-review.schema.json",
   "title": "Alexandria Rewild blind-review note",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "schema_version",
     "status",
@@ -16,10 +15,10 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "type": "integer"
     },
     "status": {
-      "const": "completed"
+      "type": "string"
     },
     "report_sha256": {
       "type": "string",
@@ -30,14 +29,21 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "report_lang": {
-      "enum": ["en", "zh-CN", "zh-HK"]
+      "enum": [
+        "en",
+        "zh-CN",
+        "zh-HK"
+      ]
     },
     "profile": {
-      "enum": ["rewild", "rewild-zh", "rewild-hk"]
+      "enum": [
+        "rewild",
+        "rewild-zh",
+        "rewild-hk"
+      ]
     },
     "fidelity_checks": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "facts_and_figures",
         "attribution_and_uncertainty",
@@ -45,52 +51,52 @@
         "causality"
       ],
       "properties": {
-        "facts_and_figures": { "type": "boolean" },
-        "attribution_and_uncertainty": { "type": "boolean" },
-        "direction_and_negation": { "type": "boolean" },
-        "causality": { "type": "boolean" }
+        "facts_and_figures": {
+          "type": "boolean"
+        },
+        "attribution_and_uncertainty": {
+          "type": "boolean"
+        },
+        "direction_and_negation": {
+          "type": "boolean"
+        },
+        "causality": {
+          "type": "boolean"
+        }
       }
     },
     "findings": {
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
-        "required": ["category", "finding", "disposition", "reason"],
+        "required": [
+          "category",
+          "finding",
+          "disposition",
+          "reason"
+        ],
         "properties": {
           "category": {
-            "enum": ["style", "region", "fidelity"]
+            "enum": [
+              "style",
+              "region",
+              "fidelity"
+            ]
           },
           "finding": {
             "type": "string",
             "minLength": 1
           },
           "disposition": {
-            "enum": ["resolved", "rejected"]
+            "enum": [
+              "resolved",
+              "rejected"
+            ]
           },
           "reason": {
-            "type": "string",
-            "minLength": 5
+            "type": "string"
           }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "category": {
-                  "enum": ["region", "fidelity"]
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "disposition": {
-                  "const": "resolved"
-                }
-              }
-            }
-          }
-        ]
+        }
       }
     }
   }

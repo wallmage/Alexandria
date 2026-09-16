@@ -59,3 +59,29 @@ Any change to report text after the receipt is written invalidates it. Review th
 changed report against the original snapshot, then `alx review start rewild --iter`
 and a new receipt. Mechanical deltas (Sources regen, excerpts, whitespace) do
 not require `--iter`.
+
+## Blind-review note
+
+`alx review start rewild` writes `reviews/rewild.json` with metadata filled.
+Edit it in place. Fill `fidelity_checks` (four booleans) and `findings[]`
+(`category` style|region|fidelity, `finding`, `disposition` resolved|rejected,
+`reason`). Then `alx review finish rewild`.
+
+```json
+{
+  "fidelity_checks": {
+    "facts_and_figures": true,
+    "attribution_and_uncertainty": true,
+    "direction_and_negation": true,
+    "causality": true
+  },
+  "findings": [
+    {
+      "category": "style",
+      "finding": "example",
+      "disposition": "resolved",
+      "reason": "example"
+    }
+  ]
+}
+```

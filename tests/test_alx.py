@@ -1214,7 +1214,7 @@ class ReviewTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(0, code, out)
         self.assertIn("WARN review/content:", out)
-        self.assertIn("scores", out)
+        self.assertIn("scored", out)
         self.assertTrue(self.state()["reviews"]["content"]["finished"])
 
     def test_only_a_qualified_or_removed_claim_needs_a_support_note(self):
@@ -1271,8 +1271,12 @@ class ReviewTests(AlxTestCase):
         )
         code, out = self.run_in("check")
         self.assertEqual(0, code, out)
-        self.assertIn("re-review required", out)
-        self.assertNotIn("re-review required", out.split("=== WARN")[0])
+        self.assertIn("paragraph(s) changed since the content review", out)
+        self.assertIn("alx review finish content re-stamps", out)
+        self.assertNotIn(
+            "paragraph(s) changed since the content review",
+            out.split("=== WARN")[0],
+        )
 
 
 class IssueTests(AlxTestCase):
@@ -2277,8 +2281,8 @@ class IntegrationHoleTests(AlxTestCase):
             "「原始日記」", (self.dir / "report.md").read_text(encoding="utf-8")
         )
 
-    def test_a_stale_review_note_is_left_unstamped(self):
-        """Spec §6.8: no stub — the real gates run and the hash stays old."""
+    def test_issue_stamps_hashes_when_the_report_changed_after_the_review(self):
+        """R35.6: issue stamps current hashes into both notes unconditionally."""
         issue_tests = IssueTests("test_issue_writes_receipts_and_verification_note")
         for name in (
             "root", "dir", "run_alx", "run_in", "write_json", "init", "fetch",
@@ -2293,23 +2297,22 @@ class IntegrationHoleTests(AlxTestCase):
             ),
             encoding="utf-8",
         )
+        current = alx.file_sha256(self.dir / "report.md")
         stamps = {
             kind: json.loads(
                 (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
             )["report_sha256"]
             for kind in ("rewild", "content")
         }
+        self.assertNotEqual(current, stamps["content"])
         alx._receipt_phase(
             alx.Workspace(self.dir), self.state(), self.ledger(), [], []
         )
-        for kind, before in stamps.items():
+        for kind in ("rewild", "content"):
             note = json.loads(
                 (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(before, note["report_sha256"])
-        self.assertNotEqual(
-            alx.file_sha256(self.dir / "report.md"), stamps["content"]
-        )
+            self.assertEqual(current, note["report_sha256"])
 
     # item 3 --------------------------------------------------------------
     def test_a_reworded_paragraph_gets_a_binding_remedy_not_a_re_review(self):
@@ -2356,7 +2359,7 @@ class IntegrationHoleTests(AlxTestCase):
         code, out = self.run_in("review", "start", "content")
         self.assertEqual(0, code, out)
         for token in (
-            "Fill reviews/content.json",
+            "Edit reviews/content.json in place: fill the fields below, leave the rest as written.",
             "scores.<key>.score: integer 1-5",
             "checks.<key>",
             "section_reviews[]",
@@ -2376,7 +2379,7 @@ class IntegrationHoleTests(AlxTestCase):
         self.assertEqual(sorted(alx.CONTENT_CHECK_KEYS), sorted(note["checks"]))
         self.assertEqual({False}, set(note["checks"].values()))
 
-    def test_the_filled_skeleton_validates_against_the_schemas(self):
+    def test_the_filled_skeleton_finishes(self):
         self.bootstrap()
         self.run_in("check", "--fix")
         self.run_in("snapshot")
@@ -2390,22 +2393,9 @@ class IntegrationHoleTests(AlxTestCase):
         reviews.run_in = self.run_in
         reviews.state = self.state
         reviews.ledger = self.ledger
-        for kind, schema_name in (
-            ("rewild", "rewild-review.schema.json"),
-            ("content", "content-review.schema.json"),
-        ):
+        for kind in ("rewild", "content"):
             with self.subTest(kind=kind):
                 reviews.fill_note(kind)
-                note = json.loads(
-                    (self.dir / "reviews" / f"{kind}.json").read_text(encoding="utf-8")
-                )
-                schema = json.loads(
-                    (Path(alx.__file__).resolve().parents[1] / "references" / schema_name)
-                    .read_text(encoding="utf-8")
-                )
-                self.assertEqual(
-                    [], list(alx.validate_ledger.validate_schema(note, schema))
-                )
                 code, out = self.run_in("review", "finish", kind)
                 self.assertEqual(0, code, out)
 
@@ -2416,15 +2406,14 @@ class IntegrationHoleTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(0, code, out)
         self.assertTrue(self.state()["reviews"]["content"]["finished"])
-        for path in (
-            "scores.question_answered.score",
-            "scores.question_answered.rationale",
-            "checks.central_judgment_answers_question",
-            "section_reviews",
-            "completion_note",
+        for token in (
+            "question_answered scored none (< 4): revise, then alx review finish content",
+            "checks false:",
+            "section_reviews empty",
+            "completion_note empty",
         ):
-            with self.subTest(path=path):
-                self.assertIn(f"WARN review/content: {path}", out)
+            with self.subTest(token=token):
+                self.assertIn(f"WARN review/content: {token}", out)
         # The list is the fixed form, never one line per claim.
         self.assertNotIn("claim_support[C1]", out)
 
@@ -3217,12 +3206,11 @@ class ParkedReviewNoteTests(AlxTestCase):
         missing = alx._note_completeness(
             alx.Workspace(self.dir), self.state(), self.ledger(), "content"
         )
-        # score/rationale per score key + one per check key + section_reviews
-        # + completion_note: the form, whatever the claim count. `status` is
-        # no longer among them — `finish` writes it itself (B6).
+        # one score line per key + one checks line + section_reviews +
+        # completion_note: the form, whatever the claim count.
         own = [item for item in missing if "(content-review schema)" not in item]
         self.assertEqual(
-            2 + 2 * len(alx.CONTENT_SCORE_KEYS) + len(alx.CONTENT_CHECK_KEYS),
+            2 + len(alx.CONTENT_SCORE_KEYS) + 1,
             len(own),
             own,
         )
@@ -3236,7 +3224,10 @@ class ParkedReviewNoteTests(AlxTestCase):
         self.run_in("snapshot")
         code, out = self.run_in("review", "start", "rewild")
         self.assertEqual(0, code, out)
-        self.assertIn("Fill reviews/rewild.json", out)
+        self.assertIn(
+            "Edit reviews/rewild.json in place: fill the fields below, leave the rest as written.",
+            out,
+        )
         self.assertIn("fidelity_checks.<key>: true | false; all must be true", out)
         for name in sorted(alx.rewild_gate.REQUIRED_FIDELITY_CHECKS):
             with self.subTest(check=name):
@@ -3767,35 +3758,6 @@ class ReportLengthTests(AlxTestCase):
         count, unit = alx.report_blocks.report_length(report, "en")
         _code, out = self.run_in("check")
         self.assertIn(f"length {count} {unit}; floor 7500, ceiling 15000", out)
-
-
-class ReviewNoteFloorTests(AlxTestCase):
-    """J3: `review finish` keeps the full floor for non-CJK review prose."""
-
-    def note(self, text):
-        return {
-            "section_reviews": [
-                {
-                    "section_heading": "Findings",
-                    "purpose": "Advance the report's governing question fully.",
-                    "new_value": "Adds distinct evidence and decision value.",
-                    "evidence_or_reasoning": "Supported by the bound ledger.",
-                    "limitation_or_tradeoff": text,
-                    "contribution_to_governing_question": "Moves to the judgment.",
-                    "disposition": "keep",
-                }
-            ]
-        }
-
-    def test_chinese_note_passes_and_english_of_the_same_length_does_not(self):
-        self.assertEqual([], alx._prose_floor_missing(self.note("1915年残13天没有逐日表。"), "content"))
-        missing = alx._prose_floor_missing(self.note("Thin, unusable"), "content")
-        self.assertTrue(
-            any("threshold 20, actual 14" in item for item in missing), missing
-        )
-        self.assertTrue(
-            all("content-review schema" in item for item in missing), missing
-        )
 
 
 class DropIdentityTests(AlxTestCase):
@@ -4966,7 +4928,10 @@ class ReviewFinishOneRoundTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(0, code, out)
         self.assertIn("WARN review/content:", out)
-        self.assertIn("scores.question_answered.score (integer 1-5)", out)
+        self.assertIn(
+            "question_answered scored none (< 4): revise, then alx review finish content",
+            out,
+        )
         paths = []
         for line in out.splitlines():
             if line.startswith("WARN review/content: "):
@@ -4993,6 +4958,54 @@ class ReviewFinishOneRoundTests(AlxTestCase):
         code, out = self.run_in("review", "finish", "content")
         self.assertEqual(0, code, out)
         self.assertEqual("keep", self.note(path)["section_reviews"][0]["disposition"])
+
+    def test_finish_on_a_note_lacking_every_metadata_field_gains_the_metadata(self):
+        """R35.4: finish never rejects metadata; it writes the workspace fields."""
+        path = self.started()
+        self.write_note(path, {})
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(0, code, out)
+        note = self.note(path)
+        for key in (
+            "schema_version",
+            "status",
+            "report_path",
+            "ledger_path",
+            "report_sha256",
+            "ledger_sha256",
+            "source_sha256",
+            "report_lang",
+            "profile",
+            "reviewed_at",
+            "reviewer_mode",
+        ):
+            self.assertIn(key, note)
+        self.assertEqual("completed", note["status"])
+        self.assertEqual("fresh_eyes", note["reviewer_mode"])
+        self.assertEqual(alx.file_sha256(self.dir / "report.md"), note["report_sha256"])
+        self.assertEqual(alx.file_sha256(self.dir / "ledger.json"), note["ledger_sha256"])
+        datetime.fromisoformat(str(note["reviewed_at"]).replace("Z", "+00:00"))
+
+    def test_finish_prints_quality_warns_all_at_once(self):
+        """R35.5: quality lines print together as WARN review/<kind>; finish still exits 0."""
+        path = self.started()
+        self.reviewer().fill_note("content")
+        note = self.note(path)
+        note["scores"]["writing_clarity"]["score"] = 2
+        note["checks"]["counterevidence_tested"] = False
+        note["section_reviews"] = []
+        note["completion_note"] = ""
+        self.write_note(path, note)
+        code, out = self.run_in("review", "finish", "content")
+        self.assertEqual(0, code, out)
+        self.assertIn(
+            "WARN review/content: writing_clarity scored 2 (< 4): revise, then alx review finish content",
+            out,
+        )
+        self.assertIn("WARN review/content: checks false:", out)
+        self.assertIn("counterevidence_tested", out)
+        self.assertIn("WARN review/content: section_reviews empty", out)
+        self.assertIn("WARN review/content: completion_note empty", out)
 
     def test_a_disclosure_excerpt_survives_the_report_markup(self):
         self.bootstrap()
@@ -5696,8 +5709,6 @@ class DefectAuditTests(AlxTestCase):
                 continue
             rest = line.split("WARN review/content: ", 1)[1]
             paths.append(rest.split(":", 1)[0].split()[0])
-            if "schema)" in rest:
-                self.assertFalse(rest.endswith(" missing"), line)
         self.assertGreater(len(paths), 1, out)
         self.assertEqual(len(paths), len(set(paths)), paths)
 

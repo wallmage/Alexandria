@@ -133,13 +133,13 @@ Remedy rules `alx check` applies to every line it prints: the producing module's
 - **example:** C4 supports C2, and C2 was dropped.
 
 ### `ledger/coverage` — W
-- **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims).
+- **rule:** coverage item linkage inconsistent with the claims (status vs `claim_ids`, gap with claims); a coverage item that is not an object, an unknown `status`, or `claim_ids` that is not a list (`ledger merge` prints these too; the value is stored as given).
 - **fix:** `alx ledger merge coverage.json` (`--fix` repairs no coverage linkage)
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** area `supported` with an empty `claim_ids`.
 
 ### `ledger/synthesis` — W
-- **rule:** synthesis names a claim that does not exist, or a central judgment with no claim behind it.
+- **rule:** synthesis names a claim that does not exist, or a central judgment with no claim behind it; a claim-id list that is not a list, or a synthesis item that is not an object (`ledger merge` prints these too; the value is stored as given).
 - **fix:** `alx ledger merge coverage.json`
 - **remove:** n/a (warning; never blocks `issue`)
 - **example:** `central_judgment_claim_ids: ["C9"]`; C9 was dropped.

@@ -81,7 +81,7 @@ Read `references/research-protocol.md`. Create:
 3. an evidence ledger (`alx` keeps it in `ledger.json`);
 4. an explicit list of unresolved questions.
 
-Record the brief, the people involved and the coverage map in the ledger with a patch file (`brief`/`people`/`coverage`/`synthesis`, in whatever JSON shape you find useful; `alx` stores it as given):
+Record the brief, the people involved and the coverage map in the ledger with a patch file (`brief`/`people`/`coverage`/`synthesis`, in whatever JSON shape you find useful; `alx` stores it as given and warns once where `check` would otherwise read nothing: an unknown coverage `status`, a claim-id list that is not a list, a synthesis item that is not an object):
 `"$ALEXANDRIA_PYTHON" "$SKILL_ROOT/scripts/alx.py" --dir "$WORK" ledger merge "$PATCH"`
 
 If parallel research is available and appropriate, divide coverage areas among research agents. Give each agent exclusive primary ownership and a disjoint numeric ID range—for example, `S1000–S1999` and `C1000–C1999`—while allowing it to flag cross-cutting evidence. Each returns ledger entries, contradictions, gaps, and a short synthesis—not a detached pile of URLs. The primary agent deduplicates sources and rewrites IDs and relationships before validation.
@@ -249,4 +249,4 @@ One command at a time. Write claim and report text to files; never put it inside
 
 ## Clock
 
-30 min wall-clock from `init`; every command prints elapsed/remaining and nothing ever blocks on it. At remaining ≤ 8 min stop polishing: `alx issue`, `alx render`, deliver what `issue` accepts; a BLOCKED gate is fixed regardless of the clock, which never lifts a block.
+30 min wall-clock from `init`; every command prints elapsed/remaining (in the last 8 min it adds `stop polishing: alx issue, then alx render`) and nothing ever blocks on it. At remaining ≤ 8 min stop polishing: `alx issue`, `alx render`, deliver what `issue` accepts; a BLOCKED gate is fixed regardless of the clock, which never lifts a block.

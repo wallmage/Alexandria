@@ -661,9 +661,26 @@ def run_content_gate(
         )
         errors.extend(source_errors)
         if source_receipt is not None:
-            errors.extend(
-                validate_source_fidelity_receipt(ledger_path, source_receipt)
+            recorded_ledger = source_receipt.get("ledger_sha256")
+            recorded_report = source_receipt.get("report_sha256")
+            stale = recorded_ledger != file_sha256(ledger_path) or (
+                recorded_report
+                and recorded_report != file_sha256(report_path)
             )
+            if stale:
+                fidelity_skipped = True
+                errors.append(
+                    warning(
+                        "source-fidelity receipt predates the ledger; skipped "
+                        "(alx issue --live refreshes it)"
+                    )
+                )
+            else:
+                errors.extend(
+                    validate_source_fidelity_receipt(
+                        ledger_path, source_receipt
+                    )
+                )
     try:
         report_text = report_path.read_text(encoding="utf-8")
     except OSError as exc:

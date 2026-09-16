@@ -430,6 +430,10 @@ REMINDER_FAMILIES = frozenset(
 )
 REMINDER_HEADER = "=== REMINDERS (not fixed yet; warnings, never block) ==="
 BLOCKED_HEADER = "=== BLOCKED (fix, then alx issue again) ==="
+STALE_FIDELITY_WARN = (
+    "WARNING: source-fidelity receipt predates the ledger; skipped "
+    "(alx issue --live refreshes it)"
+)
 
 
 def finding(family, message, *, severity="hard", ids=(), fix="", remove=""):
@@ -4017,8 +4021,11 @@ def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
     """Spec §6.9.4: validate_report `--fast --final-once`; never a second fetch."""
     if not {"rewild", "content"} <= set(receipts):
         return
-    if not (ws.receipts / "source-fidelity.json").exists():
-        # K4: `--fast` requires that receipt; its absence is already a note.
+    fidelity_receipt = ws.receipts / "source-fidelity.json"
+    if not fidelity_receipt.exists() or _source_fidelity_receipt_stale(
+        fidelity_receipt, ws.ledger_path, ws.report
+    ):
+        # K4 / R35.13: `--fast` requires a current receipt; stale = absent.
         return
     argv = [
         str(ws.report),
@@ -4051,6 +4058,27 @@ def _verify_receipts_in_process(ws, state, receipts, delivery_notes):
         delivery_notes.append(
             "validate_report --fast --final-once failed: " + " | ".join(errors[:3])
         )
+
+
+def _source_fidelity_receipt_stale(path, ledger_path, report_path=None):
+    """True when the file exists but ledger/report hashes no longer match."""
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        payload = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("ledger_sha256") != file_sha256(ledger_path):
+        return True
+    recorded_report = payload.get("report_sha256")
+    return bool(
+        recorded_report
+        and report_path is not None
+        and recorded_report != file_sha256(report_path)
+    )
 
 
 def _receipt_phase(ws, state, ledger, lines, delivery_notes):
@@ -4095,6 +4123,11 @@ def _receipt_phase(ws, state, ledger, lines, delivery_notes):
         receipts["rewild"] = rewild_receipt
     content_receipt = ws.receipts / "content.json"
     fidelity_receipt = ws.receipts / "source-fidelity.json"
+    fidelity_stale = _source_fidelity_receipt_stale(
+        fidelity_receipt, ws.ledger_path, ws.report
+    )
+    if fidelity_stale:
+        lines.append(STALE_FIDELITY_WARN)
     errors = gate_severity.hard_errors(content_gate.run_content_gate(
         ws.report,
         ws.ledger_path,
@@ -4209,10 +4242,11 @@ def cmd_issue(args):
         },
         "delivery_notes": delivery_notes,
     }
-    if (ws.receipts / "source-fidelity.json").exists():
-        receipt["receipts"]["source-fidelity"] = file_sha256(
-            ws.receipts / "source-fidelity.json"
-        )
+    fidelity_receipt = ws.receipts / "source-fidelity.json"
+    if fidelity_receipt.exists() and not _source_fidelity_receipt_stale(
+        fidelity_receipt, ws.ledger_path, ws.report
+    ):
+        receipt["receipts"]["source-fidelity"] = file_sha256(fidelity_receipt)
     _write_json(ws.receipts / "issue.json", receipt)
     state["counters"]["issue"] = state["counters"].get("issue", 0) + 1
     ws.save_state(state)
@@ -4292,6 +4326,12 @@ def cmd_render(args):
         else ["executive", md_to_pdf.select_adaptive_companion(subject)]
     )
     lines = []
+    fidelity_path = ws.receipts / "source-fidelity.json"
+    fidelity_stale = _source_fidelity_receipt_stale(
+        fidelity_path, ws.ledger_path, ws.report
+    )
+    if fidelity_stale:
+        lines.append(STALE_FIDELITY_WARN)
     written = 0
     usable = 0
     for template in templates:
@@ -4305,9 +4345,11 @@ def cmd_render(args):
         for name, path in (
             ("rewild_receipt", ws.receipts / "rewild.json"),
             ("content_receipt", ws.receipts / "content.json"),
-            ("source_fidelity_receipt", ws.receipts / "source-fidelity.json"),
+            ("source_fidelity_receipt", fidelity_path),
         ):
-            if path.exists():
+            if path.exists() and not (
+                name == "source_fidelity_receipt" and fidelity_stale
+            ):
                 kwargs[name] = str(path)
         kwargs["issue_receipt"] = str(receipt_path)
         try:

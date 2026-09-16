@@ -1481,6 +1481,17 @@ class IssueTests(AlxTestCase):
         self.assertEqual(0, calls["online"])
         self.assertNotIn("source fidelity:", out)
 
+    def test_issue_omits_reminders_header_when_there_are_none(self):
+        """R35.13: the REMINDERS banner prints only when a reminder follows."""
+        from contextlib import ExitStack
+
+        self.prepared()
+        with ExitStack() as stack:
+            self.stub_gates(stack)
+            code, out = self.run_in("issue")
+        self.assertEqual(0, code, out)
+        self.assertNotIn(alx.REMINDER_HEADER, out)
+
     def test_issue_stamps_the_note_hashes_before_running_the_gates(self):
         """Spec §6.8/§6.9 step 4: stamp, then gate; `check` never judges hashes."""
         from contextlib import ExitStack

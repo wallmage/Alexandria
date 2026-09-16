@@ -1347,6 +1347,37 @@ class SkippedSourceFidelityReceiptTests(unittest.TestCase):
                 ),
             )
 
+    def test_a_stale_source_fidelity_receipt_is_skipped_not_hard(self):
+        """R35.13: wrong ledger_sha256 is a missing receipt, not a refusal."""
+        with tempfile.TemporaryDirectory() as directory:
+            report, ledger, review, receipt, source_receipt = self.make_case(
+                directory
+            )
+            payload = json.loads(source_receipt.read_text(encoding="utf-8"))
+            payload["ledger_sha256"] = "0" * 64
+            source_receipt.write_text(json.dumps(payload), encoding="utf-8")
+
+            errors = run_content_gate(
+                report,
+                ledger,
+                review,
+                receipt,
+                source_fidelity_receipt_path=source_receipt,
+            )
+
+            self.assertEqual([], hard_errors(errors))
+            warn = [error for error in errors if "predates the ledger" in error]
+            self.assertEqual(1, len(warn), errors)
+            self.assertIn(
+                "source-fidelity receipt predates the ledger; skipped "
+                "(alx issue --live refreshes it)",
+                warn[0],
+            )
+            self.assertTrue(receipt.exists())
+            recorded = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertTrue(recorded["source_fidelity_receipt_skipped"])
+            self.assertIsNone(recorded["source_fidelity_receipt_sha256"])
+
 
 class R29ReviewNoiseTests(unittest.TestCase):
     """R29/A4: the review gate no longer re-reports claim binding."""

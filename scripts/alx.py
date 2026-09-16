@@ -1074,7 +1074,15 @@ def _emit(ws, state, command, summary, lines, *, worklog=True):
     if worklog:
         with ws.worklog.open("a", encoding="utf-8") as handle:
             handle.write(f"{stamp} {command} {summary}\n")
-    print(f"elapsed {max(elapsed, 0)} min, remaining {max(remaining, 0)} min")
+    shown = max(remaining, 0)
+    suffix = (
+        " — stop polishing: alx issue, then alx render"
+        if 1 <= shown <= 8
+        else " — time is up: alx issue, then alx render, deliver"
+        if shown == 0
+        else ""
+    )
+    print(f"elapsed {max(elapsed, 0)} min, remaining {shown} min{suffix}")
 
 
 #: D7: a stalled rewild checker costs its 120 s once per command, not once per
@@ -2449,6 +2457,8 @@ def cmd_ledger_merge(args):
             ledger[key] = value
     ws.save_ledger(ledger)
     lines = [f"merged: {', '.join(merged)}"]
+    for finding in validate_ledger.notes_shape_findings(ledger):
+        lines.append(f"WARN {finding.message}")
     if blocked:
         lines.append(
             f"ignored keys: {', '.join(blocked)} "

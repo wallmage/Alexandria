@@ -3628,3 +3628,49 @@ class R29SeverityTests(unittest.TestCase):
         self.assertTrue(digits)
         self.assertTrue(all(error.startswith("WARNING:") for error in digits), digits)
 
+
+class NotesShapeFindingsTests(unittest.TestCase):
+    """R35.14: merge/check warn only where a consumer reads a notes field."""
+
+    def ledger(self):
+        data = valid_quality_ledger()
+        data["coverage"][0]["status"] = "done"
+        data["synthesis"]["decisions_or_takeaways"] = ["a takeaway"]
+        data["brief"] = {"editorial_mode": "x"}
+        data["synthesis"]["outcome"] = "y"
+        data["people"] = "ignored"
+        data["unresolved_questions"] = "ignored"
+        return data
+
+    def test_notes_shape_findings_warns_coverage_status_and_string_takeaways(self):
+        data = self.ledger()
+        helper = validate_ledger.notes_shape_findings(data)
+        collected = validate_ledger.collect_findings(data)
+        status = (
+            "coverage[0].status 'done' is not one of "
+            "unstarted|in_progress|supported|disputed|gap — stored as given; "
+            "check tracks coverage only for supported|disputed|gap"
+        )
+        takeaways = (
+            "synthesis.decisions_or_takeaways[0] is a str; check links it to "
+            "claims only through an object with rationale_claim_ids — stored as given"
+        )
+        by_message = {item.message: item for item in helper}
+        self.assertIn(status, by_message)
+        self.assertIn(takeaways, by_message)
+        self.assertEqual("ledger/coverage", by_message[status].family)
+        self.assertEqual("ledger/synthesis", by_message[takeaways].family)
+        self.assertEqual("warn", by_message[status].severity)
+        self.assertEqual("warn", by_message[takeaways].severity)
+        silent = ("editorial_mode", "outcome", "people", "unresolved_questions")
+        for item in helper:
+            for needle in silent:
+                self.assertNotIn(needle, item.message)
+        collected_messages = {item.message: item for item in collected}
+        self.assertIn(status, collected_messages)
+        self.assertIn(takeaways, collected_messages)
+        self.assertEqual("ledger/coverage", collected_messages[status].family)
+        self.assertEqual("ledger/synthesis", collected_messages[takeaways].family)
+        self.assertEqual("warn", collected_messages[status].severity)
+        self.assertEqual("warn", collected_messages[takeaways].severity)
+

@@ -3104,6 +3104,108 @@ def validate_references(data, cache_dir=None):
     return _as_legacy(_reference_findings(data, cache_dir))
 
 
+_COVERAGE_STATUSES = frozenset(
+    {"unstarted", "in_progress", "supported", "disputed", "gap"}
+)
+_CLAIM_ID_LIST_HINT = '["C1","C2"]'
+
+
+def _str_list(value):
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def notes_shape_findings(ledger):
+    """R35.14: WARN only where check reads a notes field; store as given."""
+    findings = []
+    if not isinstance(ledger, dict):
+        return findings
+    if "coverage" in ledger:
+        coverage = ledger["coverage"]
+        if not isinstance(coverage, list):
+            findings.append(
+                _f(
+                    "ledger/coverage",
+                    "coverage is not an object — stored as given; check reads "
+                    "area/status/claim_ids from objects only",
+                    severity="warn",
+                    ids=[],
+                )
+            )
+        else:
+            for i, item in enumerate(coverage):
+                if not isinstance(item, dict):
+                    findings.append(
+                        _f(
+                            "ledger/coverage",
+                            f"coverage[{i}] is not an object — stored as given; "
+                            "check reads area/status/claim_ids from objects only",
+                            severity="warn",
+                            ids=[],
+                        )
+                    )
+                    continue
+                if "status" in item and item["status"] not in _COVERAGE_STATUSES:
+                    findings.append(
+                        _f(
+                            "ledger/coverage",
+                            f"coverage[{i}].status '{item['status']}' is not one of "
+                            "unstarted|in_progress|supported|disputed|gap — stored "
+                            "as given; check tracks coverage only for "
+                            "supported|disputed|gap",
+                            severity="warn",
+                            ids=[],
+                        )
+                    )
+                if "claim_ids" in item and not _str_list(item["claim_ids"]):
+                    findings.append(
+                        _f(
+                            "ledger/coverage",
+                            f"coverage[{i}].claim_ids must be a list of claim ids "
+                            f"like {_CLAIM_ID_LIST_HINT} — stored as given",
+                            severity="warn",
+                            ids=[],
+                        )
+                    )
+    synthesis = ledger.get("synthesis")
+    if not isinstance(synthesis, dict):
+        return findings
+    for key in ("central_judgment_claim_ids", "counterevidence_claim_ids"):
+        if key in synthesis and not _str_list(synthesis[key]):
+            findings.append(
+                _f(
+                    "ledger/synthesis",
+                    f"synthesis.{key} must be a list of claim ids like "
+                    f"{_CLAIM_ID_LIST_HINT} — stored as given",
+                    severity="warn",
+                    ids=[],
+                )
+            )
+    buckets = (
+        ("adversarial_tests", "claim_ids"),
+        ("implications", "claim_ids"),
+        ("decisions_or_takeaways", "rationale_claim_ids"),
+        ("scenarios", "claim_ids"),
+    )
+    for bucket, field in buckets:
+        items = synthesis.get(bucket)
+        if not isinstance(items, list):
+            continue
+        for i, item in enumerate(items):
+            if isinstance(item, dict) and isinstance(item.get(field), list):
+                continue
+            findings.append(
+                _f(
+                    "ledger/synthesis",
+                    f"synthesis.{bucket}[{i}] is a {type(item).__name__}; "
+                    f"check links it to claims only through an object with "
+                    f"{field} — stored as given",
+                    severity="warn",
+                    ids=[],
+                )
+            )
+    return findings
+
+
 def collect_findings(ledger, *, schema_path=None, cache_dir=None):
     schema_file = Path(schema_path) if schema_path else DEFAULT_SCHEMA
     schema = json.loads(schema_file.read_text(encoding="utf-8"))
@@ -3111,6 +3213,7 @@ def collect_findings(ledger, *, schema_path=None, cache_dir=None):
     for item in validate_schema(ledger, schema):
         location, _, detail = item.partition(": ")
         findings.append(_f("ledger/schema", item, fix=schema_remedy(location, detail)))
+    findings.extend(notes_shape_findings(ledger))
     findings.extend(_reference_findings(ledger, cache_dir))
     if cache_dir:
         findings.extend(_offline_probe_findings(ledger, cache_dir))

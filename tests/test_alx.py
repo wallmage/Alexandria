@@ -342,7 +342,7 @@ class InitTests(AlxTestCase):
         self.assertIn("counters", state)
         self.assertIn("reviews", state)
         self.assertIn("last_check", state)
-        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
+        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min(?: — .+)?$")
         self.assertIn("alx fetch", out)
         worklog = (self.dir / "worklog.md").read_text(encoding="utf-8")
         self.assertIn("init", worklog)
@@ -1092,7 +1092,7 @@ class CheckTests(AlxTestCase):
         self.assertEqual(0, code)
         self.assertRegex(out, r"=== HARD \d+ \(fix, or alx issue drops them\) ===")
         self.assertRegex(out, r"=== STATUS: check #1\. Next:")
-        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
+        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min(?: — .+)?$")
         self.assertIn("last_check", json.dumps(self.state()))
 
     def test_fix_normalizes_the_date_line_whitespace(self):
@@ -1121,7 +1121,7 @@ class CheckTests(AlxTestCase):
         self.bootstrap()
         self.set_remaining(10)
         _code, out = self.run_in("status")
-        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
+        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min(?: — .+)?$")
         self.assertNotIn("stop fixing", out)
         self.assertNotIn("--deliver", out)
 
@@ -1756,7 +1756,28 @@ class StatusTests(AlxTestCase):
         self.assertIn("claims 2", out)
         self.assertIn("snapshot", out)
         self.assertIn("Next:", out)
-        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min$")
+        self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min(?: — .+)?$")
+
+    def test_footer_suffix_depends_on_remaining(self):
+        """R35.15: remaining 1-8 stop-polishing; 0 time-is-up; else bare footer."""
+        self.bootstrap()
+        self.set_remaining(5)
+        _code, out = self.run_in("status")
+        self.assertIn(
+            " — stop polishing: alx issue, then alx render",
+            out.strip().splitlines()[-1],
+        )
+        self.set_remaining(0)
+        _code, out = self.run_in("status")
+        self.assertIn(
+            " — time is up: alx issue, then alx render, deliver",
+            out.strip().splitlines()[-1],
+        )
+        self.set_remaining(15)
+        _code, out = self.run_in("status")
+        footer = out.strip().splitlines()[-1]
+        self.assertRegex(footer, r"^elapsed \d+ min, remaining \d+ min$")
+        self.assertNotIn("—", footer)
 
 
 #: SKILL.md placeholders -> a value `alx`'s parser accepts (spec D14).

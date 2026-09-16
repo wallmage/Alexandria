@@ -26,6 +26,7 @@ PAGE = """<html><head><title>Ledger Study</title>
 
 SECOND_PAGE = """<html><head><title>Registry Note</title></head><body>
 <p>The registry logged 1,204 documents in March 2026 and published its own tally.</p>
+<p>The registry note also records who published that tally and when the desk closed the count.</p>
 </body></html>"""
 
 CLAIM_ONE = {
@@ -524,6 +525,18 @@ class FetchTests(AlxTestCase):
         self.assertEqual(0, code, out)
         self.assertNotIn("fetch batch stopped", out)
         self.assertEqual(1, len(self.ledger()["sources"]))
+
+    def test_fetch_refuses_empty_shell_pages(self):
+        self.init()
+        shell = "<html><body>ok</body></html>"
+        code, out = self.fetch("https://example.org/empty", page=shell)
+        self.assertEqual(0, code, out)
+        self.assertRegex(
+            out, r"S1 EMPTY \(\d+ chars; no readable text: [^)]+\) — not added"
+        )
+        self.assertEqual([], self.ledger()["sources"])
+        self.assertFalse((self.dir / "sources" / "S1.txt").exists())
+        self.assertFalse((self.dir / "sources" / "S1.meta.json").exists())
 
 
 class LanguageTests(AlxTestCase):
@@ -1117,6 +1130,20 @@ class CheckTests(AlxTestCase):
         self.assertRegex(out.strip().splitlines()[-1], r"^elapsed \d+ min, remaining \d+ min(?: — .+)?$")
         self.assertIn("last_check", json.dumps(self.state()))
 
+    def test_check_lists_uncited_sources(self):
+        self.init()
+        self.fetch("https://example.org/study", "https://registry.example.net/note")
+        batch = self.write_json("claims.json", [CLAIM_ONE])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        code, out = self.run_in("check")
+        self.assertRegex(out, r"uncited sources \(1\): S2 \(\d+ chars\)")
+        batch = self.write_json("claims2.json", [CLAIM_TWO])
+        code, out = self.run_in("claim", "add", batch)
+        self.assertEqual(0, code, out)
+        code, out = self.run_in("check")
+        self.assertNotIn("uncited sources", out)
+
     def test_fix_normalizes_the_date_line_whitespace(self):
         self.bootstrap()
         expected = alx.report_contract.localized_date("en", None)
@@ -1228,6 +1255,37 @@ class ReviewTests(AlxTestCase):
         code, out = self.run_in("review", "start", "rewild")
         self.assertEqual(0, code, out)
         self.assertIn("references/rewild-gate.md blind-review protocol", out)
+
+    def test_review_set_writes_note_fields(self):
+        self.bootstrap()
+        self.run_in("check", "--fix")
+        code, out = self.run_in("review", "start", "content")
+        self.assertEqual(0, code, out)
+        path = self.dir / "reviews" / "content.json"
+        code, out = self.run_in(
+            "review",
+            "set",
+            "content",
+            "scores.question_answered.score=5",
+            "scores.question_answered.rationale=三项要求各有专章",
+            "checks.evidence_verbatim=true",
+        )
+        self.assertEqual(0, code, out)
+        self.assertIn("set 3 field(s) in reviews/content.json", out)
+        note = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(5, note["scores"]["question_answered"]["score"])
+        self.assertIsInstance(note["scores"]["question_answered"]["score"], int)
+        self.assertEqual(
+            "三项要求各有专章", note["scores"]["question_answered"]["rationale"]
+        )
+        self.assertIs(True, note["checks"]["evidence_verbatim"])
+        after = path.read_text(encoding="utf-8")
+        code, out = self.run_in(
+            "review", "set", "content", "section_reviews[99].purpose=x"
+        )
+        self.assertEqual(1, code, out)
+        self.assertIn("section_reviews[99].purpose", out)
+        self.assertEqual(after, path.read_text(encoding="utf-8"))
 
     def test_finish_refuses_an_incomplete_note(self):
         self.bootstrap()
@@ -5163,7 +5221,8 @@ class LedgerMergeMissingClaimTests(AlxTestCase):
         self.assertIn("is not valid JSON: Extra data at line 1 column 8", out)
         self.assertNotIn("Traceback", out)
 TRADITIONAL_PAGE = """<html><head><title>中山艦</title></head><body>
-<p>中山艦事件發生於一九二六年三月，其真實性仍有爭議。</p>
+<p>中山艦事件發生於一九二六年三月，其真實性仍有爭議。後續記述補充事件背景與各方說法，說明三月日期何以被反覆引用，當時報刊與後來史述都圍繞這一日期展開，讀者仍須對照原文。</p>
+<p>Archival notes keep the March 1926 date in view for later readers of the incident.</p>
 </body></html>"""
 
 

@@ -387,6 +387,8 @@ REWILD_CHECKER_TIMEOUT_SECONDS = 120
 ONLINE_CAP_MINUTES = 4
 EXCERPT_CHARS = 60
 MIN_EXTRACT_CHARS = 20
+# JS-rendered or bot-blocked pages return HTTP 200 with no readable body
+MIN_SOURCE_TEXT_CHARS = 200
 MAX_WINDOW_CHARS = 300
 MAX_FINDING_CHARS = 800
 
@@ -1674,6 +1676,13 @@ def _fetch_one(ws, state, ledger, args, url, lines):
         return False
     if result.status != "ok":
         lines.append(f"{source_id} UNDECODABLE ({result.reason_class}) — not added")
+        return False
+    n = len(result.text.strip())
+    if n < MIN_SOURCE_TEXT_CHARS:
+        lines.append(
+            f"{source_id} EMPTY ({n} chars; no readable text: JS-rendered, "
+            "bot-blocked or scanned) — not added"
+        )
         return False
     aliases.extend(result.aliases)
     aliases.append(target)
@@ -3892,6 +3901,42 @@ def _length_line(ws, state):
     return f"length {count} {unit}; floor {floor}, ceiling {ceiling}"
 
 
+def _cited_source_ids(ledger):
+    cited = set()
+    for claim in ledger.get("claims") or []:
+        cited.update(claim.get("source_ids") or [])
+        for evidence in claim.get("source_evidence") or []:
+            if evidence.get("source_id"):
+                cited.add(evidence["source_id"])
+    return cited
+
+
+def _source_id_sort_key(source_id):
+    return int(source_id[1:]) if source_id[1:].isdigit() else source_id
+
+
+def _uncited_sources_line(ws, ledger):
+    cited = _cited_source_ids(ledger)
+    uncited = [
+        sid
+        for sid in (source.get("source_id") for source in ledger.get("sources") or [])
+        if isinstance(sid, str) and sid not in cited
+    ]
+    if not uncited:
+        return None
+    sizes = {}
+    for source_id in uncited:
+        entry = cached(ws, source_id)
+        sizes[source_id] = -1 if entry is None else len(entry[0])
+    # smallest first: an empty shell is what this line exists to expose
+    uncited.sort(key=lambda sid: (sizes[sid], _source_id_sort_key(sid)))
+    parts = [
+        f"{sid} (no cache)" if sizes[sid] < 0 else f"{sid} ({sizes[sid]} chars)"
+        for sid in uncited
+    ]
+    return f"uncited sources ({len(uncited)}): " + " ".join(parts)
+
+
 def cmd_check(args):
     ws, state, ledger = _open(args)
     state["counters"]["check"] = state["counters"].get("check", 0) + 1
@@ -3903,6 +3948,9 @@ def cmd_check(args):
     ledger = ws.load_ledger()
     rows = sorted(mapping.items(), key=lambda row: _claim_order(row[0]))
     lines = list(rewrites) + [_length_line(ws, state)]
+    uncited = _uncited_sources_line(ws, ledger)
+    if uncited:
+        lines.append(uncited)
     lines.append(
         f"claim->paragraph ({len(rows)} claims):" if rows else "claim->paragraph: none"
     )
@@ -3989,6 +4037,12 @@ CONTENT_NOTE_GUIDE = (
 )
 
 
+REVIEW_SET_EXAMPLE = {
+    "content": "scores.question_answered.score=5 'scores.question_answered.rationale=…'",
+    "rewild": "fidelity_checks.causality=true 'findings=[]'",
+}
+
+
 def _rewild_note_guide():
     return (
         (
@@ -4010,7 +4064,9 @@ def _note_instructions(kind):
     """The printed field list `review start` owes the reviewer (item 4)."""
     guide = CONTENT_NOTE_GUIDE if kind == "content" else _rewild_note_guide()
     lines = [
-        f"Edit reviews/{kind}.json in place: fill the fields below, leave the rest as written."
+        f"Edit reviews/{kind}.json in place: fill the fields below, leave the rest as written.",
+        f"Or: alx review set {kind} {REVIEW_SET_EXAMPLE[kind]} "
+        "(one PATH=VALUE per field; no shell heredocs)",
     ]
     lines.extend(f"  {path}: {values} — {meaning}" for path, values, meaning in guide)
     lines.append(
@@ -4186,6 +4242,85 @@ def cmd_review_finish(args):
         f"review finish {kind}",
         f"iteration {record['iteration']}",
         [f"{kind} review {record['iteration']} finished."],
+    )
+    return 0
+
+
+_PATH_SEGMENT = re.compile(r"\.?([^[.\]]+)(?:\[(\d+)\])?")
+
+
+def _assignment_tokens(path):
+    tokens = []
+    pos = 0
+    while pos < len(path):
+        match = _PATH_SEGMENT.match(path, pos)
+        if match is None or match.start() != pos:
+            raise KeyError(path)
+        tokens.append(match.group(1))
+        if match.group(2) is not None:
+            tokens.append(int(match.group(2)))
+        pos = match.end()
+    if not tokens:
+        raise KeyError(path)
+    return tokens
+
+
+def _set_note_path(note, path, value):
+    tokens = _assignment_tokens(path)
+    cur = note
+    for i, token in enumerate(tokens[:-1]):
+        nxt = tokens[i + 1]
+        if isinstance(token, int):
+            if not isinstance(cur, list) or token >= len(cur):
+                raise KeyError(path)
+            cur = cur[token]
+            continue
+        if token not in cur:
+            cur[token] = [] if isinstance(nxt, int) else {}
+        cur = cur[token]
+    last = tokens[-1]
+    if isinstance(last, int):
+        if not isinstance(cur, list) or last >= len(cur):
+            raise KeyError(path)
+        cur[last] = value
+        return
+    cur[last] = value
+
+
+def _assignment_value(raw):
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+def cmd_review_set(args):
+    ws, state, _ledger = _open(args)
+    kind = args.kind
+    path = ws.reviews / f"{kind}.json"
+    if not path.is_file():
+        print(f"Run alx review start {kind} first.", file=sys.stderr)
+        return 1
+    note = _read_json(path)
+    for raw in args.assignments:
+        field, sep, value = raw.partition("=")
+        if not sep:
+            print(f"review set {kind}: expected PATH=VALUE, got {raw!r}", file=sys.stderr)
+            return 1
+        try:
+            _set_note_path(note, field, _assignment_value(value))
+        except (KeyError, TypeError):
+            print(f"review set {kind}: no such path {field}", file=sys.stderr)
+            return 1
+    _write_json(path, note)
+    n = len(args.assignments)
+    _emit(
+        ws,
+        state,
+        f"review set {kind}",
+        f"{n} fields",
+        [f"set {n} field(s) in reviews/{kind}.json"],
+        worklog=False,
     )
     return 0
 
@@ -5042,6 +5177,10 @@ def build_parser():
     review_finish = review_sub.add_parser("finish")
     review_finish.add_argument("kind", choices=REVIEW_KINDS)
     review_finish.set_defaults(handler=cmd_review_finish)
+    review_set = review_sub.add_parser("set")
+    review_set.add_argument("kind", choices=REVIEW_KINDS)
+    review_set.add_argument("assignments", nargs="+")
+    review_set.set_defaults(handler=cmd_review_set)
 
     issue = subparsers.add_parser("issue", help="receipts, once, at the end")
     issue.add_argument(

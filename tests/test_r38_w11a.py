@@ -34,12 +34,12 @@ class R38_1ReferenceFixPerRuleTests(unittest.TestCase):
             {"source_id": "S99", "extract_or_location": "Missing page."}
         )
         [item] = _fixes(unknown, needle="unknown source S99")
-        self.assertEqual("remove S99 from source_ids", item.fix)
+        self.assertEqual("remove S99 from source_ids in claims/<file>, then alx claim add claims/<file>", item.fix)
 
         dangling = valid_quality_ledger()
         dangling["claims"][0]["supports"] = ["C99"]
         [item] = _fixes(dangling, needle="unknown claim C99")
-        self.assertEqual("remove C99 from supports", item.fix)
+        self.assertEqual("remove C99 from supports in claims/<file>, then alx claim add claims/<file>", item.fix)
 
         drift = valid_quality_ledger()
         drift["claims"][0]["as_of"] = "2026-08-10"
@@ -63,7 +63,7 @@ class R38_1ReferenceFixPerRuleTests(unittest.TestCase):
         cycle["claims"][0]["supports"] = ["C2"]
         cycle["claims"].append(fact_claim(claim_id="C2", supports=["C1"]))
         [item] = _fixes(cycle, needle="circular support")
-        self.assertEqual("remove C1 from supports", item.fix)
+        self.assertEqual("remove C1 from supports in claims/<file>, then alx claim add claims/<file>", item.fix)
 
         priority = valid_quality_ledger()
         priority["claims"].append(

@@ -2634,7 +2634,7 @@ def _reference_findings(data, cache_dir=None):
                         "ledger/reference",
                         f"{claim_id} references unknown source {source_id}.",
                         ids=[claim_id, source_id],
-                        fix=f"remove {source_id} from source_ids",
+                        fix=f"remove {source_id} from source_ids in claims/<file>, then alx claim add claims/<file>",
                         remove=_drop(claim_id),
                     )
                 )
@@ -2703,7 +2703,7 @@ def _reference_findings(data, cache_dir=None):
                             f"{claim_id} has a circular {relation} reference.",
                             severity="warn",
                             ids=[claim_id],
-                            fix=f"remove {related_id} from {relation}",
+                            fix=f"remove {related_id} from {relation} in claims/<file>, then alx claim add claims/<file>",
                         )
                     )
                 if related_id in excluded_ids:
@@ -2726,7 +2726,7 @@ def _reference_findings(data, cache_dir=None):
                             f"{claim_id} references unknown claim {related_id}.",
                             severity="warn",
                             ids=[claim_id, related_id],
-                            fix=f"remove {related_id} from {relation}",
+                            fix=f"remove {related_id} from {relation} in claims/<file>, then alx claim add claims/<file>",
                         )
                     )
                 elif relation == "contradicts":
@@ -3072,7 +3072,7 @@ def _reference_findings(data, cache_dir=None):
                 "the evidence a claim rests on.",
                 severity="warn",
                 ids=list(path),
-                fix=f"remove {path[0]} from supports",
+                fix=f"remove {path[0]} from supports in claims/<file>, then alx claim add claims/<file>",
             )
         )
 

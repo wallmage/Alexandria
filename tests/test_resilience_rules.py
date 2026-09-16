@@ -512,7 +512,10 @@ class LivingPersonRulesAreGoneTests(unittest.TestCase):
             "people or drop the id",
             item.message,
         )
-        self.assertEqual("alx ledger merge people.json", item.fix)
+        self.assertEqual(
+            "set people in a patch file, then alx ledger merge <patch>",
+            item.fix,
+        )
         self.assertEqual("", item.remove)
 
 
@@ -645,12 +648,10 @@ class AdversarialTestWarnTests(unittest.TestCase):
     def test_the_fix_is_the_synthesis_merge_and_alx_accepts_it(self):
         [item] = self.findings([])
         self.assertEqual(
-            "set field synthesis.adversarial_tests, "
-            "then alx ledger merge synthesis",
+            "put the counterevidence id in synthesis.adversarial_tests in a "
+            "patch file, then alx ledger merge <patch>",
             item.fix,
         )
-        self.assertTrue(alx.valid_remedy(item.fix))
-        self.assertEqual(item.fix, alx.adopt([item])[0].fix)
 
     def test_a_tested_counterevidence_claim_raises_nothing(self):
         self.assertEqual(

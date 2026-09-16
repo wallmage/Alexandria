@@ -315,7 +315,13 @@ class R37_8CollapseSynthesisAndPriorityTests(unittest.TestCase):
             if item.family == "ledger/synthesis"
             and "central_judgment_claim_ids" in item.message
         ]
-        self.assertEqual(["alx ledger merge synthesis.json"], [item.fix for item in findings])
+        self.assertEqual(
+            [
+                "put C1 C2 in synthesis.central_judgment_claim_ids in a patch "
+                "file, then alx ledger merge <patch>"
+            ],
+            [item.fix for item in findings],
+        )
 
         data = valid_quality_ledger()
         data["coverage"][0].pop("priority")

@@ -3446,7 +3446,7 @@ class ClaimRemedyTests(unittest.TestCase):
         data = valid_quality_ledger()
         data["claims"][0]["person_ids"] = ["P9"]
         self.assertEqual(
-            ["alx ledger merge people.json"],
+            ["set people in a patch file, then alx ledger merge <patch>"],
             self._fixes(data, "not in ledger.people"),
         )
 
@@ -3463,7 +3463,7 @@ class ClaimRemedyTests(unittest.TestCase):
     def test_month_day_extract_remedy_names_the_find(self):
         """R29 restatement of test_month_day_extract_remedy_asks_for_the_year.
 
-        The year-fragment hint is gone: the remedy is the plain `alx find`.
+        The year-fragment hint is gone: the remedy is find, then paste or reword.
         """
         extract = "登記簿は12月10日に決定を記録した。"
         data = ledger_with_fact(
@@ -3472,7 +3472,10 @@ class ClaimRemedyTests(unittest.TestCase):
             source_evidence=[{"source_id": "S2", "extract_or_location": extract}],
         )
         self.assertEqual(
-            ["alx find S2 1936-12-10"],
+            [
+                "alx find S2 1936-12-10 — paste that window into "
+                "extract_or_location and alx claim add, or reword the claim"
+            ],
             self._fixes(data, "'1936-12-10' is in the claim"),
         )
 
@@ -3574,7 +3577,8 @@ class PageLevelCoverageTests(unittest.TestCase):
         self.assertNotIn("Remove:", item.message)
         self.assertEqual(
             "C90: '1945年10月' is in the claim but not in S2 (extracts or cached "
-            "page). Fix: alx find S2 1945年10月, or reword the claim.",
+            "page). Fix: alx find S2 1945年10月 — paste that window into "
+            "extract_or_location and alx claim add, or reword the claim",
             item.message,
         )
 

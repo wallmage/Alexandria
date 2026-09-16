@@ -1047,8 +1047,44 @@ def _claim_field_fix(field):
 
 #: R23: the synthesis field is merged, not re-added with a claim.
 ADVERSARIAL_TESTS_FIX = (
-    "set field synthesis.adversarial_tests, then alx ledger merge synthesis"
+    "put the counterevidence id in synthesis.adversarial_tests in a patch "
+    "file, then alx ledger merge <patch>"
 )
+COVERAGE_PATCH_FIX = (
+    "set coverage[i].claim_ids to supported claim ids in a patch file, "
+    "then alx ledger merge <patch>"
+)
+PROVENANCE_INDEPENDENT_FIX = (
+    "alx source set {sid} --provenance primary_independent only if the "
+    "page truly is; otherwise fetch an independent one"
+)
+
+
+def _claim_set_fix(field):
+    return f"set field {field} in claims/<file>, then alx claim add claims/<file>"
+
+
+def _synthesis_ids_fix(ids):
+    named = " ".join(ids) if ids else "C1 C2 …"
+    return (
+        f"put {named} in synthesis.central_judgment_claim_ids in a patch "
+        "file, then alx ledger merge <patch>"
+    )
+
+
+def _family_justification_fix(source_id, *, parties):
+    return (
+        f"write ≥40 characters on why these pages are {parties} into "
+        f"family-justification.txt, then alx source set {source_id} "
+        "--family-justification family-justification.txt"
+    )
+
+
+def _key_claim_fix(claim_id):
+    return (
+        f"fetch an independent page for {claim_id}, add it to source_evidence "
+        "and alx claim add; or set field importance \"supporting\" and re-add"
+    )
 
 
 def _scan_quantities(text):
@@ -1852,16 +1888,20 @@ def _evidence_coverage_findings(
         find_id = cited[0] if cited else None
         named = " or ".join(cited) if cited else "the cited sources"
         fix = (
-            f"alx find {find_id} {display}"
+            f"alx find {find_id} {display} — paste that window into "
+            "extract_or_location and alx claim add, or reword the claim"
             if find_id
-            else "set field extract_or_location"
+            else (
+                "set field extract_or_location in claims/<file>, then "
+                "alx claim add claims/<file>, or reword the claim"
+            )
         )
         errors.append(
             _f(
                 "ledger/quantity",
                 f"{claim_id}: '{display}' is in the claim but not in "
                 f"{named} (extracts or cached page). "
-                f"Fix: {fix}, or reword the claim.",
+                f"Fix: {fix}",
                 ids=_ids_in(f"{claim_id} {find_id or ''}"),
                 fix=fix,
             )
@@ -1985,9 +2025,15 @@ def _absence_errors(claim, report_day):
     record = claim.get("evidence_of_absence")
     if not isinstance(record, dict):
         return [
-            f"{claim_id}: claim asserts that something does not exist or was "
-            "not found but records no evidence_of_absence. Record the "
-            "queries, the expected locations, and searched_at."
+            _f(
+                "ledger/reference",
+                f"{claim_id}: claim asserts that something does not exist or was "
+                "not found but records no evidence_of_absence. Record the "
+                "queries, the expected locations, and searched_at.",
+                severity="warn",
+                ids=[claim_id],
+                fix=_claim_set_fix("evidence_of_absence"),
+            )
         ]
     errors = []
     for field in ("queries", "expected_locations"):
@@ -2054,7 +2100,7 @@ def _verification_errors(
                 "day); a claim cannot be verified before the state it describes.",
                 severity="warn",
                 ids=[claim_id],
-                fix="set field as_of",
+                fix=_claim_set_fix("as_of"),
                 remove=_drop(claim_id),
             )
         )
@@ -2167,10 +2213,10 @@ def _source_family_errors(sources_by_id):
                     "Use one family per domain, or record a family_justification "
                     f"of at least {_CJK_PROSE_MIN} characters (CJK) / "
                     f"{_LATIN_PROSE_MIN} characters explaining the genuine "
-                    f"independence. Fix: `alx source set {sid}`.",
+                    "independence.",
                     severity="warn",
                     ids=unjustified,
-                    fix=f"alx source set {sid}",
+                    fix=_family_justification_fix(sid, parties="one party"),
                 )
             )
     for host, source_ids in sorted(hosts.items()):
@@ -2209,7 +2255,7 @@ def _source_family_errors(sources_by_id):
                     "party unless the difference is justified.",
                     severity="warn",
                     ids=source_ids,
-                    fix=f"alx source set {sid}",
+                    fix=_family_justification_fix(sid, parties="two parties"),
                     remove="",
                 )
             )
@@ -2338,7 +2384,7 @@ def _reference_findings(data, cache_dir=None):
                 # not a fabrication; triangulation still computes from whatever
                 # classification is set.
                 severity="warn",
-                fix="alx source set S1",
+                fix=PROVENANCE_INDEPENDENT_FIX.format(sid="S1"),
             )
         )
 
@@ -2362,7 +2408,13 @@ def _reference_findings(data, cache_dir=None):
         for claim_id in coverage_claims:
             if claim_id not in claim_set:
                 errors.append(
-                    f"Coverage {area} references unknown claim {claim_id}."
+                    _f(
+                        "ledger/reference",
+                        f"Coverage {area} references unknown claim {claim_id}.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix=f"remove {claim_id} from coverage claim_ids",
+                    )
                 )
         if (
             item.get("priority") == "high"
@@ -2385,7 +2437,10 @@ def _reference_findings(data, cache_dir=None):
                     "ledger/coverage",
                     f"Coverage {area} is disputed but references no disputed claim.",
                     severity="warn",
-                    fix="alx check --fix",
+                    fix=(
+                        "set coverage[i].claim_ids to disputed claim ids in a "
+                        "patch file, then alx ledger merge <patch>"
+                    ),
                 )
             )
         if item.get("status") == "supported" and has_claim_list and not any(
@@ -2397,7 +2452,7 @@ def _reference_findings(data, cache_dir=None):
                     "ledger/coverage",
                     f"Coverage {area} is supported but references no supported claim.",
                     severity="warn",
-                    fix="alx check --fix",
+                    fix=COVERAGE_PATCH_FIX,
                 )
             )
 
@@ -2436,11 +2491,13 @@ def _reference_findings(data, cache_dir=None):
                 _f(
                     "ledger/https",
                     f"{source_id}: source.url must be https "
-                    f"(threshold: https; actual: {url}). "
-                    f"Fix: `alx fetch --id {source_id}`.",
+                    f"(threshold: https; actual: {url}).",
                     severity="warn",
                     ids=[source_id],
-                    fix=f"alx fetch --id {source_id}",
+                    fix=(
+                        f"alx source set {source_id} --url "
+                        f"{re.sub(r'(?i)^http://', 'https://', url)}"
+                    ),
                 )
             )
 
@@ -2521,7 +2578,9 @@ def _reference_findings(data, cache_dir=None):
                     "only on interested sources; mark it as a gap or add "
                     "independent evidence.",
                     severity="warn",
-                    fix="alx source set S1",
+                    fix=PROVENANCE_INDEPENDENT_FIX.format(
+                        sid=sorted(linked_sources)[0]
+                    ),
                 )
             )
 
@@ -2575,7 +2634,7 @@ def _reference_findings(data, cache_dir=None):
                         "ledger/reference",
                         f"{claim_id} references unknown source {source_id}.",
                         ids=[claim_id, source_id],
-                        fix="set field source_ids",
+                        fix=f"remove {source_id} from source_ids",
                         remove=_drop(claim_id),
                     )
                 )
@@ -2626,7 +2685,10 @@ def _reference_findings(data, cache_dir=None):
                         "the id",
                         severity="warn",
                         ids=[claim_id, person_id],
-                        fix="alx ledger merge people.json",
+                        fix=(
+                            "set people in a patch file, then alx ledger "
+                            "merge <patch>"
+                        ),
                     )
                 )
         for relation in ("supports", "contradicts"):
@@ -2635,7 +2697,15 @@ def _reference_findings(data, cache_dir=None):
                 continue
             for related_id in related_claims:
                 if related_id == claim_id:
-                    errors.append(f"{claim_id} has a circular {relation} reference.")
+                    errors.append(
+                        _f(
+                            "ledger/reference",
+                            f"{claim_id} has a circular {relation} reference.",
+                            severity="warn",
+                            ids=[claim_id],
+                            fix=f"remove {related_id} from {relation}",
+                        )
+                    )
                 if related_id in excluded_ids:
                     errors.append(
                         _f(
@@ -2650,7 +2720,15 @@ def _reference_findings(data, cache_dir=None):
                         )
                     )
                 elif related_id not in claim_set:
-                    errors.append(f"{claim_id} references unknown claim {related_id}.")
+                    errors.append(
+                        _f(
+                            "ledger/reference",
+                            f"{claim_id} references unknown claim {related_id}.",
+                            severity="warn",
+                            ids=[claim_id, related_id],
+                            fix=f"remove {related_id} from {relation}",
+                        )
+                    )
                 elif relation == "contradicts":
                     other = claims_by_id.get(related_id, {})
                     reverse = other.get("contradicts", [])
@@ -2714,8 +2792,14 @@ def _reference_findings(data, cache_dir=None):
                 item for item in assumptions if _text(item)
             ]:
                 errors.append(
-                    f"{claim_id}: an estimate must record its assumptions; "
-                    "state the inputs and the arithmetic that produced it."
+                    _f(
+                        "ledger/reference",
+                        f"{claim_id}: an estimate must record its assumptions; "
+                        "state the inputs and the arithmetic that produced it.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix=_claim_set_fix("assumptions"),
+                    )
                 )
         if claim.get("kind") == "analysis" and not _text(claim.get("reasoning")):
             errors.append(
@@ -2794,7 +2878,11 @@ def _reference_findings(data, cache_dir=None):
                             "'living page', '持续更新', '持續更新'.",
                             severity="warn",
                             ids=[source_id, claim_id],
-                            fix=f"alx source set {source_id}",
+                            fix=(
+                                "write why the page is continuously updated into "
+                                f"undated-reason.txt, then alx source set {source_id} "
+                                "--undated-reason undated-reason.txt"
+                            ),
                             remove=_drop(claim_id),
                         )
                     )
@@ -2853,7 +2941,7 @@ def _reference_findings(data, cache_dir=None):
                         "no independent source.",
                         severity="warn",
                         ids=[claim_id],
-                        fix="alx source set S1",
+                        fix=PROVENANCE_INDEPENDENT_FIX.format(sid="S1"),
                         remove=_drop(claim_id),
                     )
                 )
@@ -2907,7 +2995,7 @@ def _reference_findings(data, cache_dir=None):
                         "first-level supporting claim with one.",
                         severity="warn",
                         ids=[claim_id],
-                        fix="alx source set S1",
+                        fix=_key_claim_fix(claim_id),
                         remove=_drop(claim_id),
                     )
                 )
@@ -2924,7 +3012,7 @@ def _reference_findings(data, cache_dir=None):
                         "evidence or record the area as a gap.",
                         severity="warn",
                         ids=[claim_id, *sorted(judged)],
-                        fix=f"alx source set {sorted(judged)[0]}",
+                        fix=_key_claim_fix(claim_id),
                         remove=_drop(claim_id),
                     )
                 )
@@ -2977,9 +3065,15 @@ def _reference_findings(data, cache_dir=None):
     # so any cycle is a collapsed source graph and is rejected outright.
     for path in _supports_cycles(claims_by_id):
         errors.append(
-            "Analysis has circular support: "
-            f"{' -> '.join(path)}. supports must point strictly downward to "
-            "the evidence a claim rests on."
+            _f(
+                "ledger/reference",
+                "Analysis has circular support: "
+                f"{' -> '.join(path)}. supports must point strictly downward to "
+                "the evidence a claim rests on.",
+                severity="warn",
+                ids=list(path),
+                fix=f"remove {path[0]} from supports",
+            )
         )
 
     synthesis = data.get("synthesis")
@@ -2999,7 +3093,7 @@ def _reference_findings(data, cache_dir=None):
                         f"Synthesis references unknown central judgment {claim_id}.",
                         severity="warn",
                         ids=[claim_id],
-                        fix="set field synthesis",
+                        fix=f"remove {claim_id} from synthesis.central_judgment_claim_ids",
                     )
                 )
             elif (
@@ -3012,7 +3106,7 @@ def _reference_findings(data, cache_dir=None):
                         f"Central judgment {claim_id} must be an included key claim.",
                         severity="warn",
                         ids=[claim_id],
-                        fix="set field synthesis",
+                        fix=f"remove {claim_id} from synthesis.central_judgment_claim_ids",
                     )
                 )
         missing_key = [
@@ -3032,13 +3126,19 @@ def _reference_findings(data, cache_dir=None):
                     f"synthesis.central_judgment_claim_ids: {' '.join(missing_key)}",
                     severity="warn",
                     ids=missing_key,
-                    fix="alx ledger merge synthesis.json",
+                    fix=_synthesis_ids_fix(missing_key),
                 )
             )
         for claim_id in counterevidence:
             if claim_id not in claim_set:
                 errors.append(
-                    f"Synthesis references unknown counterevidence {claim_id}."
+                    _f(
+                        "ledger/reference",
+                        f"Synthesis references unknown counterevidence {claim_id}.",
+                        severity="warn",
+                        ids=[claim_id],
+                        fix=f"remove {claim_id} from synthesis.counterevidence_claim_ids",
+                    )
                 )
         adversarial_claims = set()
         adversarial_tests = synthesis.get("adversarial_tests", [])
@@ -3054,7 +3154,13 @@ def _reference_findings(data, cache_dir=None):
                 adversarial_claims.add(claim_id)
                 if claim_id not in claim_set:
                     errors.append(
-                        f"Synthesis references unknown adversarial-test claim {claim_id}."
+                        _f(
+                            "ledger/reference",
+                            f"Synthesis references unknown adversarial-test claim {claim_id}.",
+                            severity="warn",
+                            ids=[claim_id],
+                            fix=f"remove {claim_id} from synthesis.adversarial_tests",
+                        )
                     )
         for claim_id in counterevidence:
             if claim_id in claim_set and claim_id not in adversarial_claims:
@@ -3083,7 +3189,13 @@ def _reference_findings(data, cache_dir=None):
             for claim_id in implication_claims:
                 if claim_id not in claim_set:
                     errors.append(
-                        f"Synthesis references unknown implication claim {claim_id}."
+                        _f(
+                            "ledger/reference",
+                            f"Synthesis references unknown implication claim {claim_id}.",
+                            severity="warn",
+                            ids=[claim_id],
+                            fix=f"remove {claim_id} from synthesis.implications",
+                        )
                     )
             if not set(implication_claims).intersection(central):
                 errors.append(
@@ -3100,7 +3212,13 @@ def _reference_findings(data, cache_dir=None):
             for claim_id in rationale_claims:
                 if claim_id not in claim_set:
                     errors.append(
-                        f"Synthesis references unknown takeaway rationale {claim_id}."
+                        _f(
+                            "ledger/reference",
+                            f"Synthesis references unknown takeaway rationale {claim_id}.",
+                            severity="warn",
+                            ids=[claim_id],
+                            fix=f"remove {claim_id} from synthesis.decisions_or_takeaways",
+                        )
                     )
             if not set(rationale_claims).intersection(central):
                 errors.append(
@@ -3117,7 +3235,13 @@ def _reference_findings(data, cache_dir=None):
             for claim_id in scenario_claims:
                 if claim_id not in claim_set:
                     errors.append(
-                        f"Synthesis references unknown scenario claim {claim_id}."
+                        _f(
+                            "ledger/reference",
+                            f"Synthesis references unknown scenario claim {claim_id}.",
+                            severity="warn",
+                            ids=[claim_id],
+                            fix=f"remove {claim_id} from synthesis.scenarios",
+                        )
                     )
             if not set(scenario_claims).intersection(central):
                 errors.append(
@@ -3138,8 +3262,18 @@ def _reference_findings(data, cache_dir=None):
             ]
             if uncovered:
                 errors.append(
-                    f"Central judgment {' '.join(uncovered)} is not covered by a "
-                    "high-priority research area."
+                    _f(
+                        "ledger/reference",
+                        f"Central judgment {' '.join(uncovered)} is not covered by a "
+                        "high-priority research area.",
+                        severity="warn",
+                        ids=uncovered,
+                        fix=(
+                            "set coverage[i].claim_ids to include "
+                            f"{' '.join(uncovered)} on a high-priority item "
+                            "in a patch file, then alx ledger merge <patch>"
+                        ),
+                    )
                 )
     return [_ref(item) for item in errors]
 
@@ -3174,6 +3308,7 @@ def notes_shape_findings(ledger):
                     "area/status/claim_ids from objects only",
                     severity="warn",
                     ids=[],
+                    fix=COVERAGE_PATCH_FIX,
                 )
             )
         else:
@@ -3186,6 +3321,7 @@ def notes_shape_findings(ledger):
                             "check reads area/status/claim_ids from objects only",
                             severity="warn",
                             ids=[],
+                            fix=COVERAGE_PATCH_FIX,
                         )
                     )
                     continue
@@ -3199,6 +3335,7 @@ def notes_shape_findings(ledger):
                             "supported|disputed|gap",
                             severity="warn",
                             ids=[],
+                            fix=COVERAGE_PATCH_FIX,
                         )
                     )
                 if "claim_ids" in item and not _str_list(item["claim_ids"]):
@@ -3209,6 +3346,7 @@ def notes_shape_findings(ledger):
                             f"like {_CLAIM_ID_LIST_HINT} — stored as given",
                             severity="warn",
                             ids=[],
+                            fix=COVERAGE_PATCH_FIX,
                         )
                     )
                 elif "claim_ids" not in item and "claims" not in item:
@@ -3219,6 +3357,7 @@ def notes_shape_findings(ledger):
                             'check reads claim_ids: ["C1", …]',
                             severity="warn",
                             ids=[],
+                            fix=COVERAGE_PATCH_FIX,
                         )
                     )
     synthesis = ledger.get("synthesis")
@@ -3233,6 +3372,7 @@ def notes_shape_findings(ledger):
                     f"{_CLAIM_ID_LIST_HINT} — stored as given",
                     severity="warn",
                     ids=[],
+                    fix=_synthesis_ids_fix([]),
                 )
             )
     buckets = (
@@ -3256,6 +3396,7 @@ def notes_shape_findings(ledger):
                     f"{field} — stored as given",
                     severity="warn",
                     ids=[],
+                    fix=_synthesis_ids_fix([]),
                 )
             )
     return findings
@@ -3628,7 +3769,8 @@ def schema_remedy(location, detail=""):
     required = _SCHEMA_REQUIRED_RE.search(detail)
     if required:
         field = required.group(1)
-        path = f"{path}.{field}" if path else field
+        if path != field and not path.endswith(f".{field}"):
+            path = f"{path}.{field}" if path else field
     if not path or not _SCHEMA_PATH_RE.match(path):
         return ""
     section = path.split(".", 1)[0]

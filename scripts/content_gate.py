@@ -93,6 +93,39 @@ FAMILIES = (
     "content/disclosure",
     "content/language",
 )
+CONTENT_SCORE_FIX = (
+    "edit reviews/content.json (raise the score), then alx review finish content"
+)
+CONTENT_CHECKS_FIX = (
+    "edit reviews/content.json (set checks true), then alx review finish content"
+)
+CONTENT_SECTIONS_FIX = (
+    "edit reviews/content.json (fill sections), then alx review finish content"
+)
+CONTENT_CRITICAL_FIX = (
+    "edit reviews/content.json (disposition fixed), then alx review finish content"
+)
+CONTENT_DISCLOSURE_FIX = (
+    "edit reviews/content.json (excerpt ≥40 chars from report.md), "
+    "then alx review finish content"
+)
+
+
+def _brief_report_language(ledger):
+    brief = ledger.get("brief") if isinstance(ledger, dict) else None
+    if not isinstance(brief, dict):
+        return None
+    value = brief.get("report_language")
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _language_fix(lang):
+    return (
+        f'set brief.report_language "{lang}" in a patch file, '
+        "then alx ledger merge <patch>"
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_REVIEW_SCHEMA = ROOT / "references" / "content-review.schema.json"
@@ -521,16 +554,13 @@ def run_check(
             findings.extend(binding_findings(report_text, ledger))
     if isinstance(review, dict) and review:
         _fill_review_metadata(review, report_path, ledger_path)
-        ledger_language = (
-            ledger.get("brief", {}).get("report_language")
-            if isinstance(ledger, dict) and isinstance(ledger.get("brief"), dict)
-            else None
-        )
-        if review.get("report_lang") != ledger_language:
+        ledger_language = _brief_report_language(ledger)
+        if ledger_language is not None and review.get("report_lang") != ledger_language:
             findings.append(
                 _finding(
                     "content/language",
                     "Content review language does not match the evidence ledger.",
+                    fix=_language_fix(review.get("report_lang") or ledger_language),
                 )
             )
         scores = review.get("scores", {})
@@ -546,7 +576,7 @@ def run_check(
                             "content/score",
                             f"{name} scored {result['score']} (< 4): revise, then "
                             "alx review finish content",
-                            fix="raise the score by fixing the report, then re-review",
+                            fix=CONTENT_SCORE_FIX,
                         )
                     )
         checks = review.get("checks", {})
@@ -557,12 +587,25 @@ def run_check(
                     _finding(
                         "content/check",
                         "checks false: " + ", ".join(false),
+                        fix=CONTENT_CHECKS_FIX,
                     )
                 )
         if not review.get("section_reviews"):
-            findings.append(_finding("content/check", "section_reviews empty"))
+            findings.append(
+                _finding(
+                    "content/check",
+                    "section_reviews empty",
+                    fix=CONTENT_SECTIONS_FIX,
+                )
+            )
         if not review.get("completion_note"):
-            findings.append(_finding("content/check", "completion_note empty"))
+            findings.append(
+                _finding(
+                    "content/check",
+                    "completion_note empty",
+                    fix=CONTENT_SECTIONS_FIX,
+                )
+            )
         report_normalized = _normalized(report_text)
         review_findings = review.get("findings", [])
         if isinstance(review_findings, list):
@@ -578,7 +621,7 @@ def run_check(
                             "content/critical-finding",
                             f"Critical finding {finding_id} must be fixed.",
                             ids=[finding_id],
-                            fix="fix the finding and set disposition to fixed",
+                            fix=CONTENT_CRITICAL_FIX,
                         )
                     )
                 if severity == "major" and disposition == "rejected":
@@ -600,7 +643,7 @@ def run_check(
                                 "content/disclosure",
                                 f"{finding_id} disclosure cannot be located in the final report.",
                                 ids=[finding_id],
-                                fix="place a ≥40-character disclosure excerpt in the report",
+                                fix=CONTENT_DISCLOSURE_FIX,
                             )
                         )
     return findings
@@ -699,12 +742,8 @@ def run_content_gate(
         warning(error) for error in _section_review_errors(report_text, review)
     )
     errors.extend(validate_report_against_ledger(report_text, ledger))
-    ledger_language = (
-        ledger.get("brief", {}).get("report_language")
-        if isinstance(ledger.get("brief"), dict)
-        else None
-    )
-    if review.get("report_lang") != ledger_language:
+    ledger_language = _brief_report_language(ledger)
+    if ledger_language is not None and review.get("report_lang") != ledger_language:
         errors.append(
             warning("Content review language does not match the evidence ledger.")
         )

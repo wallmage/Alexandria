@@ -3215,26 +3215,32 @@ def _regenerate_sources(ws, ledger, lang="en"):
         )
         return _sources_rewritten_line(len(cited), 0)
     heading_end = text.index("\n", offset) if "\n" in text[offset:] else len(text)
-    heading = text[offset:heading_end]
     block_start = heading_end + 1 if heading_end < len(text) else len(text)
     next_heading = re.search(r"^#{1,6}\s", text[block_start:], re.M)
     block_end = block_start + next_heading.start() if next_heading else len(text)
-    kept = []
-    for line in text[block_start:block_end].splitlines():
-        stripped = line.lstrip()
-        if not stripped or _source_entry_line(stripped):
+    # In place: the listing takes the first entry's position, other entries go,
+    # every other line (blank lines included) stays where the author put it.
+    out, placed, kept = [], False, 0
+    for line in text[block_start:block_end].split("\n"):
+        if _source_entry_line(line.lstrip()):
+            if not placed:
+                out.append(listing)
+                placed = True
             continue
-        kept.append(line)
-    parts = [text[:offset] + heading, "", listing]
-    if kept:
-        parts.append("")
-        parts.extend(kept)
-    rebuilt = "\n".join(parts).rstrip("\n") + "\n"
-    tail = text[block_end:]
-    if tail:
-        rebuilt = rebuilt.rstrip("\n") + "\n\n" + tail.lstrip("\n")
-    ws.report.write_text(rebuilt, encoding="utf-8")
-    return _sources_rewritten_line(len(cited), len(kept))
+        kept += bool(line.strip())
+        out.append(line)
+    block = "\n".join(out)
+    if not placed:
+        body = block.strip("\n")
+        block = "\n" + (f"{body}\n\n" if body else "") + listing + "\n"
+        if text[block_end:]:
+            block += "\n"
+    prefix = text[:block_start]
+    if not prefix.endswith("\n"):
+        prefix += "\n"
+    rebuilt = prefix + re.sub(r"\n{3,}", "\n\n", block) + text[block_end:]
+    ws.report.write_text(rebuilt.rstrip("\n") + "\n", encoding="utf-8")
+    return _sources_rewritten_line(len(cited), kept)
 
 
 def _excerpt_prose(text):

@@ -57,7 +57,8 @@ class SourcesTrailingProseTests(AlxTestCase):
         report = self._primary_sources_block("- [Primary]({url})")
         self.assertIn(BETWEEN, report)
         self.assertEqual(1, report.count("- [Primary]"))
-        self.assertGreater(report.index(BETWEEN), report.index("- [Primary]"))
+        # In place: the note stays above the list, blank lines intact.
+        self.assertIn(f"## Sources\n\n{BETWEEN}\n\n- [Primary](", report)
 
     def test_star_bullet_between_heading_does_not_duplicate_the_list(self):
         report = self._primary_sources_block("* [Primary]({url})")
@@ -91,8 +92,54 @@ class SourcesTrailingProseTests(AlxTestCase):
         self.assertIn(between, report)
         self.assertEqual(1, report.count("- [Primary]"))
         self.assertGreater(report.index(after), report.index("- [Primary]"))
-        self.assertGreater(report.index(between), report.index("- [Primary]"))
+        self.assertLess(report.index(between), report.index("- [Primary]"))
+        self.assertIn(f"{between}\n\n- [Primary](", report)
+        self.assertTrue(report.endswith(f")\n\n{after}\n"))
         self.assertIn(f"sources section rewritten: {n} entries, 2 lines kept", out)
+
+    def test_block_is_edited_in_place_order_and_blank_lines_kept(self):
+        """R4-1/R4-2: lead-in stays above, paragraphs stay separate, tail intact."""
+        self.bootstrap()
+        ledger = self.ledger()
+        ledger["sources"][0]["title"] = "Primary"
+        (self.dir / "ledger.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
+        )
+        url = ledger["sources"][0]["url"]
+        path = self.dir / "report.md"
+        text = path.read_text(encoding="utf-8")
+        block = (
+            "## Sources\n\n第一段说明。\n\n第二段说明。\n\n- 列表式正文（无URL）\n"
+            f"- [Stale](https://stale.example/x)\n- [Primary]({url})\n\n第三段说明。\n\n"
+            "## 附录\n\n附录内容。\n"
+        )
+        path.write_text(text[: text.index("## Sources")] + block, encoding="utf-8")
+        self.run_in("check", "--fix")
+        first = path.read_text(encoding="utf-8")
+        listing = "\n".join(
+            f"- [{source['title']}]({source['url']})"
+            for source in alx._cited_sources(self.ledger(), first)
+        )
+        expected = (
+            "## Sources\n\n第一段说明。\n\n第二段说明。\n\n- 列表式正文（无URL）\n"
+            f"{listing}\n\n第三段说明。\n\n## 附录\n\n附录内容。\n"
+        )
+        self.assertNotIn("Stale", first)
+        self.assertTrue(first.endswith(expected), first[first.index("## Sources") :])
+        self.run_in("check", "--fix")
+        self.assertEqual(first, path.read_text(encoding="utf-8"))
+
+    def test_lead_in_without_entries_keeps_the_list_below_it(self):
+        self.bootstrap()
+        path = self.dir / "report.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text[: text.index("## Sources")] + "## Sources\n\nLead-in sentence:\n",
+            encoding="utf-8",
+        )
+        self.run_in("check", "--fix")
+        report = path.read_text(encoding="utf-8")
+        self.assertIn("## Sources\n\nLead-in sentence:\n\n- [", report)
 
     def test_no_heading_appends_heading_and_list(self):
         self.bootstrap()
